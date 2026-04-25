@@ -1,0 +1,83 @@
+em-x11 public header directory.
+======================================================================
+
+These headers form the ABI contract between X applications and em-x11.
+Client code (hello demo, xeyes, xclock, libXt, libXaw, Tk, ...) includes
+them as <X11/Xlib.h>, <X11/X.h>, etc., and expects byte-for-byte layout
+compatibility with the canonical X.Org headers.
+
+STATUS: UPSTREAM HEADERS INSTALLED
+----------------------------------
+The headers in this directory are unmodified copies from the upstream
+X.Org releases. They are not maintained in em-x11 -- to update, re-run
+the fetch procedure at the bottom of this file.
+
+Sources
+-------
+
+  Files from xorgproto 2025.1:
+      X.h, Xmd.h, Xfuncproto.h, Xosdefs.h, Xatom.h,
+      Xdefs.h, Xfuncs.h, Xarch.h, keysym.h, keysymdef.h,
+      extensions/shapeconst.h
+
+    Tarball:  xorgproto-2025.1.tar.xz
+    URL:      https://www.x.org/releases/individual/proto/xorgproto-2025.1.tar.xz
+    License:  MIT/X Consortium (see ../licenses/COPYING-xorgproto-x11)
+
+  Files from libX11 1.8.13:
+      Xlib.h, Xutil.h, Xresource.h, Xlocale.h, cursorfont.h,
+      XlibConf.h  (generated from XlibConf.h.in with both XTHREADS and
+                   XUSE_MTSAFE_API left undefined, since em-x11 runs on
+                   the browser main thread)
+
+    Tarball:  libX11-1.8.13.tar.xz
+    URL:      https://www.x.org/releases/individual/lib/libX11-1.8.13.tar.xz
+    License:  MIT/X Consortium (see ../licenses/COPYING-libX11)
+
+  Files from libXext 1.3.7:
+      extensions/shape.h, extensions/Xext.h, extensions/extutil.h
+
+    Tarball:  libXext-1.3.7.tar.xz
+    URL:      https://www.x.org/releases/individual/lib/libXext-1.3.7.tar.xz
+    License:  MIT/X Consortium (see ../licenses/COPYING-libXext)
+
+    Note: libXext's C source is NOT imported. Extension client code in
+    upstream calls Xlib-internal protocol machinery (LockDisplay, GetReq,
+    _XReply) that em-x11 does not implement. We implement the client API
+    ourselves in native/src/ext/ against em-x11 internals, mirroring the
+    approach taken for core Xlib.
+
+  Fetched:   2026-04-25
+
+Deliberately NOT copied
+-----------------------
+
+  Xlibint.h      -- internal Xlib implementer's header. em-x11 has its
+                    own internal header at native/src/emx11_internal.h
+                    that defines struct _XDisplay / struct _XGC for a
+                    browser-canvas backend instead of a socket connection.
+
+  Xlib-xcb.h     -- bridges Xlib with XCB. We have neither.
+
+  XKBlib.h       -- XKB keyboard extension client API. Will be staged
+                    when keyboard handling grows beyond simple KeyPress
+                    events.
+
+  Xcms.h         -- Color Management System. Deferred; we serve only a
+                    single TrueColor visual.
+
+  Xregion.h,     -- Internal headers, pulled in by libX11 internals only.
+  ImUtil.h
+
+Upgrading upstream headers
+--------------------------
+
+  Fetch the newer tarballs into a temp directory, extract, and copy the
+  same file list listed above, overwriting in place. Regenerate this
+  file's "Fetched" date and the tarball version lines, then rebuild:
+
+      pnpm build:native   (from a WSL shell, see README)
+
+  Any API additions in a new libX11 release that em-x11 has not yet
+  implemented will surface as unresolved symbols at link time when a
+  client actually calls them -- add stubs in native/src/ as needed.
