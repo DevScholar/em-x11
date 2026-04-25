@@ -1,5 +1,8 @@
 # em-x11
 
+⚠️ This project is in Pre-Alpha stage.
+
+
 A WASM implementation of the X11 / Xlib C API that targets HTML5 Canvas
 instead of a real X server. Programs written against Xlib are compiled
 with Emscripten, link against `em-x11`, and draw directly to a browser
@@ -194,6 +197,6 @@ never touched (selections, XIM, Pixmap semantics, XRender).
 
 ## License
 
-MIT. Upstream X.Org / XFree86 code that we copy into `third-party/`
+MIT. Upstream X.Org code that we copy into `third-party/`
 or `native/include/` carries its own MIT / X Consortium license,
 preserved alongside the copied files.
