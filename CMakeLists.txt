@@ -22,4 +22,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts")
 set(EMX11_WARN_FLAGS -Wall -Wextra -Wno-unused-parameter)
 
 add_subdirectory(native)
+add_subdirectory(third-party/libXt)
 add_subdirectory(demos/hello)
+add_subdirectory(demos/xt-hello)

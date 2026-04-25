@@ -28,6 +28,33 @@ Window XCreateSimpleWindow(Display *display, Window parent,
     return w->id;
 }
 
+/* Full XCreateWindow with attributes -- Xt calls this directly from
+ * XtRealizeWidget rather than the simple form. The attributes struct
+ * lets the caller override background, border, event mask, and
+ * override_redirect; visual/depth we ignore (single-visual world). */
+Window XCreateWindow(Display *display, Window parent,
+                     int x, int y,
+                     unsigned int width, unsigned int height,
+                     unsigned int border_width,
+                     int depth, unsigned int class_,
+                     Visual *visual, unsigned long valuemask,
+                     XSetWindowAttributes *attrs) {
+    (void)depth; (void)class_; (void)visual;
+
+    unsigned long bg = 0x00000000UL;
+    unsigned long bd = 0x00000000UL;
+    if (attrs && (valuemask & CWBackPixel))   bg = attrs->background_pixel;
+    if (attrs && (valuemask & CWBorderPixel)) bd = attrs->border_pixel;
+
+    Window w = XCreateSimpleWindow(display, parent, x, y, width, height,
+                                   border_width, bd, bg);
+    if (w == None || !attrs) return w;
+
+    /* Apply any remaining attribute bits via the common setter. */
+    XChangeWindowAttributes(display, w, valuemask, attrs);
+    return w;
+}
+
 int XMapWindow(Display *display, Window w) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) {
