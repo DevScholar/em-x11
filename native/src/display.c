@@ -159,7 +159,7 @@ Display *XOpenDisplay(const char *display_name) {
      * so subsequent ops targeting root land in the window map instead of
      * being dropped by the "unknown id" check. Root is created mapped
      * (no XMapWindow call on it) because it is always present in X. */
-    emx11_js_window_create(root->id, None, 0, 0,
+    emx11_js_window_create(g_display.conn_id, root->id, None, 0, 0,
                            EMX11_SCREEN_WIDTH, EMX11_SCREEN_HEIGHT,
                            root->background_pixel);
     emx11_js_window_map(root->id);

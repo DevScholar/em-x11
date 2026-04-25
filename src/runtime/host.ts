@@ -1,20 +1,28 @@
 /**
  * Global host singleton.
  *
- * Installed on `globalThis.__EMX11__` before the wasm module starts so the
- * C-side JS library functions (src/bindings/emx11.library.js) can reach
+ * Installed on `globalThis.__EMX11__` before the first wasm module starts so
+ * the C-side JS library functions (src/bindings/emx11.library.js) can reach
  * into the TS runtime without going through Emscripten's Module object.
  *
- * Separating host state from Module lets a single wasm binary share one
- * RootCanvas/Compositor across multiple Emscripten module instances
- * (relevant later for Pyodide + Tcl-Tk, which run in the same page).
+ * Since Step 2 the Host is also the "X server": each wasm client calls
+ * XOpenDisplay, gets a connection id back, and from then on the Host
+ * tracks which windows that connection owns so input events and (in
+ * Step 3) redirected X requests route to the right wasm Module.
  */
 
 import { RootCanvas } from './canvas.js';
 import { pixelToCssColor } from './canvas.js';
 import type { RootCanvasOptions } from './canvas.js';
 import { Compositor, arcPath } from './compositor.js';
-import type { EmX11Host, Point, ShapeRect } from '../types/emscripten.js';
+import { loadWasm, type LoadOptions } from '../loader/wasm.js';
+import { keyEventToKeysym, modifiersFromEvent } from './keymap.js';
+import type {
+  EmX11Host,
+  EmscriptenModule,
+  Point,
+  ShapeRect,
+} from '../types/emscripten.js';
 
 export type HostOptions = RootCanvasOptions;
 
@@ -27,13 +35,28 @@ interface Pixmap {
 }
 
 /* Per-connection bookkeeping. Each wasm Module that calls XOpenDisplay
- * gets one of these. Right now we only track the connection's XID
- * range; Step 2 will hang owned windows / atoms / property subscribers
- * / the ccall-back Module reference off this record. */
+ * gets one of these. Step 2 hangs owned windows and the ccall-back
+ * Module reference off it; Step 3 will add substructure-redirect claims
+ * and per-client event subscriptions. */
 interface Connection {
   connId: number;
   xidBase: number;
   xidMask: number;
+  /** Registered after launchClient loads the wasm. Null for a
+   *  "headless" connection (test harness or legacy demos that open
+   *  their own wasm without going through launchClient). */
+  module: EmscriptenModule | null;
+  /** XIDs created by this connection; kept so we can clean them up
+   *  when the client disconnects. */
+  ownedWindows: Set<number>;
+}
+
+/* Handoff slot used by launchClient so Host.openDisplay (called from
+ * inside the wasm's main()) can find which Module instance is
+ * currently booting. Because launchClient awaits serially, only one
+ * launch can be pending at a time. */
+interface PendingLaunch {
+  connId: number;
 }
 
 const MAX_PIXMAP_EDGE = 4096;
@@ -46,6 +69,12 @@ const XID_RANGE_BITS = 21;
 const XID_PER_CONN = 1 << XID_RANGE_BITS;         // 0x00200000
 const XID_MASK = XID_PER_CONN - 1;                // 0x001FFFFF
 
+/* X event-type numerics we send to the C side via emx11_push_*_event. */
+const X_ButtonPress = 4;
+const X_ButtonRelease = 5;
+const X_KeyPress = 2;
+const X_KeyRelease = 3;
+
 export class Host implements EmX11Host {
   readonly canvas: RootCanvas;
   readonly compositor: Compositor;
@@ -53,7 +82,12 @@ export class Host implements EmX11Host {
   private pointerY: number;
   private readonly pixmaps = new Map<number, Pixmap>();
   private readonly connections = new Map<number, Connection>();
+  private readonly windowToConn = new Map<number, number>();
   private nextConnId = 0;
+  private pendingLaunch: PendingLaunch | null = null;
+  /** Last window that received a ButtonPress, by connection id. Key
+   *  events route here until another ButtonPress moves focus. */
+  private focusedWindow: number | null = null;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -82,10 +116,47 @@ export class Host implements EmX11Host {
       this.pointerX = (e.clientX - rect.left) | 0;
       this.pointerY = (e.clientY - rect.top) | 0;
     });
+
+    this.attachInputBridge();
   }
 
   install(): void {
     globalThis.__EMX11__ = this;
+  }
+
+  /** Load a wasm client and bind its Module to the connection that
+   *  Host.openDisplay allocates during the module's startup path.
+   *
+   *  Sequencing (the subtle part): wasm main() runs during
+   *  `loadWasm`'s awaited factory. main() calls XOpenDisplay very
+   *  early, which synchronously re-enters Host.openDisplay. We stash
+   *  a PendingLaunch slot before the await so openDisplay can record
+   *  the new connId into it; once loadWasm resolves we have the
+   *  Module and both sides of the pair, and we stitch them together.
+   *
+   *  Launches are serialized — if two callers race, the second will
+   *  see pendingLaunch and throw. In practice callers await each
+   *  launchClient in order. */
+  async launchClient(opts: LoadOptions): Promise<{ connId: number; module: EmscriptenModule }> {
+    if (this.pendingLaunch) {
+      throw new Error('em-x11: launchClient is not reentrant; await the previous launch first');
+    }
+    const pending: PendingLaunch = { connId: 0 };
+    this.pendingLaunch = pending;
+    let module: EmscriptenModule;
+    try {
+      module = await loadWasm(opts);
+    } finally {
+      this.pendingLaunch = null;
+    }
+    const conn = this.connections.get(pending.connId);
+    if (!conn) {
+      throw new Error(
+        `em-x11: wasm at ${opts.glueUrl} finished loading without calling XOpenDisplay`,
+      );
+    }
+    conn.module = module;
+    return { connId: pending.connId, module };
   }
 
   getPointerXY(): Point {
@@ -103,17 +174,32 @@ export class Host implements EmX11Host {
     const connId = ++this.nextConnId;
     const xidBase = connId * XID_PER_CONN;
     const xidMask = XID_MASK;
-    this.connections.set(connId, { connId, xidBase, xidMask });
+    this.connections.set(connId, {
+      connId,
+      xidBase,
+      xidMask,
+      module: null,
+      ownedWindows: new Set(),
+    });
+    if (this.pendingLaunch) this.pendingLaunch.connId = connId;
     return { connId, xidBase, xidMask };
   }
 
   closeDisplay(connId: number): void {
-    /* Step 1: just drop the record. Step 2 will sweep owned windows,
-     * pixmaps, property subscribers, and cached Module reference. */
+    const conn = this.connections.get(connId);
+    if (!conn) return;
+    /* Drop every window this connection owned. Compositor cleans up
+     * its side; windowToConn drops its entries. Pixmaps/atoms still
+     * live in their global tables -- Step 2b will sweep those. */
+    for (const winId of conn.ownedWindows) {
+      this.compositor.destroyWindow(winId);
+      this.windowToConn.delete(winId);
+    }
     this.connections.delete(connId);
   }
 
   onWindowCreate(
+    connId: number,
     id: number,
     parent: number,
     x: number,
@@ -122,6 +208,11 @@ export class Host implements EmX11Host {
     height: number,
     background: number,
   ): void {
+    const conn = this.connections.get(connId);
+    if (conn) {
+      conn.ownedWindows.add(id);
+      this.windowToConn.set(id, connId);
+    }
     this.compositor.addWindow(id, parent, x, y, width, height, background);
   }
 
@@ -134,6 +225,12 @@ export class Host implements EmX11Host {
   }
 
   onWindowDestroy(id: number): void {
+    const connId = this.windowToConn.get(id);
+    if (connId !== undefined) {
+      const conn = this.connections.get(connId);
+      conn?.ownedWindows.delete(id);
+      this.windowToConn.delete(id);
+    }
     this.compositor.destroyWindow(id);
   }
 
@@ -301,6 +398,87 @@ export class Host implements EmX11Host {
     }
 
     this.compositor.setWindowShape(destId, rects);
+  }
+
+  /* -- Input event bridge ------------------------------------------------
+   *
+   * Moved from src/runtime/events.ts into Host at Step 2 because the
+   * target Module is no longer fixed: we resolve it per event via the
+   * window's owning connection. A window with no registered Module (a
+   * legacy headless connection) is treated as "no target" and the
+   * event is dropped cleanly.
+   */
+
+  private attachInputBridge(): void {
+    const el = this.canvas.element;
+    el.addEventListener('mousedown', (e) => this.onMouseButton(e, X_ButtonPress));
+    el.addEventListener('mouseup', (e) => this.onMouseButton(e, X_ButtonRelease));
+    el.addEventListener('mousemove', (e) => this.onMouseMove(e));
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('mousedown', () => el.focus());
+
+    window.addEventListener('keydown', (e) => this.onKey(e, X_KeyPress));
+    window.addEventListener('keyup', (e) => this.onKey(e, X_KeyRelease));
+  }
+
+  private cssPoint(e: MouseEvent): { x: number; y: number } {
+    const rect = this.canvas.element.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  /** Resolve the Module that owns a window. Returns null if the window
+   *  isn't tracked, if the owning connection has no Module (legacy
+   *  headless case), or if the connection was closed. */
+  private moduleForWindow(winId: number): EmscriptenModule | null {
+    const connId = this.windowToConn.get(winId);
+    if (connId === undefined) return null;
+    const conn = this.connections.get(connId);
+    return conn?.module ?? null;
+  }
+
+  private onMouseButton(e: MouseEvent, xType: number): void {
+    const { x, y } = this.cssPoint(e);
+    const win = this.compositor.findWindowAt(x, y);
+    if (win === null) return;
+    const module = this.moduleForWindow(win);
+    if (!module) return;
+    if (xType === X_ButtonPress) this.focusedWindow = win;
+    module.ccall(
+      'emx11_push_button_event',
+      null,
+      ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+      [xType, win, x, y, x, y, e.button + 1, modifiersFromEvent(e)],
+    );
+  }
+
+  private onMouseMove(e: MouseEvent): void {
+    const { x, y } = this.cssPoint(e);
+    const win = this.compositor.findWindowAt(x, y);
+    if (win === null) return;
+    const module = this.moduleForWindow(win);
+    if (!module) return;
+    module.ccall(
+      'emx11_push_motion_event',
+      null,
+      ['number', 'number', 'number', 'number', 'number', 'number'],
+      [win, x, y, x, y, modifiersFromEvent(e)],
+    );
+  }
+
+  private onKey(e: KeyboardEvent, xType: number): void {
+    if (this.focusedWindow === null) return;
+    const module = this.moduleForWindow(this.focusedWindow);
+    if (!module) return;
+    const keysym = keyEventToKeysym(e);
+    if (keysym === 0) return;
+    if (document.activeElement === this.canvas.element) e.preventDefault();
+
+    module.ccall(
+      'emx11_push_key_event',
+      null,
+      ['number', 'number', 'number', 'number', 'number', 'number'],
+      [xType, this.focusedWindow, keysym, modifiersFromEvent(e), 0, 0],
+    );
   }
 
   /* -- Pixmap drawing helpers -------------------------------------------- */

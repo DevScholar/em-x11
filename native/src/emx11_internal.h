@@ -229,7 +229,8 @@ extern void emx11_js_open_display(int *conn_id_out,
                                   unsigned int *xid_mask_out);
 extern void emx11_js_close_display(int conn_id);
 
-extern void emx11_js_window_create(Window id, Window parent, int x, int y,
+extern void emx11_js_window_create(int conn_id, Window id, Window parent,
+                                   int x, int y,
                                    unsigned int w, unsigned int h,
                                    unsigned long background);
 extern void emx11_js_window_map(Window id);

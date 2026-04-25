@@ -70,6 +70,7 @@ export interface EmX11Host {
    *  Step 2) releases any windows / pixmaps / atoms it owned. */
   closeDisplay(connId: number): void;
   onWindowCreate(
+    connId: number,
     id: number,
     parent: number,
     x: number,

@@ -39,9 +39,9 @@ addToLibrary({
     globalThis.__EMX11__ && globalThis.__EMX11__.closeDisplay(connId);
   },
 
-  emx11_js_window_create: function (id, parent, x, y, w, h, background) {
+  emx11_js_window_create: function (connId, id, parent, x, y, w, h, background) {
     globalThis.__EMX11__ &&
-      globalThis.__EMX11__.onWindowCreate(id, parent, x, y, w, h, background);
+      globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, background);
   },
 
   emx11_js_window_map: function (id) {
