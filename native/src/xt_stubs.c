@@ -412,7 +412,17 @@ int XMapRaised(Display *dpy, Window w) {
 }
 
 int XMapSubwindows(Display *dpy, Window w) {
-    (void)dpy; (void)w;
+    /* Xt uses this from RealizeWidget to map all children of a composite
+     * in one shot when every child is managed+mapped_when_managed (see
+     * Intrinsic.c:RealizeWidget). Real X maps in bottom-to-top stacking
+     * order; we have no z-order yet, so iteration order is fine. */
+    if (!dpy) return 0;
+    for (int i = 0; i < EMX11_MAX_WINDOWS; i++) {
+        EmxWindow *c = &dpy->windows[i];
+        if (c->in_use && c->parent == w && !c->mapped) {
+            XMapWindow(dpy, c->id);
+        }
+    }
     return 1;
 }
 

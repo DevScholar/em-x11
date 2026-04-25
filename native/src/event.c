@@ -2,6 +2,7 @@
 
 #include <X11/Xutil.h>
 #include <emscripten.h>
+#include <stdio.h>
 #include <string.h>
 
 bool emx11_event_queue_push(Display *dpy, const XEvent *event) {
@@ -135,20 +136,115 @@ int XLookupString(XKeyEvent *event, char *buffer_return, int bytes_buffer,
     return 0;
 }
 
+/* -- Window hit testing -------------------------------------------------- */
+
+/* Walk the parent chain to compute the window's origin in root-relative
+ * coordinates, plus its depth in the tree (root = 0, shell = 1, ...).
+ * Cycles in `parent` links (should never happen) are defended against
+ * with a hard iteration limit. */
+static void window_abs_origin(Display *dpy, EmxWindow *w,
+                              int *ax_out, int *ay_out, int *depth_out) {
+    int ax = 0, ay = 0, depth = 0;
+    EmxWindow *cur = w;
+    for (int guard = 0; cur && guard < EMX11_MAX_WINDOWS; guard++, depth++) {
+        ax += cur->x;
+        ay += cur->y;
+        if (cur->parent == None || cur->parent == cur->id) break;
+        cur = emx11_window_find(dpy, cur->parent);
+    }
+    if (ax_out)    *ax_out    = ax;
+    if (ay_out)    *ay_out    = ay;
+    if (depth_out) *depth_out = depth;
+}
+
+/* Given a root-relative point, find the deepest mapped window that
+ * (a) contains the point and (b) has at least one of `need_mask` bits
+ * in its event_mask. If the deepest containing window doesn't select
+ * for the event, propagate up the parent chain to the first ancestor
+ * that does -- matching real X's event-propagation semantics. Returns
+ * NULL if nothing accepts the event. Root window is excluded from the
+ * result (we don't deliver events to root in a single-client world).
+ *
+ * `lx`/`ly` are filled with the winning window's local coordinates. */
+static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
+                           int *lx_out, int *ly_out) {
+    EmxWindow *best = NULL;
+    int best_depth = -1;
+    int best_ax = 0, best_ay = 0;
+    Window root = dpy->screens[0].root;
+
+    for (int i = 0; i < EMX11_MAX_WINDOWS; i++) {
+        EmxWindow *w = &dpy->windows[i];
+        if (!w->in_use || !w->mapped) continue;
+        if (w->id == root) continue;
+
+        int ax, ay, depth;
+        window_abs_origin(dpy, w, &ax, &ay, &depth);
+        if (rx < ax || ry < ay ||
+            rx >= ax + (int)w->width || ry >= ay + (int)w->height) {
+            continue;
+        }
+        if (depth > best_depth) {
+            best = w;
+            best_depth = depth;
+            best_ax = ax;
+            best_ay = ay;
+        }
+    }
+    if (!best) return NULL;
+
+    /* Propagate up until an ancestor selects for the event. We keep
+     * updating (ax, ay) so local coords stay correct wherever we land. */
+    EmxWindow *cur = best;
+    int ax = best_ax, ay = best_ay;
+    while (cur) {
+        if (cur->event_mask & need_mask) {
+            if (lx_out) *lx_out = rx - ax;
+            if (ly_out) *ly_out = ry - ay;
+            return cur;
+        }
+        if (cur->parent == None || cur->parent == cur->id) break;
+        EmxWindow *p = emx11_window_find(dpy, cur->parent);
+        if (!p || p->id == root) break;
+        ax -= cur->x;                           /* un-offset into parent frame */
+        ay -= cur->y;
+        cur = p;
+    }
+    /* Nothing along the chain selected for this event. Fall back to the
+     * deepest hit anyway so the event isn't lost -- matches the shape
+     * of the old "always dispatch somewhere" behavior while we build out
+     * the rest of the dispatch logic. */
+    if (lx_out) *lx_out = rx - best_ax;
+    if (ly_out) *ly_out = ry - best_ay;
+    return best;
+}
+
 /* -- JS -> C event bridges ------------------------------------------------- */
+
+/* Note on the `window` argument: the JS bridge passes whatever window it
+ * thinks the pointer is over, but that hint is unreliable for nested
+ * widgets (the compositor doesn't know parent chains). We ignore it for
+ * button/motion and re-run the hit test here with authoritative parent
+ * data from the EmxWindow table. */
 
 EMSCRIPTEN_KEEPALIVE
 void emx11_push_button_event(int type, Window window, int x, int y,
                              int x_root, int y_root, unsigned int button,
                              unsigned int state) {
+    (void)window; (void)x; (void)y;             /* hint from JS, discarded */
     Display *dpy = emx11_get_display();
+    long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
+    int lx = 0, ly = 0;
+    EmxWindow *target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
+    if (!target) return;
+
     XEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.xbutton.type        = type;
     ev.xbutton.display     = dpy;
-    ev.xbutton.window      = window;
-    ev.xbutton.x           = x;
-    ev.xbutton.y           = y;
+    ev.xbutton.window      = target->id;
+    ev.xbutton.x           = lx;
+    ev.xbutton.y           = ly;
     ev.xbutton.x_root      = x_root;
     ev.xbutton.y_root      = y_root;
     ev.xbutton.button      = button;
@@ -161,14 +257,21 @@ EMSCRIPTEN_KEEPALIVE
 void emx11_push_motion_event(Window window, int x, int y,
                              int x_root, int y_root,
                              unsigned int state) {
+    (void)window; (void)x; (void)y;
     Display *dpy = emx11_get_display();
+    int lx = 0, ly = 0;
+    EmxWindow *target = hit_test(dpy, x_root, y_root,
+                                 PointerMotionMask | ButtonMotionMask,
+                                 &lx, &ly);
+    if (!target) return;
+
     XEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.xmotion.type        = MotionNotify;
     ev.xmotion.display     = dpy;
-    ev.xmotion.window      = window;
-    ev.xmotion.x           = x;
-    ev.xmotion.y           = y;
+    ev.xmotion.window      = target->id;
+    ev.xmotion.x           = lx;
+    ev.xmotion.y           = ly;
     ev.xmotion.x_root      = x_root;
     ev.xmotion.y_root      = y_root;
     ev.xmotion.state       = state;
