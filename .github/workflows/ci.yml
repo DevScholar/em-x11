@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: Build (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Emscripten SDK. `mymindstorm/setup-emsdk` caches the toolchain
+      # across runs (keyed on the `version` input) so subsequent CI runs
+      # skip the ~2 min emsdk install.
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      # Upstream X.Org tarballs are gitignored; cache them keyed on the
+      # fetch script so version bumps invalidate automatically.
+      - name: Cache third-party tarballs
+        uses: actions/cache@v4
+        with:
+          path: references/_tarballs
+          key: tarballs-${{ hashFiles('scripts/fetch-third-party.sh') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch third-party sources
+        run: bash scripts/fetch-third-party.sh
+
+      - name: Build native (emcc)
+        run: pnpm build:native
+
+      - name: Build web (vite)
+        run: pnpm build:web
