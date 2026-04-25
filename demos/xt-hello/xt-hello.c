@@ -1,33 +1,40 @@
 /*
  * xt-hello -- smoke test for the libXt build inside em-x11.
  *
- * Purpose: prove that Xt links against our emx11_static and its startup
- * path (XtAppInitialize -> XtRealizeWidget -> XtAppMainLoop) walks
- * through without hitting an unresolved Xlib symbol or an assertion
- * inside Xt. We deliberately use ONLY the Intrinsics -- no Xaw/Xmu --
- * so the test is a pure Xlib<->Xt boundary check.
+ * Round 1 (prior): just an empty Shell, to prove XtAppInitialize ->
+ * XtRealizeWidget -> XtAppMainLoop walks through.
  *
- * Expected visual: an X-managed top-level shell window at the
- * compositor's default position. No widgets inside, just the shell
- * background. Clicks and keys are printed via Xt event handlers so you
- * can confirm the Xt dispatcher is seeing Xlib events we push.
+ * Round 2 (now): Shell + one Core child, to exercise the pieces that
+ * an empty Shell does not touch -- the geometry manager, child
+ * XCreateWindow, parent->child expose propagation, and the Xt event
+ * dispatcher's per-widget lookup. The child gets a distinct
+ * background so you can see it's a separate window, not just the
+ * shell's own background.
  */
 
 #include <X11/Intrinsic.h>
 #include <X11/StringDefs.h>
+#include <X11/Core.h>
 #include <stdio.h>
 
 static void handle_input(Widget w, XtPointer client_data,
                          XEvent *event, Boolean *cont) {
-    (void)w; (void)client_data; (void)cont;
+    const char *who = (const char *)client_data;
+    (void)w; (void)cont;
     switch (event->type) {
     case ButtonPress:
-        printf("xt-hello: ButtonPress button=%u at (%d,%d)\n",
-               event->xbutton.button, event->xbutton.x, event->xbutton.y);
+        printf("xt-hello/%s: ButtonPress button=%u at (%d,%d)\n",
+               who, event->xbutton.button,
+               event->xbutton.x, event->xbutton.y);
         break;
     case KeyPress:
-        printf("xt-hello: KeyPress keycode=%u state=0x%x\n",
-               event->xkey.keycode, event->xkey.state);
+        printf("xt-hello/%s: KeyPress keycode=%u state=0x%x\n",
+               who, event->xkey.keycode, event->xkey.state);
+        break;
+    case Expose:
+        printf("xt-hello/%s: Expose at (%d,%d) %dx%d\n",
+               who, event->xexpose.x, event->xexpose.y,
+               event->xexpose.width, event->xexpose.height);
         break;
     default:
         break;
@@ -49,18 +56,26 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Shell widgets derive their size from children (via the geometry
-     * manager) or from XtNwidth/XtNheight resources. We have no
-     * children, so we set both explicitly -- otherwise Xt issues a
-     * fatal "zero width and/or height" on realize. */
-    Arg args[2];
-    XtSetArg(args[0], XtNwidth,  400);
-    XtSetArg(args[1], XtNheight, 300);
-    XtSetValues(top, args, 2);
+    /* The child's size drives the shell: Xt's shell grows to fit its
+     * single managed child, so we set width/height on the child, not
+     * the shell. Background is a strong red so the child window is
+     * obviously distinct from the shell frame. */
+    Arg child_args[3];
+    int n = 0;
+    XtSetArg(child_args[n], XtNwidth,  400); n++;
+    XtSetArg(child_args[n], XtNheight, 300); n++;
+    XtSetArg(child_args[n], XtNbackground, 0xFFCC3333UL); n++;
+
+    Widget pane = XtCreateManagedWidget("pane", coreWidgetClass,
+                                        top, child_args, n);
+    printf("xt-hello: created child pane=%p\n", (void*)pane); fflush(stdout);
 
     XtAddEventHandler(top,
                       ButtonPressMask | KeyPressMask,
-                      False, handle_input, NULL);
+                      False, handle_input, (XtPointer)"shell");
+    XtAddEventHandler(pane,
+                      ButtonPressMask | KeyPressMask | ExposureMask,
+                      False, handle_input, (XtPointer)"pane");
 
     printf("xt-hello: calling XtRealizeWidget\n"); fflush(stdout);
     XtRealizeWidget(top);
