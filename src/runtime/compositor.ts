@@ -22,20 +22,30 @@ interface ManagedWindow {
   width: number;
   height: number;
   background: number;
+  /** When non-null, the window background is tiled with this pixmap's
+   *  OffscreenCanvas instead of painted with `background`. Tile origin
+   *  is the window's top-left (applied via ctx.translate at paint time). */
+  backgroundPixmap: number | null;
   mapped: boolean;
   /** SHAPE bounding rectangles (window-local coords). `null` means
    *  unshaped -- the window is a plain rectangle of (width, height). */
   shape: ShapeRect[] | null;
 }
 
+/** Callback the Host supplies so the compositor can reach into the
+ *  pixmap table without importing Host (which would be circular). */
+type PixmapLookup = (id: number) => OffscreenCanvas | null;
+
 export class Compositor {
   private readonly canvas: RootCanvas;
+  private readonly pixmapLookup: PixmapLookup;
   private readonly windows = new Map<number, ManagedWindow>();
   private dirty = true;
   private rafScheduled = false;
 
-  constructor(canvas: RootCanvas) {
+  constructor(canvas: RootCanvas, pixmapLookup: PixmapLookup = () => null) {
     this.canvas = canvas;
+    this.pixmapLookup = pixmapLookup;
   }
 
   addWindow(
@@ -53,10 +63,31 @@ export class Compositor {
       width,
       height,
       background,
+      backgroundPixmap: null,
       mapped: false,
       shape: null,
     });
     this.markDirty();
+  }
+
+  setWindowBackgroundPixmap(id: number, pmId: number): void {
+    const w = this.windows.get(id);
+    if (!w) return;
+    w.backgroundPixmap = pmId > 0 ? pmId : null;
+    this.markDirty();
+  }
+
+  /** XClearWindow / XClearArea: repaint a window rectangle using whatever
+   *  background the window currently has (solid or tile). Unlike
+   *  `fillRect(id, ..., win.background)` this honours a bound pixmap. */
+  clearArea(id: number, x: number, y: number, w: number, h: number): void {
+    const win = this.windows.get(id);
+    if (!win || !win.mapped) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    this.paintBackgroundRect(ctx, win, x, y, w, h);
+    ctx.restore();
   }
 
   setWindowShape(id: number, rects: ShapeRect[]): void {
@@ -334,11 +365,50 @@ export class Compositor {
       const ctx = this.canvas.ctx;
       ctx.save();
       this.applyWindowClip(ctx, w);
-      ctx.fillStyle = pixelToCssColor(w.background);
-      ctx.fillRect(w.x, w.y, w.width, w.height);
+      this.paintBackgroundRect(ctx, w, 0, 0, w.width, w.height);
       ctx.restore();
     }
     this.dirty = false;
+  }
+
+  /** Paint a (window-local) rectangle using the window's current
+   *  background: solid colour, or tile pattern when backgroundPixmap is
+   *  bound. Tile origin is the window's top-left, so moving the window
+   *  shifts the tile with it (matching X semantics). Caller owns
+   *  ctx.save/restore and clipping. */
+  private paintBackgroundRect(
+    ctx: CanvasRenderingContext2D,
+    win: ManagedWindow,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
+    const pmId = win.backgroundPixmap;
+    if (pmId !== null) {
+      const pmCanvas = this.pixmapLookup(pmId);
+      if (pmCanvas) {
+        const pattern = ctx.createPattern(
+          pmCanvas as unknown as CanvasImageSource,
+          'repeat',
+        );
+        if (pattern) {
+          /* Translate before filling so the pattern tiles from the
+           * window's top-left, not the canvas origin. Canvas patterns
+           * are transformed along with the ctx. */
+          ctx.save();
+          ctx.translate(win.x, win.y);
+          ctx.fillStyle = pattern;
+          ctx.fillRect(x, y, w, h);
+          ctx.restore();
+          return;
+        }
+      }
+      /* Pixmap vanished or pattern build failed -- fall through to solid
+       * fill so we never leave an unpainted hole. */
+    }
+    ctx.fillStyle = pixelToCssColor(win.background);
+    ctx.fillRect(win.x + x, win.y + y, w, h);
   }
 }
 

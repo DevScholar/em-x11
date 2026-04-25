@@ -53,6 +53,11 @@ typedef struct EmxWindow {
     unsigned int   border_width;
     unsigned long  border_pixel;
     unsigned long  background_pixel;
+    /* Window background_pixmap. None (=0) means "use background_pixel as a
+     * solid fill"; any other id is a Pixmap whose content is tiled across
+     * the window (X semantics: tile origin = window's top-left). The
+     * classic X root weave lives here on the root window. */
+    Pixmap         background_pixmap;
     long           event_mask;
     bool           mapped;
     bool           in_use;
@@ -174,6 +179,14 @@ bool         emx11_event_queue_push(Display *dpy, const XEvent *event);
 bool         emx11_event_queue_pop (Display *dpy, XEvent *out);
 unsigned int emx11_event_queue_size(const Display *dpy);
 
+/* Remove the first event from the queue whose type's event-mask bit is
+ * set in `mask`. Copies the event into *out and compacts the queue.
+ * Returns true on hit, false if nothing matched. */
+bool emx11_event_queue_peek_match(Display *dpy, long mask, XEvent *out);
+
+/* Remove the first event whose type == `type` and xany.window == `w`. */
+bool emx11_event_queue_peek_typed(Display *dpy, Window w, int type, XEvent *out);
+
 /* Look up or allocate a keycode for a given keysym. Returns 0 if the
  * keycode table is exhausted (very unlikely in practice). */
 KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym);
@@ -198,6 +211,15 @@ extern void emx11_js_window_create(Window id, int x, int y,
 extern void emx11_js_window_map(Window id);
 extern void emx11_js_window_unmap(Window id);
 extern void emx11_js_window_destroy(Window id);
+/* Bind or unbind a Pixmap as the window's tiled background. pm_id=0
+ * reverts to the solid background_pixel; any other id must reference a
+ * live Pixmap on the JS side. */
+extern void emx11_js_window_set_bg_pixmap(Window id, Pixmap pm_id);
+/* XClearWindow / XClearArea entry. Lets the compositor decide whether to
+ * paint with a solid colour or the window's background_pixmap without
+ * the caller having to know. */
+extern void emx11_js_clear_area(Window id, int x, int y,
+                                unsigned int w, unsigned int h);
 extern void emx11_js_fill_rect(Window id, int x, int y,
                                unsigned int w, unsigned int h,
                                unsigned long color);

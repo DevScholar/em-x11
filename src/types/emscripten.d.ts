@@ -71,6 +71,13 @@ export interface EmX11Host {
   onWindowMap(id: number): void;
   onWindowUnmap(id: number): void;
   onWindowDestroy(id: number): void;
+  /** Bind a Pixmap as the window's tiled background, or unbind when
+   *  pmId === 0 (revert to solid background_pixel). The compositor
+   *  paints with `createPattern(pixmap.canvas, 'repeat')` from then on. */
+  onWindowSetBgPixmap(id: number, pmId: number): void;
+  /** XClearWindow / XClearArea entry. The compositor picks solid vs
+   *  pattern based on the window's current background_pixmap. */
+  onClearArea(id: number, x: number, y: number, w: number, h: number): void;
   onFillRect(
     id: number,
     x: number,

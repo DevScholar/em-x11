@@ -183,7 +183,16 @@ int XChangeWindowAttributes(Display *display, Window w,
     if (valuemask & CWBorderPixel)      win->border_pixel     = attrs->border_pixel;
     if (valuemask & CWEventMask)        win->event_mask       = attrs->event_mask;
     if (valuemask & CWOverrideRedirect) win->override_redirect = attrs->override_redirect;
-    /* Ignored: CWBackPixmap, CWBorderPixmap, CWCursor, ... until Pixmap lands. */
+    if (valuemask & CWBackPixmap) {
+        /* X semantics: ParentRelative and None are legal values here,
+         * distinct from "a real Pixmap id". We honour only the real-id
+         * case; the two sentinels collapse to "no tile, use pixel". */
+        Pixmap pm = attrs->background_pixmap;
+        if (pm == ParentRelative || pm == None) pm = 0;
+        win->background_pixmap = pm;
+        emx11_js_window_set_bg_pixmap(w, pm);
+    }
+    /* Ignored: CWBorderPixmap, CWCursor, ... */
     return 1;
 }
 
@@ -191,6 +200,21 @@ int XSetWindowBackground(Display *display, Window w, unsigned long background) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
     win->background_pixel = background;
+    /* Setting a solid pixel overrides any prior pixmap tile, matching
+     * Xlib's documented behaviour. */
+    if (win->background_pixmap != 0) {
+        win->background_pixmap = 0;
+        emx11_js_window_set_bg_pixmap(w, 0);
+    }
+    return 1;
+}
+
+int XSetWindowBackgroundPixmap(Display *display, Window w, Pixmap pm) {
+    EmxWindow *win = emx11_window_find(display, w);
+    if (!win) return 0;
+    if (pm == ParentRelative || pm == None) pm = 0;
+    win->background_pixmap = pm;
+    emx11_js_window_set_bg_pixmap(w, pm);
     return 1;
 }
 

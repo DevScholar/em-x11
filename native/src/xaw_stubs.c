@@ -18,6 +18,8 @@
 
 #include <X11/Xutil.h>
 #include <X11/extensions/XInput2.h>
+#include <emscripten.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -526,4 +528,264 @@ Bool XSupportsLocale(void) {
 char *XSetLocaleModifiers(_Xconst char *modifier_list) {
     (void)modifier_list;
     return (char *)"";
+}
+
+/* -- X Sync extension. twm uses it for per-window scheduling priorities
+ * (XSyncSetPriority/XSyncGetPriority) and probes the extension once at
+ * startup. em-x11 has a single-threaded event loop with no scheduler to
+ * influence; returning False from QueryExtension tells twm there is no
+ * sync support, and the setters/getters collapse to noops. */
+
+Status XSyncQueryExtension(Display *dpy, int *event_base_return,
+                           int *error_base_return) {
+    (void)dpy;
+    if (event_base_return) *event_base_return = 0;
+    if (error_base_return) *error_base_return = 0;
+    return False;
+}
+
+int XSyncSetPriority(Display *dpy, XID client_resource_id, int priority) {
+    (void)dpy; (void)client_resource_id; (void)priority;
+    return 0;
+}
+
+int XSyncGetPriority(Display *dpy, XID client_resource_id,
+                     int *return_priority) {
+    (void)dpy; (void)client_resource_id;
+    if (return_priority) *return_priority = 0;
+    return 0;
+}
+
+/* -- Window-manager Xlib surface used by twm ------------------------------
+ *
+ * Phase 0: the goal is to link and start twm's main loop. Everything
+ * below has a cheap implementation (track state in the EmxWindow table)
+ * where doing so costs nothing, and a pure-stub implementation otherwise.
+ * Real semantics -- substructure redirect, focus management, grab
+ * pointer routing -- arrive in Phase 1 and Phase 2 when twm starts
+ * actually observing clients.
+ *
+ * None of these rely on ICCCM properties being fully wired. Where a
+ * meaningful value exists and we know where to find it, we return it;
+ * where not, we return "nothing" cleanly so twm's defensive paths run. */
+
+/* Reparenting. We maintain a flat window list on the JS side and don't
+ * yet model parent/child visually -- but update the EmxWindow record so
+ * XQueryTree / WM bookkeeping sees the right parent. Phase 2 will hook
+ * this into the compositor proper. */
+int XReparentWindow(Display *dpy, Window w, Window parent, int x, int y) {
+    EmxWindow *win = emx11_window_find(dpy, w);
+    if (!win) return 0;
+    win->parent = parent;
+    win->x = x;
+    win->y = y;
+    return 1;
+}
+
+/* Save set: X keeps track of windows that should revert to root if the
+ * controlling client dies. One-client world -> no-op. */
+int XAddToSaveSet(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
+int XRemoveFromSaveSet(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
+
+/* Focus. We have no keyboard-focus concept yet; pretend we honoured it. */
+int XSetInputFocus(Display *dpy, Window focus, int revert_to, Time t) {
+    (void)dpy; (void)focus; (void)revert_to; (void)t;
+    return 1;
+}
+
+/* Subwindow circulation: rotate z-order. No z-order here yet. */
+int XCirculateSubwindowsDown(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
+int XCirculateSubwindowsUp(Display *dpy, Window w)   { (void)dpy; (void)w; return 1; }
+
+/* Kill client: twm offers this as a menu action for unresponsive
+ * windows. We don't model separate clients; ignore. */
+int XKillClient(Display *dpy, XID resource) { (void)dpy; (void)resource; return 1; }
+
+/* Pointer and key grabs. twm uses grabs to intercept drags (resize,
+ * move, menu pop) and hot-key bindings. We always accept the grab so
+ * the caller's drag loop proceeds; events still go through the normal
+ * hit-test path, which is wrong but close enough for Phase 0. */
+int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
+                 unsigned int event_mask, int pointer_mode, int keyboard_mode,
+                 Window confine_to, Cursor cursor, Time t) {
+    (void)dpy; (void)grab_window; (void)owner_events; (void)event_mask;
+    (void)pointer_mode; (void)keyboard_mode; (void)confine_to;
+    (void)cursor; (void)t;
+    return GrabSuccess;
+}
+
+int XWarpPointer(Display *dpy, Window src_w, Window dest_w,
+                 int src_x, int src_y, unsigned int src_width, unsigned int src_height,
+                 int dest_x, int dest_y) {
+    (void)dpy; (void)src_w; (void)dest_w;
+    (void)src_x; (void)src_y; (void)src_width; (void)src_height;
+    (void)dest_x; (void)dest_y;
+    /* Can't move the OS cursor from a browser. Phase 2 can cheat by
+     * updating our cached pointer position to match. */
+    return 1;
+}
+
+int XUngrabKey(Display *dpy, int keycode, unsigned int modifiers,
+               Window grab_window) {
+    (void)dpy; (void)keycode; (void)modifiers; (void)grab_window;
+    return 1;
+}
+
+/* Event queue scanners. twm uses these from drag loops (XMaskEvent in
+ * MenuMapped) and to coalesce queued events (XCheckTypedWindowEvent in
+ * HandleExpose). Implemented as non-blocking peek+pop for now; the
+ * blocking XMaskEvent will spin the asyncify yield loop until an event
+ * matches. */
+
+Bool XCheckMaskEvent(Display *dpy, long event_mask, XEvent *ev) {
+    return emx11_event_queue_peek_match(dpy, event_mask, ev) ? True : False;
+}
+
+Bool XCheckTypedWindowEvent(Display *dpy, Window w, int event_type, XEvent *ev) {
+    return emx11_event_queue_peek_typed(dpy, w, event_type, ev) ? True : False;
+}
+
+int XMaskEvent(Display *dpy, long event_mask, XEvent *ev) {
+    for (;;) {
+        if (emx11_event_queue_peek_match(dpy, event_mask, ev)) return 1;
+        emscripten_sleep(10);
+    }
+}
+
+/* ICCCM / WM hint readers. None of these are wired to the property
+ * subsystem yet; return "nothing" so twm falls back to defaults. */
+
+Status XFetchName(Display *dpy, Window w, char **name_return) {
+    (void)dpy; (void)w;
+    if (name_return) *name_return = NULL;
+    return 0;
+}
+
+Status XGetWMIconName(Display *dpy, Window w, XTextProperty *text_prop) {
+    (void)dpy; (void)w;
+    if (text_prop) memset(text_prop, 0, sizeof(*text_prop));
+    return 0;
+}
+
+Status XGetTransientForHint(Display *dpy, Window w, Window *prop_window_return) {
+    (void)dpy; (void)w;
+    if (prop_window_return) *prop_window_return = None;
+    return 0;
+}
+
+Status XGetWMColormapWindows(Display *dpy, Window w,
+                             Window **windows_return, int *count_return) {
+    (void)dpy; (void)w;
+    if (windows_return) *windows_return = NULL;
+    if (count_return)   *count_return   = 0;
+    return 0;
+}
+
+Status XGetRGBColormaps(Display *dpy, Window w,
+                        XStandardColormap **stdcmaps, int *count, Atom property) {
+    (void)dpy; (void)w; (void)property;
+    if (stdcmaps) *stdcmaps = NULL;
+    if (count)    *count    = 0;
+    return 0;
+}
+
+int XInstallColormap(Display *dpy, Colormap cmap) {
+    (void)dpy; (void)cmap;
+    /* Single-visual world; no per-window colormap switching needed. */
+    return 1;
+}
+
+/* Cut buffers. Legacy inter-client clipboard from X10 days, still used
+ * by a few programs (twm's F_CUTFILE, xterm's middle-click). Not worth
+ * persisting across wasm reloads. */
+
+char *XFetchBytes(Display *dpy, int *nbytes_return) {
+    (void)dpy;
+    if (nbytes_return) *nbytes_return = 0;
+    return NULL;
+}
+
+int XStoreBytes(Display *dpy, _Xconst char *bytes, int nbytes) {
+    (void)dpy; (void)bytes; (void)nbytes;
+    return 1;
+}
+
+/* Parse "WxH[+/-X[+/-Y]]" geometry strings. Used by twm for default
+ * icon manager placement. Returns a bitmask of which of XValue/YValue/
+ * WidthValue/HeightValue fields are populated. Accepting a degenerate
+ * input returns 0 (no fields). */
+int XParseGeometry(_Xconst char *geom, int *x, int *y,
+                   unsigned int *width, unsigned int *height) {
+    if (!geom || !*geom) return 0;
+    int mask = 0;
+    const char *p = geom;
+    unsigned int uval;
+    int sval;
+
+    /* [W x H] */
+    if (*p >= '0' && *p <= '9') {
+        uval = 0;
+        while (*p >= '0' && *p <= '9') { uval = uval * 10 + (unsigned)(*p++ - '0'); }
+        if (*p == 'x' || *p == 'X') {
+            if (width) *width = uval;
+            mask |= WidthValue;
+            p++;
+            uval = 0;
+            while (*p >= '0' && *p <= '9') { uval = uval * 10 + (unsigned)(*p++ - '0'); }
+            if (height) *height = uval;
+            mask |= HeightValue;
+        }
+    }
+    /* [+/-X+/-Y] */
+    for (int axis = 0; axis < 2; axis++) {
+        int sign = 0;
+        if (*p == '+') { sign = 1; p++; }
+        else if (*p == '-') { sign = -1; p++; }
+        else break;
+        sval = 0;
+        while (*p >= '0' && *p <= '9') { sval = sval * 10 + (*p++ - '0'); }
+        if (sign < 0) sval = -sval;
+        if (axis == 0) { if (x) *x = sval; mask |= XValue; if (sign < 0) mask |= XNegative; }
+        else           { if (y) *y = sval; mask |= YValue; if (sign < 0) mask |= YNegative; }
+    }
+    return mask;
+}
+
+int XSetWindowBorderWidth(Display *dpy, Window w, unsigned int width) {
+    EmxWindow *win = emx11_window_find(dpy, w);
+    if (!win) return 0;
+    win->border_width = width;
+    return 1;
+}
+
+/* Error text: Xlib historically renders numeric error codes into human
+ * strings via its resource database. We don't ship one; write a bland
+ * placeholder so callers (twm's error handler in particular) have
+ * something to print. */
+int XGetErrorText(Display *dpy, int code, char *buffer_return, int length) {
+    (void)dpy;
+    if (!buffer_return || length <= 0) return 0;
+    snprintf(buffer_return, (size_t)length, "X error %d", code);
+    return 0;
+}
+
+int XGetErrorDatabaseText(Display *dpy, _Xconst char *name, _Xconst char *message,
+                          _Xconst char *default_string, char *buffer_return, int length) {
+    (void)dpy; (void)name; (void)message;
+    if (!buffer_return || length <= 0) return 0;
+    const char *src = default_string ? default_string : "";
+    size_t n = strlen(src);
+    if (n >= (size_t)length) n = (size_t)length - 1;
+    memcpy(buffer_return, src, n);
+    buffer_return[n] = '\0';
+    return 0;
+}
+
+/* Multibyte image string. Route to the 8-bit XDrawImageString; our
+ * canvas-fillText font path is UTF-8 internally either way, and the
+ * XFontSet argument is already a thin wrapper around a loaded CSS font. */
+void XmbDrawImageString(Display *dpy, Drawable d, XFontSet fontset, GC gc,
+                        int x, int y, _Xconst char *text, int length) {
+    (void)fontset;
+    XDrawImageString(dpy, d, gc, x, y, text, length);
 }

@@ -32,6 +32,23 @@ addToLibrary({
     globalThis.__EMX11__ && globalThis.__EMX11__.onWindowDestroy(id);
   },
 
+  // Bind (or unbind, if pmId==0) a Pixmap as the window's tiled
+  // background. The compositor will thereafter paint the window's
+  // background using ctx.createPattern(pixmap.canvas, 'repeat') with
+  // the tile origin aligned to the window's top-left.
+  emx11_js_window_set_bg_pixmap: function (id, pmId) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onWindowSetBgPixmap(id, pmId);
+  },
+
+  // XClearWindow / XClearArea entry point. Lets the compositor decide
+  // whether to paint with background_pixel (solid) or background_pixmap
+  // (tiled) so the C side doesn't have to branch.
+  emx11_js_clear_area: function (id, x, y, w, h) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onClearArea(id, x, y, w, h);
+  },
+
   emx11_js_fill_rect: function (id, x, y, w, h, color) {
     globalThis.__EMX11__ &&
       globalThis.__EMX11__.onFillRect(id, x, y, w, h, color);

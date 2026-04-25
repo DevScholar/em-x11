@@ -153,7 +153,10 @@ int XFillPolygon(Display *display, Drawable d, GC gc,
 int XClearWindow(Display *display, Window w) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
-    emx11_js_fill_rect(w, 0, 0, win->width, win->height, win->background_pixel);
+    /* Routed through a bg-aware bridge so the compositor paints with the
+     * window's background_pixmap (if any) instead of the solid pixel.
+     * The pixel remains the fallback when no pixmap is bound. */
+    emx11_js_clear_area(w, 0, 0, win->width, win->height);
     return 1;
 }
 
@@ -165,6 +168,6 @@ int XClearArea(Display *display, Window w,
     if (!win) return 0;
     if (width == 0)  width  = win->width  - (unsigned int)x;
     if (height == 0) height = win->height - (unsigned int)y;
-    emx11_js_fill_rect(w, x, y, width, height, win->background_pixel);
+    emx11_js_clear_area(w, x, y, width, height);
     return 1;
 }

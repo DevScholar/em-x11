@@ -37,7 +37,10 @@ export class Host implements EmX11Host {
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
-    this.compositor = new Compositor(this.canvas);
+    this.compositor = new Compositor(this.canvas, (id) => {
+      const pm = this.pixmaps.get(id);
+      return pm ? pm.canvas : null;
+    });
 
     /* Default the pointer to the canvas centre so the first XQueryPointer
      * after XtRealizeWidget -- which fires before the user has had a
@@ -97,6 +100,14 @@ export class Host implements EmX11Host {
 
   onWindowDestroy(id: number): void {
     this.compositor.destroyWindow(id);
+  }
+
+  onWindowSetBgPixmap(id: number, pmId: number): void {
+    this.compositor.setWindowBackgroundPixmap(id, pmId);
+  }
+
+  onClearArea(id: number, x: number, y: number, w: number, h: number): void {
+    this.compositor.clearArea(id, x, y, w, h);
   }
 
   onFillRect(id: number, x: number, y: number, w: number, h: number, color: number): void {
