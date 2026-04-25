@@ -236,9 +236,30 @@ extern void emx11_js_window_create(int conn_id, Window id, Window parent,
                                    int x, int y,
                                    unsigned int w, unsigned int h,
                                    unsigned long background);
-extern void emx11_js_window_map(Window id);
-extern void emx11_js_window_unmap(Window id);
+/* Geometry change on an existing window (XMoveWindow / XResizeWindow /
+ * XConfigureWindow). Distinct from window_create so Host doesn't have
+ * to re-seed parent, shape, or background_pixmap -- we only touch the
+ * geometry fields. */
+extern void emx11_js_window_configure(Window id, int x, int y,
+                                      unsigned int w, unsigned int h);
+extern void emx11_js_window_map(int conn_id, Window id);
+extern void emx11_js_window_unmap(int conn_id, Window id);
 extern void emx11_js_window_destroy(Window id);
+/* Per-window event-mask subscription. XSelectInput mirrors its new
+ * value to the Host so SubstructureRedirect / SubstructureNotify holders
+ * can be located without scanning every client's C-side window table. */
+extern void emx11_js_select_input(int conn_id, Window id, long mask);
+/* Toggle a window's override_redirect flag on the Host side. Used by
+ * XChangeWindowAttributes(CWOverrideRedirect). OR=True means "window
+ * managers must not interfere" (popup menus, tooltips, twm's own
+ * decoration frames) -- the Host skips redirect processing for them. */
+extern void emx11_js_set_override_redirect(Window id, int flag);
+/* XReparentWindow -- move a window under a new parent. (x, y) is the
+ * new origin in the new parent's coordinate space. Always forwarded to
+ * the Host even when the caller has no local shadow of `id`, because
+ * cross-connection reparents are legal (twm reparenting xeyes's shell
+ * is the canonical example). */
+extern void emx11_js_reparent_window(Window id, Window parent, int x, int y);
 /* Bind or unbind a Pixmap as the window's tiled background. pm_id=0
  * reverts to the solid background_pixel; any other id must reference a
  * live Pixmap on the JS side. */

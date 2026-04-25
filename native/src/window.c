@@ -57,36 +57,46 @@ Window XCreateWindow(Display *display, Window parent,
 }
 
 int XMapWindow(Display *display, Window w) {
+    /* Cross-connection safe: a window created by another client is legal
+     * to map (the WM case -- twm calls XMapWindow on a reparented client
+     * shell). We always forward to the Host; local bookkeeping only
+     * fires when the caller owns a shadow entry.
+     *
+     * Expose synthesis lives here (not Host-side) because the owning
+     * Module reference isn't registered with the Host until launchClient's
+     * `await loadWasm` resolves -- which happens AFTER main() calls into
+     * XtAppMainLoop and suspends via asyncify. An Xt program's very first
+     * XMapWindow fires during main()'s realize phase, before the Module
+     * is bound, so a Host->C ccall for Expose at that moment would find
+     * `conn.module === null` and silently drop. Synthesizing directly
+     * into the caller's local queue is race-free: the caller IS the owner
+     * for the only case we care about (non-redirect map). Under redirect
+     * the WM maps the shell by XID and Expose would need a different
+     * path, but that's a dormant code path for the Host-WM pivot. */
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win) {
-        return 0;
-    }
-    win->mapped = true;
-    emx11_js_window_map(w);
+    if (win) win->mapped = true;
+    emx11_js_window_map(display->conn_id, w);
 
-    /* X semantics: newly-mapped windows receive an Expose event so clients
-     * know to paint themselves for the first time. */
-    XEvent ev;
-    memset(&ev, 0, sizeof(ev));
-    ev.xexpose.type    = Expose;
-    ev.xexpose.display = display;
-    ev.xexpose.window  = w;
-    ev.xexpose.x       = 0;
-    ev.xexpose.y       = 0;
-    ev.xexpose.width   = (int)win->width;
-    ev.xexpose.height  = (int)win->height;
-    ev.xexpose.count   = 0;
-    emx11_event_queue_push(display, &ev);
+    if (win) {
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.xexpose.type    = Expose;
+        ev.xexpose.display = display;
+        ev.xexpose.window  = w;
+        ev.xexpose.x       = 0;
+        ev.xexpose.y       = 0;
+        ev.xexpose.width   = (int)win->width;
+        ev.xexpose.height  = (int)win->height;
+        ev.xexpose.count   = 0;
+        emx11_event_queue_push(display, &ev);
+    }
     return 1;
 }
 
 int XUnmapWindow(Display *display, Window w) {
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win) {
-        return 0;
-    }
-    win->mapped = false;
-    emx11_js_window_unmap(w);
+    if (win) win->mapped = false;
+    emx11_js_window_unmap(display->conn_id, w);
     return 1;
 }
 
@@ -111,13 +121,11 @@ int XDestroyWindow(Display *display, Window w) {
  *    emx11_js_window_create when a window is logically "re-set". */
 
 static void notify_js_reconfigure(EmxWindow *win) {
-    /* No dedicated "reconfigure" bridge yet; the compositor's addWindow
-     * already replaces any previous entry by id, so we reuse it. */
-    Display *dpy = emx11_get_display();
-    emx11_js_window_create(dpy->conn_id, win->id, win->parent,
-                           win->x, win->y, win->width, win->height,
-                           win->background_pixel);
-    if (win->mapped) emx11_js_window_map(win->id);
+    /* Geometry-only path: window already exists on Host; just update
+     * its (x, y, w, h). We deliberately avoid re-calling window_create
+     * here -- doing so stomped on parent / shape / background_pixmap. */
+    emx11_js_window_configure(win->id, win->x, win->y,
+                              win->width, win->height);
 }
 
 int XMoveWindow(Display *display, Window w, int x, int y) {
@@ -183,8 +191,14 @@ int XChangeWindowAttributes(Display *display, Window w,
     if (!win || !attrs) return 0;
     if (valuemask & CWBackPixel)        win->background_pixel = attrs->background_pixel;
     if (valuemask & CWBorderPixel)      win->border_pixel     = attrs->border_pixel;
-    if (valuemask & CWEventMask)        win->event_mask       = attrs->event_mask;
-    if (valuemask & CWOverrideRedirect) win->override_redirect = attrs->override_redirect;
+    if (valuemask & CWEventMask) {
+        win->event_mask = attrs->event_mask;
+        emx11_js_select_input(display->conn_id, w, attrs->event_mask);
+    }
+    if (valuemask & CWOverrideRedirect) {
+        win->override_redirect = attrs->override_redirect;
+        emx11_js_set_override_redirect(w, attrs->override_redirect ? 1 : 0);
+    }
     if (valuemask & CWBackPixmap) {
         /* X semantics: ParentRelative and None are legal values here,
          * distinct from "a real Pixmap id". We honour only the real-id
@@ -294,10 +308,11 @@ Status XQueryTree(Display *display, Window w,
 
 int XSelectInput(Display *display, Window w, long event_mask) {
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win) {
-        return 0;
-    }
-    win->event_mask = event_mask;
+    if (win) win->event_mask = event_mask;
+    /* Always forward to Host, even for cross-connection targets (twm
+     * must XSelectInput(root, SubstructureRedirectMask) -- root is
+     * Host-owned, no local shadow of its event_mask would help). */
+    emx11_js_select_input(display->conn_id, w, event_mask);
     return 1;
 }
 
@@ -308,5 +323,20 @@ int XStoreName(Display *display, Window w, const char *name) {
     }
     strncpy(win->name, name, sizeof(win->name) - 1);
     win->name[sizeof(win->name) - 1] = '\0';
+    return 1;
+}
+
+/* XReparentWindow: move a window under a new parent. Always forwards to
+ * the Host, even if the caller has no local shadow -- twm reparenting
+ * xeyes's shell (a conn-2 XID) is the canonical cross-connection case,
+ * and twm wouldn't have a local EmxWindow for it. */
+int XReparentWindow(Display *display, Window w, Window parent, int x, int y) {
+    EmxWindow *win = emx11_window_find(display, w);
+    if (win) {
+        win->parent = parent;
+        win->x = x;
+        win->y = y;
+    }
+    emx11_js_reparent_window(w, parent, x, y);
     return 1;
 }

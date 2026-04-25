@@ -84,9 +84,30 @@ export interface EmX11Host {
     height: number,
     background: number,
   ): void;
-  onWindowMap(id: number): void;
-  onWindowUnmap(id: number): void;
+  /** Geometry-only update for an existing window (XMoveWindow /
+   *  XResizeWindow / XConfigureWindow). Leaves parent, shape, and
+   *  background_pixmap alone. */
+  onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void;
+  /** XMapWindow entry. `connId` is the caller's connection so Host can
+   *  enforce the SubstructureRedirect "caller == holder bypass" rule
+   *  (x11protocol.txt §1592). Host internally decides whether to
+   *  actually map (no redirect / OR set / caller == holder) or to
+   *  synthesize MapRequest to the redirect holder. */
+  onWindowMap(connId: number, id: number): void;
+  onWindowUnmap(connId: number, id: number): void;
   onWindowDestroy(id: number): void;
+  /** XSelectInput mirror. Host stores the mask per (window, caller)
+   *  and enforces at-most-one SubstructureRedirectMask per window
+   *  (x11protocol.txt §1477). */
+  onSelectInput(connId: number, id: number, mask: number): void;
+  /** XChangeWindowAttributes(CWOverrideRedirect) mirror. OR=True marks
+   *  the window as WM-invisible for redirect purposes (popup menus,
+   *  tooltips, twm's own decoration frames). */
+  onSetOverrideRedirect(id: number, flag: boolean): void;
+  /** XReparentWindow -- update parent link and position in the new
+   *  parent's coord space. Forwarded even for windows the caller
+   *  doesn't own (twm takes xeyes's shell as a child of its frame). */
+  onReparentWindow(id: number, parent: number, x: number, y: number): void;
   /** Bind a Pixmap as the window's tiled background, or unbind when
    *  pmId === 0 (revert to solid background_pixel). The compositor
    *  paints with `createPattern(pixmap.canvas, 'repeat')` from then on. */

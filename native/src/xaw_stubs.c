@@ -517,12 +517,15 @@ int XISelectEvents(Display *dpy, Window win, XIEventMask *masks,
 }
 
 /* -- Locale -- libXt's Initialize.c calls these during XtAppInitialize.
- * Our font path is UTF-8 via canvas.fillText regardless of locale, so we
- * report "locale unsupported" (returns False) and accept any modifier
- * string verbatim. Xt treats False as "fall back to C locale". */
+ * Our font path is UTF-8 via canvas.fillText regardless of locale. We
+ * report "locale supported" (returns True) because claiming otherwise
+ * makes Xt's _XtDefaultLanguageProc warn "locale not supported by Xlib,
+ * locale set to C" on every startup -- pure noise for us, since text
+ * rendering doesn't care what locale is active. XSetLocaleModifiers
+ * likewise accepts any modifier string verbatim. */
 
 Bool XSupportsLocale(void) {
-    return False;
+    return True;
 }
 
 char *XSetLocaleModifiers(_Xconst char *modifier_list) {
@@ -569,18 +572,8 @@ int XSyncGetPriority(Display *dpy, XID client_resource_id,
  * meaningful value exists and we know where to find it, we return it;
  * where not, we return "nothing" cleanly so twm's defensive paths run. */
 
-/* Reparenting. We maintain a flat window list on the JS side and don't
- * yet model parent/child visually -- but update the EmxWindow record so
- * XQueryTree / WM bookkeeping sees the right parent. Phase 2 will hook
- * this into the compositor proper. */
-int XReparentWindow(Display *dpy, Window w, Window parent, int x, int y) {
-    EmxWindow *win = emx11_window_find(dpy, w);
-    if (!win) return 0;
-    win->parent = parent;
-    win->x = x;
-    win->y = y;
-    return 1;
-}
+/* XReparentWindow lives in window.c; it needs to forward to the Host
+ * bridge and stays cross-connection-safe. */
 
 /* Save set: X keeps track of windows that should revert to root if the
  * controlling client dies. One-client world -> no-op. */

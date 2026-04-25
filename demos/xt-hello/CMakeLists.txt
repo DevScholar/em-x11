@@ -14,7 +14,7 @@ target_link_options(xt-hello PRIVATE
     "SHELL:-s ENVIRONMENT=web"
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_expose_event']"
+    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_expose_event','_emx11_push_map_request']"
     # Show all undefined symbols during the Xt bring-up, not just 15.
     "SHELL:-Wl,--error-limit=0"
 )

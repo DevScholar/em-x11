@@ -53,16 +53,45 @@ addToLibrary({
       globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, background);
   },
 
-  emx11_js_window_map: function (id) {
-    globalThis.__EMX11__ && globalThis.__EMX11__.onWindowMap(id);
+  // Geometry-only update for an existing window. Unlike window_create
+  // this preserves parent, shape, background_pixmap, and the Host-side
+  // subscription table.
+  emx11_js_window_configure: function (id, x, y, w, h) {
+    globalThis.__EMX11__ && globalThis.__EMX11__.onWindowConfigure(id, x, y, w, h);
   },
 
-  emx11_js_window_unmap: function (id) {
-    globalThis.__EMX11__ && globalThis.__EMX11__.onWindowUnmap(id);
+  emx11_js_window_map: function (connId, id) {
+    globalThis.__EMX11__ && globalThis.__EMX11__.onWindowMap(connId, id);
+  },
+
+  emx11_js_window_unmap: function (connId, id) {
+    globalThis.__EMX11__ && globalThis.__EMX11__.onWindowUnmap(connId, id);
   },
 
   emx11_js_window_destroy: function (id) {
     globalThis.__EMX11__ && globalThis.__EMX11__.onWindowDestroy(id);
+  },
+
+  // Mirror XSelectInput into Host so it can track redirect / notify
+  // holders (x11protocol.txt §1477: at most one SubstructureRedirect
+  // claim per window). Host dedupes per (window, connection).
+  emx11_js_select_input: function (connId, id, mask) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onSelectInput(connId, id, mask >>> 0);
+  },
+
+  // Set override_redirect on a window. Non-zero flag = True.
+  emx11_js_set_override_redirect: function (id, flag) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onSetOverrideRedirect(id, flag !== 0);
+  },
+
+  // XReparentWindow: re-home a window under a new parent. Always
+  // forwarded (cross-connection reparents are legal, e.g. twm takes
+  // xeyes's shell as a child of its decoration frame).
+  emx11_js_reparent_window: function (id, parent, x, y) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onReparentWindow(id, parent, x, y);
   },
 
   // Bind (or unbind, if pmId==0) a Pixmap as the window's tiled

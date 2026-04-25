@@ -76,6 +76,11 @@ const XID_MASK = XID_PER_CONN - 1;                // 0x001FFFFF
 const HOST_ROOT_ID = 0x00000001;
 const HOST_WEAVE_PIXMAP_ID = 0x00000002;
 
+/* X11 event-mask bits we act on directly (x11protocol.txt §847).
+ * These are the literal mask values clients pass to XSelectInput. */
+const SubstructureRedirectMask = 1 << 20;
+// const SubstructureNotifyMask  = 1 << 19;   // TODO: dispatch in later step
+
 /* X event-type numerics we send to the C side via emx11_push_*_event. */
 const X_ButtonPress = 4;
 const X_ButtonRelease = 5;
@@ -90,6 +95,13 @@ export class Host implements EmX11Host {
   private readonly pixmaps = new Map<number, Pixmap>();
   private readonly connections = new Map<number, Connection>();
   private readonly windowToConn = new Map<number, number>();
+  /** Per-window event-mask subscriptions from XSelectInput, keyed by
+   *  the subscribing connection. Host consults this for substructure
+   *  redirect / notify routing. Empty inner map means "no subscribers". */
+  private readonly windowSubscriptions = new Map<number, Map<number, number>>();
+  /** override_redirect flag per window (CWOverrideRedirect). True means
+   *  "WM stays out" -- Host skips the redirect path for this window. */
+  private readonly overrideRedirect = new Map<number, boolean>();
   private nextConnId = 0;
   private pendingLaunch: PendingLaunch | null = null;
   /** Last window that received a ButtonPress, by connection id. Key
@@ -240,11 +252,20 @@ export class Host implements EmX11Host {
     const conn = this.connections.get(connId);
     if (!conn) return;
     /* Drop every window this connection owned. Compositor cleans up
-     * its side; windowToConn drops its entries. Pixmaps/atoms still
-     * live in their global tables -- Step 2b will sweep those. */
+     * its side; windowToConn, subscriptions, and override_redirect
+     * drop their entries. Pixmaps/atoms still live in their global
+     * tables -- Step 2b will sweep those. */
     for (const winId of conn.ownedWindows) {
       this.compositor.destroyWindow(winId);
       this.windowToConn.delete(winId);
+      this.windowSubscriptions.delete(winId);
+      this.overrideRedirect.delete(winId);
+    }
+    /* Also drop this connection's subscription entries on OTHER
+     * clients' windows (a WM that observed substructure on root
+     * shouldn't keep that claim after disconnecting). */
+    for (const subs of this.windowSubscriptions.values()) {
+      subs.delete(connId);
     }
     this.connections.delete(connId);
   }
@@ -267,11 +288,44 @@ export class Host implements EmX11Host {
     this.compositor.addWindow(id, parent, x, y, width, height, background);
   }
 
-  onWindowMap(id: number): void {
-    this.compositor.mapWindow(id);
+  onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void {
+    this.compositor.configureWindow(id, x, y, w, h);
   }
 
-  onWindowUnmap(id: number): void {
+  onWindowMap(connId: number, id: number): void {
+    /* SubstructureRedirect decision (x11protocol.txt §1592):
+     *   Redirect applies iff the window's PARENT has a connection
+     *   that selected SubstructureRedirectMask on it, AND the caller
+     *   is a different connection, AND override_redirect is False.
+     * Otherwise proceed with the actual map. */
+    const parent = this.compositor.parentOf(id);
+    const holderConnId = parent !== 0 ? this.redirectHolderFor(parent) : null;
+    const overrideRedirect = this.overrideRedirect.get(id) ?? false;
+    if (
+      holderConnId !== null &&
+      holderConnId !== connId &&
+      !overrideRedirect
+    ) {
+      console.info(
+        `em-x11: redirect map(conn=${connId}, win=${id}, parent=${parent}) ` +
+          `-> holder conn=${holderConnId}`,
+      );
+      this.dispatchMapRequest(holderConnId, parent, id);
+      return;
+    }
+    this.compositor.mapWindow(id);
+    /* No Expose synthesis here: that lives in C's XMapWindow. Doing
+     * it Host-side via mod.ccall would race the launchClient handoff
+     * (conn.module is null during the initial map that happens inside
+     * loadWasm's awaited factory, before launchClient stitches the
+     * Module reference onto the Connection). Re-add a Host-side path
+     * only if we revive SubstructureRedirect, where the map might be
+     * served by a different connection than the owner. */
+  }
+
+  onWindowUnmap(_connId: number, id: number): void {
+    /* Unmap isn't redirected in X -- only Map / Configure / Circulate
+     * go through SubstructureRedirect. Unmap is always immediate. */
     this.compositor.unmapWindow(id);
   }
 
@@ -282,7 +336,93 @@ export class Host implements EmX11Host {
       conn?.ownedWindows.delete(id);
       this.windowToConn.delete(id);
     }
+    this.windowSubscriptions.delete(id);
+    this.overrideRedirect.delete(id);
     this.compositor.destroyWindow(id);
+  }
+
+  onSelectInput(connId: number, id: number, mask: number): void {
+    let subs = this.windowSubscriptions.get(id);
+    if (!subs) {
+      subs = new Map();
+      this.windowSubscriptions.set(id, subs);
+    }
+    if (mask === 0) {
+      subs.delete(connId);
+      if (subs.size === 0) this.windowSubscriptions.delete(id);
+    } else {
+      /* x11protocol.txt §1477: at most one client may select
+       * SubstructureRedirectMask on a given window. If another
+       * connection already holds it, strip the bit from this request
+       * and log -- matches X server's BadAccess reply as a soft warning. */
+      if (mask & SubstructureRedirectMask) {
+        for (const [existingConn, existingMask] of subs) {
+          if (
+            existingConn !== connId &&
+            existingMask & SubstructureRedirectMask
+          ) {
+            console.warn(
+              `em-x11: conn ${connId} requested SubstructureRedirect on win ` +
+                `${id} but conn ${existingConn} already holds it; ignoring`,
+            );
+            mask &= ~SubstructureRedirectMask;
+            break;
+          }
+        }
+        if (mask & SubstructureRedirectMask) {
+          console.info(
+            `em-x11: conn ${connId} now holds SubstructureRedirect on win ${id}`,
+          );
+        }
+      }
+      subs.set(connId, mask);
+    }
+  }
+
+  onSetOverrideRedirect(id: number, flag: boolean): void {
+    if (flag) this.overrideRedirect.set(id, true);
+    else this.overrideRedirect.delete(id);
+  }
+
+  onReparentWindow(id: number, parent: number, x: number, y: number): void {
+    this.compositor.reparentWindow(id, parent, x, y);
+  }
+
+  /** Look up which connection (if any) selected SubstructureRedirectMask
+   *  on this window. Returns null if nobody holds it. */
+  private redirectHolderFor(winId: number): number | null {
+    const subs = this.windowSubscriptions.get(winId);
+    if (!subs) return null;
+    for (const [connId, mask] of subs) {
+      if (mask & SubstructureRedirectMask) return connId;
+    }
+    return null;
+  }
+
+  /** Push a MapRequest into the holder's event queue via ccall. The
+   *  holder is some other wasm Module (typically twm) currently blocked
+   *  in XNextEvent; once this returns, its emscripten_sleep loop will
+   *  pick up the event on the next yield. */
+  private dispatchMapRequest(
+    holderConnId: number,
+    parent: number,
+    window: number,
+  ): void {
+    const holder = this.connections.get(holderConnId);
+    const mod = holder?.module;
+    if (!mod) {
+      console.warn(
+        `em-x11: MapRequest for win ${window} but redirect holder conn ` +
+          `${holderConnId} has no Module yet; dropping`,
+      );
+      return;
+    }
+    mod.ccall(
+      'emx11_push_map_request',
+      null,
+      ['number', 'number'],
+      [parent, window],
+    );
   }
 
   onWindowSetBgPixmap(id: number, pmId: number): void {

@@ -393,3 +393,23 @@ void emx11_push_expose_event(Window window, int x, int y, int w, int h) {
     ev.xexpose.height  = h;
     emx11_event_queue_push(dpy, &ev);
 }
+
+/* -- Substructure redirect dispatch ---------------------------------------
+ *
+ * The Host ccall's these on the holder module whenever a redirect would
+ * normally have been served by the X server. They construct the canonical
+ * XMapRequestEvent (etc.) and push it onto the holder's queue so the WM's
+ * normal event loop picks it up via XNextEvent (x11protocol.txt §1592).
+ */
+
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_map_request(Window parent, Window window) {
+    Display *dpy = emx11_get_display();
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xmaprequest.type    = MapRequest;
+    ev.xmaprequest.display = dpy;
+    ev.xmaprequest.parent  = parent;
+    ev.xmaprequest.window  = window;
+    emx11_event_queue_push(dpy, &ev);
+}
