@@ -60,6 +60,15 @@ export interface Point {
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;
+  /** XOpenDisplay entry. Allocates a connection id (used to route events
+   *  to the caller's wasm Module in the multi-client world) and grants
+   *  an XID range per x11protocol.txt §869/§935. Every XID the C side
+   *  later hands out is `xidBase | (counter & xidMask)`, and ranges
+   *  across connections never overlap. */
+  openDisplay(): { connId: number; xidBase: number; xidMask: number };
+  /** XCloseDisplay entry. Host drops the connection and (eventually, in
+   *  Step 2) releases any windows / pixmaps / atoms it owned. */
+  closeDisplay(connId: number): void;
   onWindowCreate(
     id: number,
     x: number,

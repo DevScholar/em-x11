@@ -15,6 +15,30 @@ addToLibrary({
     globalThis.__EMX11__ && globalThis.__EMX11__.onInit(screenWidth, screenHeight);
   },
 
+  // Connection setup. Host returns a connection id (used to route events
+  // back to this Module once we go multi-client) and an XID range
+  // carved out per x11protocol.txt §869/§935 -- the client ORs its
+  // counter into `base`, limited to bits in `mask`, and every allocated
+  // XID is globally unique.
+  emx11_js_open_display: function (connIdPtr, basePtr, maskPtr) {
+    if (!globalThis.__EMX11__) {
+      // No Host installed: hand back a harmless single-client range so
+      // test harnesses / headless runs still work.
+      HEAP32[connIdPtr >> 2] = 0;
+      HEAPU32[basePtr >> 2] = 0;
+      HEAPU32[maskPtr >> 2] = 0x001FFFFF;
+      return;
+    }
+    var info = globalThis.__EMX11__.openDisplay();
+    HEAP32[connIdPtr >> 2] = info.connId | 0;
+    HEAPU32[basePtr >> 2] = info.xidBase >>> 0;
+    HEAPU32[maskPtr >> 2] = info.xidMask >>> 0;
+  },
+
+  emx11_js_close_display: function (connId) {
+    globalThis.__EMX11__ && globalThis.__EMX11__.closeDisplay(connId);
+  },
+
   emx11_js_window_create: function (id, x, y, w, h, background) {
     globalThis.__EMX11__ &&
       globalThis.__EMX11__.onWindowCreate(id, x, y, w, h, background);

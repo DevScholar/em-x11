@@ -26,7 +26,25 @@ interface Pixmap {
   depth: number;
 }
 
+/* Per-connection bookkeeping. Each wasm Module that calls XOpenDisplay
+ * gets one of these. Right now we only track the connection's XID
+ * range; Step 2 will hang owned windows / atoms / property subscribers
+ * / the ccall-back Module reference off this record. */
+interface Connection {
+  connId: number;
+  xidBase: number;
+  xidMask: number;
+}
+
 const MAX_PIXMAP_EDGE = 4096;
+
+/* XID layout: top 3 bits always 0 (x11protocol.txt §935). We dedicate
+ * the low 0x00200000 slot (conn_id=0, 2 M IDs) to Host-owned resources
+ * -- root window, default cursor, etc. -- so no client can ever forge
+ * one. Real connections start at conn_id=1. */
+const XID_RANGE_BITS = 21;
+const XID_PER_CONN = 1 << XID_RANGE_BITS;         // 0x00200000
+const XID_MASK = XID_PER_CONN - 1;                // 0x001FFFFF
 
 export class Host implements EmX11Host {
   readonly canvas: RootCanvas;
@@ -34,6 +52,8 @@ export class Host implements EmX11Host {
   private pointerX: number;
   private pointerY: number;
   private readonly pixmaps = new Map<number, Pixmap>();
+  private readonly connections = new Map<number, Connection>();
+  private nextConnId = 0;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -77,6 +97,20 @@ export class Host implements EmX11Host {
      * authority. We ignore the hint and the C side will be corrected the
      * next time it queries through XDisplayWidth/Height once we wire that
      * back through. TODO: plumb the correction call. */
+  }
+
+  openDisplay(): { connId: number; xidBase: number; xidMask: number } {
+    const connId = ++this.nextConnId;
+    const xidBase = connId * XID_PER_CONN;
+    const xidMask = XID_MASK;
+    this.connections.set(connId, { connId, xidBase, xidMask });
+    return { connId, xidBase, xidMask };
+  }
+
+  closeDisplay(connId: number): void {
+    /* Step 1: just drop the record. Step 2 will sweep owned windows,
+     * pixmaps, property subscribers, and cached Module reference. */
+    this.connections.delete(connId);
   }
 
   onWindowCreate(

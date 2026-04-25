@@ -152,6 +152,19 @@ struct _XDisplay {
 
     XID                        next_xid;
 
+    /* Connection bookkeeping granted by the Host (the JS "X server")
+     * when XOpenDisplay runs. `conn_id` identifies this wasm module in
+     * the Host's connection table so events / redirect dispatch know
+     * which queue to push into. `xid_base` and `xid_mask` carve out
+     * this client's resource-id range per x11protocol.txt §869/§935:
+     * every XID we hand out is `xid_base | (counter & xid_mask)`, and
+     * the top three bits are always zero. Other connections use
+     * non-overlapping bases so XIDs are globally unique without a
+     * round-trip to the Host for each alloc. */
+    int                        conn_id;
+    XID                        xid_base;
+    XID                        xid_mask;
+
     EmxWindow                  windows[EMX11_MAX_WINDOWS];
 
     XEvent                     event_queue[EMX11_EVENT_QUEUE_CAPACITY];
@@ -205,6 +218,17 @@ void emx11_window_free_properties(EmxWindow *win);
 /* ------------------------------------------------------------------------- */
 
 extern void emx11_js_init(int screen_width, int screen_height);
+
+/* Connection setup. Called by XOpenDisplay before anything else touches
+ * the Host. The Host allocates a connection id and grants this client
+ * an XID range (see struct _XDisplay for layout). `emx11_js_close_display`
+ * tells the Host to drop the connection; any resources still owned by
+ * it are cleaned up server-side. */
+extern void emx11_js_open_display(int *conn_id_out,
+                                  unsigned int *xid_base_out,
+                                  unsigned int *xid_mask_out);
+extern void emx11_js_close_display(int conn_id);
+
 extern void emx11_js_window_create(Window id, int x, int y,
                                    unsigned int w, unsigned int h,
                                    unsigned long background);

@@ -15,7 +15,13 @@ Display *emx11_get_display(void) {
 }
 
 XID emx11_next_xid(Display *dpy) {
-    return ++dpy->next_xid;
+    /* x11protocol.txt §935: client-allocated IDs are formed by ORing
+     * an arbitrary value whose bits all lie within `resource-id-mask`
+     * into `resource-id-base`. We keep a monotonic counter modulo the
+     * mask, which gives every connection its own private 2 M-slot
+     * range and never hits IDs reserved for Host-owned resources. */
+    dpy->next_xid = (dpy->next_xid + 1) & dpy->xid_mask;
+    return dpy->xid_base | dpy->next_xid;
 }
 
 EmxWindow *emx11_window_alloc(Display *dpy) {
@@ -95,6 +101,16 @@ Display *XOpenDisplay(const char *display_name) {
 
     memset(&g_display, 0, sizeof(g_display));
 
+    /* Open a connection with the Host first: the returned XID range
+     * must be in place before anything calls emx11_next_xid. */
+    int conn_id = 0;
+    unsigned int xid_base = 0, xid_mask = 0;
+    emx11_js_open_display(&conn_id, &xid_base, &xid_mask);
+    g_display.conn_id  = conn_id;
+    g_display.xid_base = (XID)xid_base;
+    g_display.xid_mask = (XID)xid_mask;
+    g_display.next_xid = 0;
+
     /* Public Display fields -- a plausible-looking minimum. Clients rarely
      * read these but Xt/Xaw inspect a few (protocol version, release). */
     g_display.proto_major_version = 11;
@@ -115,7 +131,6 @@ Display *XOpenDisplay(const char *display_name) {
     g_display.min_keycode         = 8;
     g_display.max_keycode         = 255;
 
-    g_display.next_xid = 0x0400001;             /* plausible client-side id */
     g_display.next_keycode = 8;                 /* X reserves 0..7          */
 
     emx11_init_screen(&g_display);
@@ -177,6 +192,9 @@ Display *XOpenDisplay(const char *display_name) {
 
 int XCloseDisplay(Display *display) {
     (void)display;
+    if (g_display_open) {
+        emx11_js_close_display(g_display.conn_id);
+    }
     g_display_open = false;
     return 0;
 }
