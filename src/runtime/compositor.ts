@@ -212,6 +212,47 @@ export class Compositor {
     ctx.restore();
   }
 
+  drawString(
+    id: number,
+    x: number,
+    y: number,
+    font: string,
+    text: string,
+    fgColor: number,
+    bgColor: number,
+    imageMode: boolean,
+  ): void {
+    const win = this.windows.get(id);
+    if (!win || !win.mapped || text.length === 0) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    ctx.font = font;
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    if (imageMode) {
+      const metrics = ctx.measureText(text);
+      /* Approximate the rectangle Xlib expects: advance width, and a
+       * vertical extent from font ascent to descent. measureText gives
+       * fontBoundingBoxAscent/Descent on modern browsers; fall back to
+       * actualBoundingBox if absent. */
+      const ascent =
+        metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent ?? 10;
+      const descent =
+        metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
+      ctx.fillStyle = pixelToCssColor(bgColor);
+      ctx.fillRect(
+        win.x + x,
+        win.y + y - ascent,
+        metrics.width,
+        ascent + descent,
+      );
+    }
+    ctx.fillStyle = pixelToCssColor(fgColor);
+    ctx.fillText(text, win.x + x, win.y + y);
+    ctx.restore();
+  }
+
   findWindowAt(cssX: number, cssY: number): number | null {
     /* Naive hit test in insertion order (top-most last). Honours SHAPE:
      * a point outside the shape rectangles does not count as a hit. v1

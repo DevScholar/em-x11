@@ -20,6 +20,7 @@ set(EMX11_SOURCES
     src/atom.c
     src/color.c
     src/error.c
+    src/font.c
     src/ext/shape.c
 )
 

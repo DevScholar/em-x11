@@ -80,6 +80,91 @@ addToLibrary({
     globalThis.__EMX11__ && globalThis.__EMX11__.onFlush();
   },
 
+  emx11_js_draw_string: function (id, x, y, fontPtr, textPtr, length, fg, bg, imageMode) {
+    if (!globalThis.__EMX11__) return;
+    var font = fontPtr !== 0 ? UTF8ToString(fontPtr) : '13px monospace';
+    // X strings are not NUL-terminated; pass explicit length.
+    var text = length > 0 && textPtr !== 0 ? UTF8ToString(textPtr, length) : '';
+    globalThis.__EMX11__.onDrawString(id, x, y, font, text, fg, bg, imageMode);
+  },
+
+  // Font measurement. Runs in a lazily-created offscreen 2D context so we
+  // don't depend on a DOM canvas being mounted (helps headless tests too).
+  // Writes directly into C buffers via HEAP32.
+  emx11_js_measure_font: function (fontPtr, ascentPtr, descentPtr, maxWidthPtr, widthsPtr) {
+    var g = globalThis;
+    if (!g.__emx11_measureCtx__) {
+      var c =
+        typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(1, 1)
+          : typeof document !== 'undefined'
+            ? document.createElement('canvas')
+            : null;
+      g.__emx11_measureCtx__ = c ? c.getContext('2d') : null;
+    }
+    var ctx = g.__emx11_measureCtx__;
+    var fallbackWidth = 8;
+    var fallbackAscent = 10;
+    var fallbackDescent = 3;
+
+    if (!ctx) {
+      HEAP32[ascentPtr >> 2] = fallbackAscent;
+      HEAP32[descentPtr >> 2] = fallbackDescent;
+      HEAP32[maxWidthPtr >> 2] = fallbackWidth;
+      for (var i = 0; i < 95; i++) HEAP32[(widthsPtr >> 2) + i] = fallbackWidth;
+      return;
+    }
+
+    var css = UTF8ToString(fontPtr);
+    ctx.font = css;
+    // Use a representative pair of glyphs for the font-level bbox.
+    var refMetrics = ctx.measureText('Mg');
+    var ascent =
+      Math.ceil(
+        refMetrics.fontBoundingBoxAscent ?? refMetrics.actualBoundingBoxAscent ?? fallbackAscent,
+      ) || fallbackAscent;
+    var descent =
+      Math.ceil(
+        refMetrics.fontBoundingBoxDescent ??
+          refMetrics.actualBoundingBoxDescent ??
+          fallbackDescent,
+      ) || fallbackDescent;
+    HEAP32[ascentPtr >> 2] = ascent;
+    HEAP32[descentPtr >> 2] = descent;
+
+    var maxW = 0;
+    var base = widthsPtr >> 2;
+    for (var j = 0; j < 95; j++) {
+      var ch = String.fromCharCode(32 + j);
+      var w = Math.ceil(ctx.measureText(ch).width) || fallbackWidth;
+      if (w > maxW) maxW = w;
+      HEAP32[base + j] = w;
+    }
+    HEAP32[maxWidthPtr >> 2] = maxW;
+  },
+
+  // Measure the pixel-advance of an arbitrary string in the given CSS
+  // font. Handles Unicode, proportional fonts, ligatures -- whatever
+  // canvas.fillText would produce, measureText agrees with.
+  emx11_js_measure_string: function (fontPtr, textPtr, length) {
+    if (length <= 0 || textPtr === 0) return 0;
+    var g = globalThis;
+    if (!g.__emx11_measureCtx__) {
+      var c =
+        typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(1, 1)
+          : typeof document !== 'undefined'
+            ? document.createElement('canvas')
+            : null;
+      g.__emx11_measureCtx__ = c ? c.getContext('2d') : null;
+    }
+    var ctx = g.__emx11_measureCtx__;
+    if (!ctx) return length * 8; // fallback
+    ctx.font = fontPtr !== 0 ? UTF8ToString(fontPtr) : '13px monospace';
+    var text = UTF8ToString(textPtr, length);
+    return Math.ceil(ctx.measureText(text).width);
+  },
+
   emx11_js_window_shape: function (id, rectsPtr, count) {
     if (!globalThis.__EMX11__) return;
     var rects = [];

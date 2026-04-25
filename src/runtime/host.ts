@@ -111,6 +111,19 @@ export class Host implements EmX11Host {
     this.compositor.drawPoints(id, points, mode, color);
   }
 
+  onDrawString(
+    id: number,
+    x: number,
+    y: number,
+    font: string,
+    text: string,
+    fgColor: number,
+    bgColor: number,
+    imageMode: number,
+  ): void {
+    this.compositor.drawString(id, x, y, font, text, fgColor, bgColor, imageMode !== 0);
+  }
+
   onFlush(): void {
     /* No-op: the compositor already presents through requestAnimationFrame.
      * Kept as a hook for future synchronous-flush scenarios. */

@@ -37,6 +37,7 @@ struct _XGC {
     int            line_width;
     int            line_style;
     int            fill_style;
+    Font           font;            /* currently bound font, or None */
 };
 
 /* ------------------------------------------------------------------------- */
@@ -164,6 +165,10 @@ unsigned int emx11_event_queue_size(const Display *dpy);
  * keycode table is exhausted (very unlikely in practice). */
 KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym);
 
+/* Look up the CSS font string bound to a loaded Font id. Returns NULL
+ * if the font hasn't been loaded (caller falls back to a default). */
+const char *emx11_font_css(Font font);
+
 /* ------------------------------------------------------------------------- */
 /*  JS bridge. These symbols are defined by src/bindings/emx11.library.js   */
 /*  and hooked into the link via --js-library. The C side calls into the    */
@@ -205,6 +210,35 @@ extern void emx11_js_fill_polygon(Window id, const int *points, int count,
 /* Points: same flat int array layout as polygon. */
 extern void emx11_js_draw_points(Window id, const int *points, int count,
                                  int mode, unsigned long color);
+
+/* Text rendering. font_css is a CSS `font` shorthand string (e.g.
+ * "13px monospace"). image_mode=1 fills the text background with
+ * bg_color (XDrawImageString semantics); image_mode=0 leaves the
+ * background untouched (XDrawString). */
+extern void emx11_js_draw_string(Window id, int x, int y,
+                                 const char *font_css,
+                                 const char *text, int length,
+                                 unsigned long fg_color,
+                                 unsigned long bg_color,
+                                 int image_mode);
+
+/* Query the browser for the real metrics of a CSS font, exported once
+ * per XLoadQueryFont so we never have to approximate. Writes:
+ *   *ascent    -- ceil(fontBoundingBoxAscent),  pixels
+ *   *descent   -- ceil(fontBoundingBoxDescent), pixels
+ *   *max_width -- max advance over ASCII 32..126
+ *   widths[95] -- per-char advance for ASCII 32..126
+ * Silent no-op plus default-filled outputs if no browser canvas is
+ * available (e.g. during test harnesses). */
+extern void emx11_js_measure_font(const char *font_css,
+                                  int *ascent, int *descent,
+                                  int *max_width, int *widths);
+
+/* Measure the advance width of `length` bytes of `text` (interpreted as
+ * UTF-8) in the given CSS font. Single round-trip to the browser; the
+ * result matches what fillText will render pixel-for-pixel. */
+extern int emx11_js_measure_string(const char *font_css,
+                                   const char *text, int length);
 
 /* SHAPE extension: push the new bounding rectangles to the compositor.
  * rects is an array of (x, y, width, height) int quadruples, length

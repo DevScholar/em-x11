@@ -16,6 +16,7 @@ GC XCreateGC(Display *display, Drawable d,
     gc->line_width = 0;
     gc->line_style = LineSolid;
     gc->fill_style = FillSolid;
+    gc->font       = None;
 
     if (values) {
         if (valuemask & GCForeground) gc->foreground = values->foreground;
@@ -23,6 +24,7 @@ GC XCreateGC(Display *display, Drawable d,
         if (valuemask & GCLineWidth)  gc->line_width = values->line_width;
         if (valuemask & GCLineStyle)  gc->line_style = values->line_style;
         if (valuemask & GCFillStyle)  gc->fill_style = values->fill_style;
+        if (valuemask & GCFont)       gc->font       = values->font;
     }
     return gc;
 }

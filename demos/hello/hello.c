@@ -14,13 +14,19 @@
 #include <X11/keysym.h>
 #include <emscripten.h>
 #include <stdio.h>
+#include <string.h>
 
-static Display *display;
-static Window   window;
-static GC       gc;
+static Display     *display;
+static Window       window;
+static GC           gc;
+static XFontStruct *font_fixed;   /* monospace, from alias "fixed"       */
+static XFontStruct *font_sans;    /* sans-serif, from an XLFD helvetica  */
 
 static int block_x = 150;
 static int block_y = 100;
+
+/* Last click position, printed as text in the window. */
+static char status_text[64] = "click anywhere, press keys (Esc quits)";
 
 static void redraw(void) {
     XSetForeground(display, gc, 0x003020UL);
@@ -46,6 +52,19 @@ static void redraw(void) {
               block_x,       block_y + 50,
               block_x + 100, block_y + 50);
 
+    /* Status text at the bottom. Two lines showing (1) the monospace
+     * "fixed" font and (2) a proportional sans-serif resolved from an
+     * XLFD helvetica spec -- proves family mapping and browser-measured
+     * advances both work. */
+    XSetForeground(display, gc, 0xFFFFFFUL);
+    XSetFont(display, gc, font_fixed->fid);
+    XDrawString(display, window, gc, 10, 260,
+                status_text, (int)strlen(status_text));
+
+    const char *tag = "em-x11 / XDrawString / measureText metrics";
+    XSetFont(display, gc, font_sans->fid);
+    XDrawString(display, window, gc, 10, 285, tag, (int)strlen(tag));
+
     XFlush(display);
 }
 
@@ -63,6 +82,8 @@ static void tick(void) {
                    event.xbutton.button, event.xbutton.x, event.xbutton.y);
             block_x = event.xbutton.x - 50;
             block_y = event.xbutton.y - 50;
+            snprintf(status_text, sizeof(status_text),
+                     "last click: (%d, %d)", event.xbutton.x, event.xbutton.y);
             redraw();
             break;
 
@@ -113,6 +134,16 @@ int main(void) {
     XMapWindow(display, window);
 
     gc = XCreateGC(display, window, 0, NULL);
+
+    /* Load two fonts to demonstrate family mapping. "fixed" resolves to
+     * "13px monospace" with per-char widths measured by the browser.
+     * The XLFD below resolves to "bold 14px sans-serif" -- parsed from
+     * field 2 (helvetica -> sans-serif), field 3 (bold -> bold), and
+     * field 7 (14 -> 14px). */
+    font_fixed = XLoadQueryFont(display, "fixed");
+    font_sans  = XLoadQueryFont(
+        display, "-*-helvetica-bold-r-normal-*-14-*-*-*-*-*-*-*");
+    if (font_fixed) XSetFont(display, gc, font_fixed->fid);
 
     emscripten_set_main_loop(tick, 0, 1);
     return 0;

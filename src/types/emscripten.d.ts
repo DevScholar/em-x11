@@ -128,6 +128,19 @@ export interface EmX11Host {
     mode: number,
     color: number,
   ): void;
+  /** Draw a text run with the given CSS font shorthand. When imageMode is
+   *  non-zero, the text's bounding box is filled with bgColor first
+   *  (XDrawImageString semantics). */
+  onDrawString(
+    id: number,
+    x: number,
+    y: number,
+    font: string,
+    text: string,
+    fgColor: number,
+    bgColor: number,
+    imageMode: number,
+  ): void;
   onFlush(): void;
   /** SHAPE extension: replace the window's bounding region. An empty
    *  array means "no shape" -- render the whole window rectangle. */
