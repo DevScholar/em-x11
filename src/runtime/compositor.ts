@@ -13,7 +13,7 @@
 
 import type { RootCanvas } from './canvas.js';
 import { pixelToCssColor } from './canvas.js';
-import type { ShapeRect } from '../types/emscripten.js';
+import type { Point, ShapeRect } from '../types/emscripten.js';
 
 interface ManagedWindow {
   id: number;
@@ -130,6 +130,88 @@ export class Compositor {
     ctx.restore();
   }
 
+  drawArc(
+    id: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+    lineWidth: number,
+  ): void {
+    const win = this.windows.get(id);
+    if (!win || !win.mapped) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    ctx.strokeStyle = pixelToCssColor(color);
+    ctx.lineWidth = lineWidth || 1;
+    this.arcPath(ctx, win.x + x, win.y + y, w, h, angle1, angle2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  fillArc(
+    id: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+  ): void {
+    const win = this.windows.get(id);
+    if (!win || !win.mapped) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    ctx.fillStyle = pixelToCssColor(color);
+    this.arcPath(ctx, win.x + x, win.y + y, w, h, angle1, angle2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  fillPolygon(
+    id: number,
+    points: Point[],
+    _shape: number,
+    _mode: number,
+    color: number,
+  ): void {
+    const win = this.windows.get(id);
+    if (!win || !win.mapped || points.length < 3) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    ctx.fillStyle = pixelToCssColor(color);
+    ctx.beginPath();
+    const first = points[0]!;
+    ctx.moveTo(win.x + first.x, win.y + first.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i]!;
+      ctx.lineTo(win.x + p.x, win.y + p.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawPoints(id: number, points: Point[], _mode: number, color: number): void {
+    const win = this.windows.get(id);
+    if (!win || !win.mapped || points.length === 0) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    ctx.fillStyle = pixelToCssColor(color);
+    for (const p of points) {
+      ctx.fillRect(win.x + p.x, win.y + p.y, 1, 1);
+    }
+    ctx.restore();
+  }
+
   findWindowAt(cssX: number, cssY: number): number | null {
     /* Naive hit test in insertion order (top-most last). Honours SHAPE:
      * a point outside the shape rectangles does not count as a hit. v1
@@ -175,6 +257,35 @@ export class Compositor {
       ctx.rect(win.x, win.y, win.width, win.height);
     }
     ctx.clip();
+  }
+
+  /** Build a canvas path for an X-semantics arc.
+   *
+   *  X arc arguments: (x, y, w, h) is the axis-aligned bounding box of the
+   *  ellipse; angle1 is the start angle and angle2 is the extent, both in
+   *  1/64ths of a degree, measured counterclockwise from 3 o'clock.
+   *
+   *  Canvas 2D ellipse arguments: centre + radii, angles in radians
+   *  measured clockwise from 3 o'clock. We flip the sign on angles to
+   *  switch rotational direction. */
+  private arcPath(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1_64: number,
+    angle2_64: number,
+  ): void {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const rx = w / 2;
+    const ry = h / 2;
+    const toRad = Math.PI / (180 * 64);
+    const start = -angle1_64 * toRad;
+    const end = -(angle1_64 + angle2_64) * toRad;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, start, end, angle2_64 > 0);
   }
 
   private markDirty(): void {

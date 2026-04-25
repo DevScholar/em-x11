@@ -51,8 +51,51 @@ int XNextEvent(Display *display, XEvent *event_return) {
     return emx11_event_queue_pop(display, event_return) ? 1 : 0;
 }
 
-/* Called from JS (bindings/emx11.library.js) when the browser generates a
- * DOM event that should surface on the X side. */
+/* -- Keymap management ---------------------------------------------------- */
+
+KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym) {
+    if (keysym == NoSymbol) return 0;
+    /* Reverse lookup first so repeated keys don't exhaust the table. */
+    for (unsigned int i = 8; i < dpy->next_keycode && i < 256; i++) {
+        if (dpy->keysym_table[i] == keysym) {
+            return (KeyCode)i;
+        }
+    }
+    if (dpy->next_keycode >= 256) {
+        return 0;                               /* table exhausted */
+    }
+    KeyCode kc = (KeyCode)dpy->next_keycode++;
+    dpy->keysym_table[kc] = keysym;
+    return kc;
+}
+
+/* Internal lookup used by both public entry points to avoid a
+ * deprecated-self-call chain on XKeycodeToKeysym. */
+static KeySym emx11_keysym_for(Display *dpy, unsigned int keycode) {
+    if (keycode >= 256) return NoSymbol;
+    return dpy->keysym_table[keycode];
+}
+
+/* The NeedWidePrototypes convention in Xfuncproto.h (default 1) widens
+ * KeyCode to unsigned int across the function-call boundary. Match that
+ * here so our definition agrees with the upstream declaration. */
+KeySym XKeycodeToKeysym(Display *dpy, unsigned int keycode, int index) {
+    (void)index;                                /* no modifier grid yet */
+    return emx11_keysym_for(dpy, keycode);
+}
+
+KeySym XLookupKeysym(XKeyEvent *event, int index) {
+    (void)index;
+    if (!event || !event->display) return NoSymbol;
+    return emx11_keysym_for(event->display, event->keycode);
+}
+
+KeyCode XKeysymToKeycode(Display *dpy, KeySym keysym) {
+    return emx11_keysym_to_keycode(dpy, keysym);
+}
+
+/* -- JS -> C event bridges ------------------------------------------------- */
+
 EMSCRIPTEN_KEEPALIVE
 void emx11_push_button_event(int type, Window window, int x, int y,
                              int x_root, int y_root, unsigned int button,
@@ -70,6 +113,45 @@ void emx11_push_button_event(int type, Window window, int x, int y,
     ev.xbutton.button      = button;
     ev.xbutton.state       = state;
     ev.xbutton.same_screen = True;
+    emx11_event_queue_push(dpy, &ev);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_motion_event(Window window, int x, int y,
+                             int x_root, int y_root,
+                             unsigned int state) {
+    Display *dpy = emx11_get_display();
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xmotion.type        = MotionNotify;
+    ev.xmotion.display     = dpy;
+    ev.xmotion.window      = window;
+    ev.xmotion.x           = x;
+    ev.xmotion.y           = y;
+    ev.xmotion.x_root      = x_root;
+    ev.xmotion.y_root      = y_root;
+    ev.xmotion.state       = state;
+    ev.xmotion.is_hint     = NotifyNormal;
+    ev.xmotion.same_screen = True;
+    emx11_event_queue_push(dpy, &ev);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_key_event(int type, Window window, unsigned int keysym,
+                          unsigned int state, int x, int y) {
+    Display *dpy = emx11_get_display();
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xkey.type        = type;
+    ev.xkey.display     = dpy;
+    ev.xkey.window      = window;
+    ev.xkey.x           = x;
+    ev.xkey.y           = y;
+    ev.xkey.x_root      = x;
+    ev.xkey.y_root      = y;
+    ev.xkey.state       = state;
+    ev.xkey.keycode     = emx11_keysym_to_keycode(dpy, (KeySym)keysym);
+    ev.xkey.same_screen = True;
     emx11_event_queue_push(dpy, &ev);
 }
 

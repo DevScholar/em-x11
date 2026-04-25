@@ -116,6 +116,7 @@ Display *XOpenDisplay(const char *display_name) {
     g_display.max_keycode         = 255;
 
     g_display.next_xid = 0x0400001;             /* plausible client-side id */
+    g_display.next_keycode = 8;                 /* X reserves 0..7          */
 
     emx11_init_screen(&g_display);
     g_display.screens = &g_display.screen0;

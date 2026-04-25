@@ -13,7 +13,7 @@
 import { RootCanvas } from './canvas.js';
 import type { RootCanvasOptions } from './canvas.js';
 import { Compositor } from './compositor.js';
-import type { EmX11Host, ShapeRect } from '../types/emscripten.js';
+import type { EmX11Host, Point, ShapeRect } from '../types/emscripten.js';
 
 export type HostOptions = RootCanvasOptions;
 
@@ -74,6 +74,41 @@ export class Host implements EmX11Host {
     lineWidth: number,
   ): void {
     this.compositor.drawLine(id, x1, y1, x2, y2, color, lineWidth);
+  }
+
+  onDrawArc(
+    id: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+    lineWidth: number,
+  ): void {
+    this.compositor.drawArc(id, x, y, w, h, angle1, angle2, color, lineWidth);
+  }
+
+  onFillArc(
+    id: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+  ): void {
+    this.compositor.fillArc(id, x, y, w, h, angle1, angle2, color);
+  }
+
+  onFillPolygon(id: number, points: Point[], shape: number, mode: number, color: number): void {
+    this.compositor.fillPolygon(id, points, shape, mode, color);
+  }
+
+  onDrawPoints(id: number, points: Point[], mode: number, color: number): void {
+    this.compositor.drawPoints(id, points, mode, color);
   }
 
   onFlush(): void {

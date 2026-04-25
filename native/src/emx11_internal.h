@@ -138,6 +138,13 @@ struct _XDisplay {
     XEvent                     event_queue[EMX11_EVENT_QUEUE_CAPACITY];
     unsigned int               event_head;      /* next slot to read        */
     unsigned int               event_tail;      /* next slot to write       */
+
+    /* Keymap. em-x11 has no real hardware keyboard: we synthesize keycodes
+     * on demand as new keysyms appear in browser events. keysym_table[kc]
+     * holds the keysym assigned to keycode `kc`. X reserves keycodes 0..7,
+     * so we start allocating at 8. */
+    KeySym                     keysym_table[256];
+    unsigned int               next_keycode;    /* next free keycode >= 8   */
 };
 
 /* ------------------------------------------------------------------------- */
@@ -152,6 +159,10 @@ XID        emx11_next_xid(Display *dpy);
 bool         emx11_event_queue_push(Display *dpy, const XEvent *event);
 bool         emx11_event_queue_pop (Display *dpy, XEvent *out);
 unsigned int emx11_event_queue_size(const Display *dpy);
+
+/* Look up or allocate a keycode for a given keysym. Returns 0 if the
+ * keycode table is exhausted (very unlikely in practice). */
+KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym);
 
 /* ------------------------------------------------------------------------- */
 /*  JS bridge. These symbols are defined by src/bindings/emx11.library.js   */
@@ -172,6 +183,28 @@ extern void emx11_js_fill_rect(Window id, int x, int y,
 extern void emx11_js_draw_line(Window id, int x1, int y1, int x2, int y2,
                                unsigned long color, int line_width);
 extern void emx11_js_flush(void);
+
+/* Arc drawing: angles are X-semantics (64ths of a degree, counterclockwise
+ * from 3 o'clock). The compositor converts to canvas-2d semantics
+ * (radians, clockwise, origin at ellipse centre). */
+extern void emx11_js_draw_arc(Window id, int x, int y,
+                              unsigned int width, unsigned int height,
+                              int angle1, int angle2,
+                              unsigned long color, int line_width);
+extern void emx11_js_fill_arc(Window id, int x, int y,
+                              unsigned int width, unsigned int height,
+                              int angle1, int angle2,
+                              unsigned long color);
+
+/* Polygon: points are a flat int array of 2*count values (x0,y0,x1,y1,...).
+ * The shape field is one of CoordModeOrigin (absolute) or CoordModePrevious
+ * (relative to prior point). */
+extern void emx11_js_fill_polygon(Window id, const int *points, int count,
+                                  int shape, int mode, unsigned long color);
+
+/* Points: same flat int array layout as polygon. */
+extern void emx11_js_draw_points(Window id, const int *points, int count,
+                                 int mode, unsigned long color);
 
 /* SHAPE extension: push the new bounding rectangles to the compositor.
  * rects is an array of (x, y, width, height) int quadruples, length

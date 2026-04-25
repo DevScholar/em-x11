@@ -42,17 +42,49 @@ addToLibrary({
       globalThis.__EMX11__.onDrawLine(id, x1, y1, x2, y2, color, lineWidth);
   },
 
+  emx11_js_draw_arc: function (id, x, y, w, h, angle1, angle2, color, lineWidth) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onDrawArc(id, x, y, w, h, angle1, angle2, color, lineWidth);
+  },
+
+  emx11_js_fill_arc: function (id, x, y, w, h, angle1, angle2, color) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onFillArc(id, x, y, w, h, angle1, angle2, color);
+  },
+
+  emx11_js_fill_polygon: function (id, ptsPtr, count, shape, mode, color) {
+    if (!globalThis.__EMX11__) return;
+    var pts = [];
+    if (count > 0 && ptsPtr !== 0) {
+      var base = ptsPtr >> 2;
+      for (var i = 0; i < count; i++) {
+        pts.push({ x: HEAP32[base + i * 2], y: HEAP32[base + i * 2 + 1] });
+      }
+    }
+    globalThis.__EMX11__.onFillPolygon(id, pts, shape, mode, color);
+  },
+
+  emx11_js_draw_points: function (id, ptsPtr, count, mode, color) {
+    if (!globalThis.__EMX11__) return;
+    var pts = [];
+    if (count > 0 && ptsPtr !== 0) {
+      var base = ptsPtr >> 2;
+      for (var i = 0; i < count; i++) {
+        pts.push({ x: HEAP32[base + i * 2], y: HEAP32[base + i * 2 + 1] });
+      }
+    }
+    globalThis.__EMX11__.onDrawPoints(id, pts, mode, color);
+  },
+
   emx11_js_flush: function () {
     globalThis.__EMX11__ && globalThis.__EMX11__.onFlush();
   },
 
   emx11_js_window_shape: function (id, rectsPtr, count) {
     if (!globalThis.__EMX11__) return;
-    // rectsPtr points to count * 4 int32 values (x, y, w, h per rect).
-    // A count of 0 (and/or null rectsPtr) clears the shape.
     var rects = [];
     if (count > 0 && rectsPtr !== 0) {
-      var base = rectsPtr >> 2; // HEAP32 index
+      var base = rectsPtr >> 2;
       for (var i = 0; i < count; i++) {
         rects.push({
           x: HEAP32[base + i * 4 + 0],

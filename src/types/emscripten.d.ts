@@ -48,6 +48,11 @@ export interface ShapeRect {
   h: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
 /**
  * The em-x11 host object, installed on `globalThis` before wasm starts so
  * that C code (via src/bindings/emx11.library.js) can reach TS-side state.
@@ -82,6 +87,46 @@ export interface EmX11Host {
     y2: number,
     color: number,
     lineWidth: number,
+  ): void;
+  /** X arc: (x, y) is the bounding box top-left, (w, h) is the bounding
+   *  box size, angle1/angle2 are in 1/64ths of a degree, counterclockwise
+   *  from 3 o'clock. */
+  onDrawArc(
+    id: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+    lineWidth: number,
+  ): void;
+  onFillArc(
+    id: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+  ): void;
+  /** Polygon fill. Points already resolved to absolute coordinates
+   *  window-local. `shape` is Complex/Nonconvex/Convex; `mode` is
+   *  CoordModeOrigin (we always pre-resolve to this). */
+  onFillPolygon(
+    id: number,
+    points: Point[],
+    shape: number,
+    mode: number,
+    color: number,
+  ): void;
+  onDrawPoints(
+    id: number,
+    points: Point[],
+    mode: number,
+    color: number,
   ): void;
   onFlush(): void;
   /** SHAPE extension: replace the window's bounding region. An empty
