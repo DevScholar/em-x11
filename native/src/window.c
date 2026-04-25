@@ -24,7 +24,7 @@ Window XCreateSimpleWindow(Display *display, Window parent,
     w->background_pixel = background;
     w->mapped           = false;
 
-    emx11_js_window_create(w->id, x, y, width, height, background);
+    emx11_js_window_create(w->id, parent, x, y, width, height, background);
     return w->id;
 }
 
@@ -112,7 +112,7 @@ int XDestroyWindow(Display *display, Window w) {
 static void notify_js_reconfigure(EmxWindow *win) {
     /* No dedicated "reconfigure" bridge yet; the compositor's addWindow
      * already replaces any previous entry by id, so we reuse it. */
-    emx11_js_window_create(win->id, win->x, win->y,
+    emx11_js_window_create(win->id, win->parent, win->x, win->y,
                            win->width, win->height,
                            win->background_pixel);
     if (win->mapped) emx11_js_window_map(win->id);

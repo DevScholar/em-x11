@@ -71,6 +71,7 @@ export interface EmX11Host {
   closeDisplay(connId: number): void;
   onWindowCreate(
     id: number,
+    parent: number,
     x: number,
     y: number,
     width: number,

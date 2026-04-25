@@ -159,27 +159,30 @@ Display *XOpenDisplay(const char *display_name) {
      * so subsequent ops targeting root land in the window map instead of
      * being dropped by the "unknown id" check. Root is created mapped
      * (no XMapWindow call on it) because it is always present in X. */
-    emx11_js_window_create(root->id, 0, 0,
+    emx11_js_window_create(root->id, None, 0, 0,
                            EMX11_SCREEN_WIDTH, EMX11_SCREEN_HEIGHT,
                            root->background_pixel);
     emx11_js_window_map(root->id);
 
     g_display_open = true;
 
-    /* Classic X root weave: a tiny tile of two slightly-different grays
-     * arranged on the diagonal, applied as the root window's
-     * background_pixmap. At a distance it reads as solid gray; up close
-     * you can see the weave. We build it using the public Xlib API so
-     * the same machinery exercises for twm's own tiles and stipples
-     * later -- no special "weave" path on the C or JS side. */
+    /* Classic X root weave: two diagonal pixels set to foreground on a
+     * black background, tiled over the root window. The pattern is
+     * intentionally pure black + pure white -- on CRTs at period-typical
+     * DPI the eye fuses the 2 px checker into a medium gray via
+     * dithering, which is what "X gray" actually was. On modern HiDPI
+     * displays you see the pattern more clearly; that's authentic to
+     * the era, not a bug. We build it via public Xlib so the same
+     * machinery exercises for twm's own tiles and stipples later --
+     * no special "weave" path on the C or JS side. */
     Pixmap weave = XCreatePixmap(&g_display, root->id, 2, 2,
                                  EMX11_SCREEN_DEPTH);
     if (weave != None) {
         GC wgc = XCreateGC(&g_display, weave, 0, NULL);
         if (wgc) {
-            XSetForeground(&g_display, wgc, 0x00BCBCBCUL);
+            XSetForeground(&g_display, wgc, 0x00000000UL);
             XFillRectangle(&g_display, weave, wgc, 0, 0, 2, 2);
-            XSetForeground(&g_display, wgc, 0x00A8A8A8UL);
+            XSetForeground(&g_display, wgc, 0x00FFFFFFUL);
             XFillRectangle(&g_display, weave, wgc, 0, 0, 1, 1);
             XFillRectangle(&g_display, weave, wgc, 1, 1, 1, 1);
             XFreeGC(&g_display, wgc);

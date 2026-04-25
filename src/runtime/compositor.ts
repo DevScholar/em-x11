@@ -17,6 +17,8 @@ import type { Point, ShapeRect } from '../types/emscripten.js';
 
 interface ManagedWindow {
   id: number;
+  /** Parent window id. 0 (None) means "no parent" — the root window. */
+  parent: number;
   x: number;
   y: number;
   width: number;
@@ -50,6 +52,7 @@ export class Compositor {
 
   addWindow(
     id: number,
+    parent: number,
     x: number,
     y: number,
     width: number,
@@ -58,6 +61,7 @@ export class Compositor {
   ): void {
     this.windows.set(id, {
       id,
+      parent,
       x,
       y,
       width,
@@ -318,17 +322,44 @@ export class Compositor {
   }
 
   /** Push a clip region matching the window's visible area onto `ctx`.
-   *  Caller must have done ctx.save() and must ctx.restore() after. */
+   *  Caller must have done ctx.save() and must ctx.restore() after.
+   *
+   *  Walks the parent chain: real X clips a child to every ancestor's
+   *  bounding shape. Our compositor is flat (no native parent/child),
+   *  so we enforce this explicitly. Without it, a shell window with
+   *  SHAPE (xeyes) has its eye-cutout covered by the Eyes widget child's
+   *  full-rectangle bg paint, because the child's own clip is just its
+   *  rectangle.
+   *
+   *  Canvas 2D clip semantics: successive ctx.clip() calls intersect
+   *  with the existing clip, so we emit one clip per chain level and
+   *  they combine correctly. */
   private applyWindowClip(ctx: CanvasRenderingContext2D, win: ManagedWindow): void {
-    ctx.beginPath();
-    if (win.shape) {
-      for (const r of win.shape) {
-        ctx.rect(win.x + r.x, win.y + r.y, r.w, r.h);
-      }
-    } else {
-      ctx.rect(win.x, win.y, win.width, win.height);
+    /* Collect ancestors, bottom-up, bounded by depth guard to survive
+     * any accidental cycle the C side might synthesize. */
+    const chain: ManagedWindow[] = [win];
+    let parentId = win.parent;
+    for (let i = 0; parentId !== 0 && i < 32; i++) {
+      const p = this.windows.get(parentId);
+      if (!p) break;
+      chain.push(p);
+      parentId = p.parent;
     }
-    ctx.clip();
+
+    /* Apply clips outermost-first so each ctx.clip() intersects the
+     * broader ancestor region before narrowing. */
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const w = chain[i]!;
+      ctx.beginPath();
+      if (w.shape) {
+        for (const r of w.shape) {
+          ctx.rect(w.x + r.x, w.y + r.y, r.w, r.h);
+        }
+      } else {
+        ctx.rect(w.x, w.y, w.width, w.height);
+      }
+      ctx.clip();
+    }
   }
 
   /** Build a canvas path for an X-semantics arc. Exposed as a free

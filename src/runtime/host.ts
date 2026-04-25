@@ -115,13 +115,14 @@ export class Host implements EmX11Host {
 
   onWindowCreate(
     id: number,
+    parent: number,
     x: number,
     y: number,
     width: number,
     height: number,
     background: number,
   ): void {
-    this.compositor.addWindow(id, x, y, width, height, background);
+    this.compositor.addWindow(id, parent, x, y, width, height, background);
   }
 
   onWindowMap(id: number): void {
