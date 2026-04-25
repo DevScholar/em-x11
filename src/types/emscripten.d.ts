@@ -69,6 +69,11 @@ export interface EmX11Host {
   /** XCloseDisplay entry. Host drops the connection and (eventually, in
    *  Step 2) releases any windows / pixmaps / atoms it owned. */
   closeDisplay(connId: number): void;
+  /** Shared root window's XID. Every client's XOpenDisplay asks Host
+   *  for this rather than creating a per-connection root; one root,
+   *  one set of compositor entries, one place to hang the
+   *  SubstructureRedirect holder in Step 3. */
+  getRootWindow(): number;
   onWindowCreate(
     connId: number,
     id: number,

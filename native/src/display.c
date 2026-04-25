@@ -136,59 +136,28 @@ Display *XOpenDisplay(const char *display_name) {
     emx11_init_screen(&g_display);
     g_display.screens = &g_display.screen0;
 
-    /* Root window occupies the first slot. Classic X sets the root
-     * background to a gray stipple ("X weave"); we ship a solid gray for
-     * now -- the important bit is that root is a real, addressable,
-     * mapped Window so XSelectInput/XChangeProperty/XClearWindow against
-     * it reach the server side instead of silently no-op'ing. A stipple
-     * pixmap can replace the solid fill once we have pattern brushes. */
+    /* Root window is Host-owned since Step 3a. Every client's XOpenDisplay
+     * asks the Host for the shared root XID and installs a local shadow
+     * in its EmxWindow table -- the authoritative record (and the weave
+     * pixmap hanging off it) lives in the JS compositor. We do NOT call
+     * emx11_js_window_create for root: the Host already has the entry
+     * and a second window_create for the same XID would either clobber
+     * state or put two compositor rows in conflict. */
+    Window root_xid = emx11_js_get_root_window();
     EmxWindow *root = emx11_window_alloc(&g_display);
-    root->id               = emx11_next_xid(&g_display);
+    root->id               = root_xid;
     root->parent           = None;
     root->x                = 0;
     root->y                = 0;
     root->width            = EMX11_SCREEN_WIDTH;
     root->height           = EMX11_SCREEN_HEIGHT;
-    root->background_pixel = 0x00BCBCBCUL;
+    root->background_pixel = 0x00FFFFFFUL;
     root->mapped           = true;
-    g_display.screen0.root = root->id;
+    g_display.screen0.root = root_xid;
 
     emx11_js_init(EMX11_SCREEN_WIDTH, EMX11_SCREEN_HEIGHT);
 
-    /* Publish root to the JS compositor so it paints the background and
-     * so subsequent ops targeting root land in the window map instead of
-     * being dropped by the "unknown id" check. Root is created mapped
-     * (no XMapWindow call on it) because it is always present in X. */
-    emx11_js_window_create(g_display.conn_id, root->id, None, 0, 0,
-                           EMX11_SCREEN_WIDTH, EMX11_SCREEN_HEIGHT,
-                           root->background_pixel);
-    emx11_js_window_map(root->id);
-
     g_display_open = true;
-
-    /* Classic X root weave: two diagonal pixels set to foreground on a
-     * black background, tiled over the root window. The pattern is
-     * intentionally pure black + pure white -- on CRTs at period-typical
-     * DPI the eye fuses the 2 px checker into a medium gray via
-     * dithering, which is what "X gray" actually was. On modern HiDPI
-     * displays you see the pattern more clearly; that's authentic to
-     * the era, not a bug. We build it via public Xlib so the same
-     * machinery exercises for twm's own tiles and stipples later --
-     * no special "weave" path on the C or JS side. */
-    Pixmap weave = XCreatePixmap(&g_display, root->id, 2, 2,
-                                 EMX11_SCREEN_DEPTH);
-    if (weave != None) {
-        GC wgc = XCreateGC(&g_display, weave, 0, NULL);
-        if (wgc) {
-            XSetForeground(&g_display, wgc, 0x00000000UL);
-            XFillRectangle(&g_display, weave, wgc, 0, 0, 2, 2);
-            XSetForeground(&g_display, wgc, 0x00FFFFFFUL);
-            XFillRectangle(&g_display, weave, wgc, 0, 0, 1, 1);
-            XFillRectangle(&g_display, weave, wgc, 1, 1, 1, 1);
-            XFreeGC(&g_display, wgc);
-        }
-        XSetWindowBackgroundPixmap(&g_display, root->id, weave);
-    }
 
     return &g_display;
 }

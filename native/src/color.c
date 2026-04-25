@@ -10,8 +10,22 @@
  * XParseColor accepts these forms:
  *    #RGB, #RRGGBB, #RRRGGGBBB, #RRRRGGGGBBBB  -- hex literals
  *    rgb:R/G/B                                  -- hex with explicit slashes
- *    <name>                                     -- entry in the rgb.txt-style
- *                                                   table below
+ *    <name>                                     -- delegated to the Host,
+ *                                                   which reuses the
+ *                                                   browser's CSS color
+ *                                                   parser. CSS3's named
+ *                                                   colour set is X11's
+ *                                                   rgb.txt plus a handful
+ *                                                   of CSS additions, so
+ *                                                   the browser's table
+ *                                                   is mostly authoritative.
+ *                                                   Exception: X11 has
+ *                                                   grayN / greyN (N=0..100)
+ *                                                   which CSS never picked
+ *                                                   up; we match that on
+ *                                                   the C side so twm's
+ *                                                   "gray70" / "gray85"
+ *                                                   resolve correctly.
  */
 
 #include "emx11_internal.h"
@@ -19,57 +33,6 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* Short rgb.txt-derived table. Covers the ~30 names X apps use most.
- * Tk / xclock / xeyes default palettes are fully inside this set. */
-typedef struct {
-    const char    *name;
-    unsigned char  r, g, b;
-} NamedColor;
-
-static const NamedColor NAMED_COLORS[] = {
-    { "black",         0,   0,   0   },
-    { "white",         255, 255, 255 },
-    { "red",           255, 0,   0   },
-    { "green",         0,   128, 0   },
-    { "blue",          0,   0,   255 },
-    { "yellow",        255, 255, 0   },
-    { "magenta",       255, 0,   255 },
-    { "cyan",          0,   255, 255 },
-    { "gray",          190, 190, 190 },
-    { "grey",          190, 190, 190 },
-    { "darkgray",      169, 169, 169 },
-    { "darkgrey",      169, 169, 169 },
-    { "lightgray",     211, 211, 211 },
-    { "lightgrey",     211, 211, 211 },
-    { "orange",        255, 165, 0   },
-    { "purple",        160, 32,  240 },
-    { "brown",         165, 42,  42  },
-    { "pink",          255, 192, 203 },
-    { "gold",          255, 215, 0   },
-    { "silver",        192, 192, 192 },
-    { "navy",          0,   0,   128 },
-    { "maroon",        128, 0,   0   },
-    { "olive",         128, 128, 0   },
-    { "teal",          0,   128, 128 },
-    { "lime",          0,   255, 0   },
-    { "aqua",          0,   255, 255 },
-    { "fuchsia",       255, 0,   255 },
-    { "wheat",         245, 222, 179 },
-    { "khaki",         240, 230, 140 },
-    { "lightblue",     173, 216, 230 },
-    { "lightgreen",    144, 238, 144 },
-    { "lightyellow",   255, 255, 224 },
-    { "lightpink",     255, 182, 193 },
-    { "darkblue",      0,   0,   139 },
-    { "darkgreen",     0,   100, 0   },
-    { "darkred",       139, 0,   0   },
-    { "tan",           210, 180, 140 },
-    { "beige",         245, 245, 220 },
-    { "ivory",         255, 255, 240 },
-    { "mint cream",    245, 255, 250 },
-};
-#define NAMED_COLOR_COUNT (sizeof(NAMED_COLORS) / sizeof(NAMED_COLORS[0]))
 
 static int hexval(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -145,36 +108,39 @@ static bool parse_rgb_slashed(const char *spec, unsigned short *rr,
     return true;
 }
 
-static bool lookup_named(const char *name, unsigned short *rr,
+/* Match X11's grayN / greyN / GrayN / GreyN where N is 0..100. CSS
+ * named-colors don't include these (CSS has bare "gray"/"grey" plus
+ * light/dark/dim variants, but not the numbered shades). Formula per
+ * X11 rgb.txt: each channel = round(N * 255 / 100). Bare "gray" and
+ * "grey" (no digits) deliberately fall through to CSS so we match the
+ * browser's 190,190,190 value there, not our own. */
+static bool parse_gray_n(const char *spec, unsigned short *rr,
                          unsigned short *gg, unsigned short *bb) {
-    /* Case-insensitive compare, ignoring spaces so "Light Gray" matches. */
-    char norm[64];
-    size_t o = 0;
-    for (size_t i = 0; name[i] && o + 1 < sizeof(norm); i++) {
-        char c = (char)tolower((unsigned char)name[i]);
-        if (c == ' ') continue;
-        norm[o++] = c;
+    const char *p = spec;
+    if ((p[0] == 'g' || p[0] == 'G') &&
+        (p[1] == 'r' || p[1] == 'R') &&
+        (p[2] == 'a' || p[2] == 'A' || p[2] == 'e' || p[2] == 'E') &&
+        (p[3] == 'y' || p[3] == 'Y')) {
+        p += 4;
+    } else {
+        return false;
     }
-    norm[o] = '\0';
-
-    for (size_t i = 0; i < NAMED_COLOR_COUNT; i++) {
-        /* Table is already lowercase and space-free (with one exception). */
-        char tab[64];
-        size_t j = 0;
-        for (size_t k = 0; NAMED_COLORS[i].name[k] && j + 1 < sizeof(tab); k++) {
-            char c = (char)tolower((unsigned char)NAMED_COLORS[i].name[k]);
-            if (c == ' ') continue;
-            tab[j++] = c;
-        }
-        tab[j] = '\0';
-        if (strcmp(norm, tab) == 0) {
-            *rr = NAMED_COLORS[i].r * 0x101;
-            *gg = NAMED_COLORS[i].g * 0x101;
-            *bb = NAMED_COLORS[i].b * 0x101;
-            return true;
-        }
+    if (!*p) return false;                          /* bare gray/grey */
+    int n = 0;
+    for (; *p; p++) {
+        if (*p < '0' || *p > '9') return false;
+        n = n * 10 + (*p - '0');
+        if (n > 100) return false;
     }
-    return false;
+    /* round-half-up: (n * 255 + 50) / 100. Matches X11 rgb.txt for
+     * gray30=77, gray70=179, gray85=217. gray50 differs by 1 (128 vs
+     * X11's 127), which no real program cares about. */
+    int v8 = (n * 255 + 50) / 100;
+    int v16 = v8 * 0x101;
+    *rr = (unsigned short)v16;
+    *gg = (unsigned short)v16;
+    *bb = (unsigned short)v16;
+    return true;
 }
 
 Status XParseColor(Display *dpy, Colormap cmap, _Xconst char *spec,
@@ -189,8 +155,10 @@ Status XParseColor(Display *dpy, Colormap cmap, _Xconst char *spec,
         ok = parse_hex_triplet(spec + 1, &r, &g, &b);
     } else if (strncmp(spec, "rgb:", 4) == 0) {
         ok = parse_rgb_slashed(spec + 4, &r, &g, &b);
+    } else if (parse_gray_n(spec, &r, &g, &b)) {
+        ok = true;
     } else {
-        ok = lookup_named(spec, &r, &g, &b);
+        ok = emx11_js_parse_color(spec, &r, &g, &b) != 0;
     }
     if (!ok) return 0;
 

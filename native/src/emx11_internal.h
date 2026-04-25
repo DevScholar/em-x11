@@ -228,6 +228,9 @@ extern void emx11_js_open_display(int *conn_id_out,
                                   unsigned int *xid_base_out,
                                   unsigned int *xid_mask_out);
 extern void emx11_js_close_display(int conn_id);
+/* Shared root window. Host owns the single root; every client's
+ * XOpenDisplay asks for its XID instead of minting a local root. */
+extern Window emx11_js_get_root_window(void);
 
 extern void emx11_js_window_create(int conn_id, Window id, Window parent,
                                    int x, int y,
@@ -330,5 +333,18 @@ extern void emx11_js_shape_combine_mask(Window dest, Pixmap src,
 /* Internal pixmap accessors (implemented in pixmap.c). */
 Bool          emx11_pixmap_exists(Pixmap id);
 unsigned int  emx11_pixmap_depth(Pixmap id);
+
+/* Parse a CSS / X11 colour name (e.g. "slategrey", "gray85",
+ * "rebeccapurple") by delegating to the browser's own colour parser.
+ * Writes 16-bit per-channel values on success -- same precision as
+ * XColor's red/green/blue fields. Returns 1 on success, 0 if the
+ * name isn't recognised or no Host is installed. "rgb:R/G/B" and
+ * "#RRGGBB" forms are handled in C; this bridge is only for bare
+ * names, which are where the CSS spec's complete table saves us
+ * from shipping an rgb.txt of our own. */
+extern Status emx11_js_parse_color(const char *name,
+                                   unsigned short *red_out,
+                                   unsigned short *green_out,
+                                   unsigned short *blue_out);
 
 #endif /* EMX11_INTERNAL_H */

@@ -63,11 +63,18 @@ const MAX_PIXMAP_EDGE = 4096;
 
 /* XID layout: top 3 bits always 0 (x11protocol.txt §935). We dedicate
  * the low 0x00200000 slot (conn_id=0, 2 M IDs) to Host-owned resources
- * -- root window, default cursor, etc. -- so no client can ever forge
- * one. Real connections start at conn_id=1. */
+ * -- root window, default cursor, the weave pixmap -- so no client can
+ * ever forge one. Real connections start at conn_id=1. */
 const XID_RANGE_BITS = 21;
 const XID_PER_CONN = 1 << XID_RANGE_BITS;         // 0x00200000
 const XID_MASK = XID_PER_CONN - 1;                // 0x001FFFFF
+
+/* Well-known XIDs for Host-owned resources. Clients learn the root
+ * window's XID through the get_root_window bridge during XOpenDisplay
+ * and put a local shadow entry in their EmxWindow table pointing at
+ * it -- the Host keeps the authoritative compositor record. */
+const HOST_ROOT_ID = 0x00000001;
+const HOST_WEAVE_PIXMAP_ID = 0x00000002;
 
 /* X event-type numerics we send to the C side via emx11_push_*_event. */
 const X_ButtonPress = 4;
@@ -118,6 +125,50 @@ export class Host implements EmX11Host {
     });
 
     this.attachInputBridge();
+    this.installSharedRoot();
+  }
+
+  /** Create the single root window at Host-owned XID `HOST_ROOT_ID` and
+   *  attach the classic X weave as its background_pixmap. Called once
+   *  from the constructor; every client's XOpenDisplay then hands back
+   *  this same XID rather than minting a per-connection root (which
+   *  caused background clicks to hit the last-loaded wasm's root in
+   *  Step 2). The compositor's flat window list still works because
+   *  this root inserts first and stays at the bottom of z-order. */
+  private installSharedRoot(): void {
+    const w = this.canvas.cssWidth;
+    const h = this.canvas.cssHeight;
+    this.compositor.addWindow(HOST_ROOT_ID, 0, 0, 0, w, h, 0xFFFFFF);
+    this.compositor.mapWindow(HOST_ROOT_ID);
+    this.windowToConn.set(HOST_ROOT_ID, 0);            // conn_id=0 = Host
+
+    /* Weave: 2×2 OffscreenCanvas, pure black + pure white on the
+     * diagonal. Historically this dithered to gray on CRTs at the
+     * period's DPI; on HiDPI displays you see the checker clearly,
+     * which is authentic to the era. */
+    const weave = new OffscreenCanvas(2, 2);
+    const wctx = weave.getContext('2d');
+    if (wctx) {
+      wctx.fillStyle = '#000';
+      wctx.fillRect(0, 0, 2, 2);
+      wctx.fillStyle = '#FFF';
+      wctx.fillRect(0, 0, 1, 1);
+      wctx.fillRect(1, 1, 1, 1);
+    }
+    this.pixmaps.set(HOST_WEAVE_PIXMAP_ID, {
+      canvas: weave,
+      ctx: wctx!,
+      width: 2,
+      height: 2,
+      depth: 24,
+    });
+    this.compositor.setWindowBackgroundPixmap(HOST_ROOT_ID, HOST_WEAVE_PIXMAP_ID);
+  }
+
+  /** XID of the one shared root window. Queried by every client's
+   *  XOpenDisplay through the emx11_js_get_root_window bridge. */
+  getRootWindow(): number {
+    return HOST_ROOT_ID;
   }
 
   install(): void {
@@ -428,10 +479,24 @@ export class Host implements EmX11Host {
 
   /** Resolve the Module that owns a window. Returns null if the window
    *  isn't tracked, if the owning connection has no Module (legacy
-   *  headless case), or if the connection was closed. */
+   *  headless case), or if the connection was closed.
+   *
+   *  Host-owned windows (conn_id=0, currently just the shared root)
+   *  have no "owner" Module. As a temporary fallback we route their
+   *  events to the first real connection -- which in the session-demo
+   *  launch convention is twm, the window manager. Step B replaces
+   *  this with an XSelectInput subscription table on the Host side so
+   *  MapRequest / SubstructureRedirect events are dispatched to the
+   *  actual holder(s), not a positional heuristic. */
   private moduleForWindow(winId: number): EmscriptenModule | null {
     const connId = this.windowToConn.get(winId);
     if (connId === undefined) return null;
+    if (connId === 0) {
+      for (const conn of this.connections.values()) {
+        if (conn.module) return conn.module;
+      }
+      return null;
+    }
     const conn = this.connections.get(connId);
     return conn?.module ?? null;
   }

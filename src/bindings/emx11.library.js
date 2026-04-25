@@ -39,6 +39,15 @@ addToLibrary({
     globalThis.__EMX11__ && globalThis.__EMX11__.closeDisplay(connId);
   },
 
+  // Shared root window. Every client's XOpenDisplay learns the root's
+  // XID this way rather than minting its own: one root, one compositor
+  // entry, one weave. Returns a 32-bit XID (always Host-reserved low
+  // range, top 3 bits zero per x11protocol.txt §935).
+  emx11_js_get_root_window: function () {
+    if (!globalThis.__EMX11__) return 0;
+    return globalThis.__EMX11__.getRootWindow() >>> 0;
+  },
+
   emx11_js_window_create: function (connId, id, parent, x, y, w, h, background) {
     globalThis.__EMX11__ &&
       globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, background);
@@ -131,7 +140,10 @@ addToLibrary({
 
   // Font measurement. Runs in a lazily-created offscreen 2D context so we
   // don't depend on a DOM canvas being mounted (helps headless tests too).
-  // Writes directly into C buffers via HEAP32.
+  // Writes directly into C buffers via HEAP32. willReadFrequently:true is
+  // important here: emx11_js_parse_color shares this context and does
+  // getImageData per colour, which without the hint forces a GPU->CPU
+  // readback every call and makes Chrome log a performance warning.
   emx11_js_measure_font: function (fontPtr, ascentPtr, descentPtr, maxWidthPtr, widthsPtr) {
     var g = globalThis;
     if (!g.__emx11_measureCtx__) {
@@ -141,7 +153,9 @@ addToLibrary({
           : typeof document !== 'undefined'
             ? document.createElement('canvas')
             : null;
-      g.__emx11_measureCtx__ = c ? c.getContext('2d') : null;
+      g.__emx11_measureCtx__ = c
+        ? c.getContext('2d', { willReadFrequently: true })
+        : null;
     }
     var ctx = g.__emx11_measureCtx__;
     var fallbackWidth = 8;
@@ -197,7 +211,9 @@ addToLibrary({
           : typeof document !== 'undefined'
             ? document.createElement('canvas')
             : null;
-      g.__emx11_measureCtx__ = c ? c.getContext('2d') : null;
+      g.__emx11_measureCtx__ = c
+        ? c.getContext('2d', { willReadFrequently: true })
+        : null;
     }
     var ctx = g.__emx11_measureCtx__;
     if (!ctx) return length * 8; // fallback
@@ -257,5 +273,52 @@ addToLibrary({
   emx11_js_shape_combine_mask: function (destId, srcId, xOff, yOff, op) {
     globalThis.__EMX11__ &&
       globalThis.__EMX11__.onShapeCombineMask(destId, srcId, xOff, yOff, op);
+  },
+
+  // Named-colour parse. XParseColor already handles "#RRGGBB" and
+  // "rgb:R/G/B" in C; bare names (the ~600 entries of X11's rgb.txt --
+  // "slategrey", "gray85", "rebeccapurple", etc.) we delegate to the
+  // browser. CSS3's <named-color> set is literally the X11 table with
+  // a few additions, so the browser's parser is authoritative. Returns
+  // 1 on success with 16-bit R/G/B written to the caller's pointers
+  // (matching XColor's field precision); 0 for invalid names.
+  emx11_js_parse_color: function (namePtr, rPtr, gPtr, bPtr) {
+    if (namePtr === 0) return 0;
+    var name = UTF8ToString(namePtr);
+    // Fast reject: non-colour values (currentcolor, transparent, bad
+    // syntax) that fillStyle would silently ignore.
+    if (typeof CSS !== 'undefined' && CSS.supports &&
+        !CSS.supports('color', name)) {
+      return 0;
+    }
+    var g = globalThis;
+    if (!g.__emx11_measureCtx__) {
+      var c =
+        typeof OffscreenCanvas !== 'undefined'
+          ? new OffscreenCanvas(1, 1)
+          : typeof document !== 'undefined'
+            ? document.createElement('canvas')
+            : null;
+      g.__emx11_measureCtx__ = c
+        ? c.getContext('2d', { willReadFrequently: true })
+        : null;
+    }
+    var ctx = g.__emx11_measureCtx__;
+    if (!ctx) return 0;
+    // Fallback validity check for browsers without CSS.supports:
+    // pick a sentinel, read it back, then attempt the caller's name;
+    // fillStyle silently retains the prior value for invalid inputs.
+    ctx.fillStyle = '#010203';
+    var sentinel = ctx.fillStyle;
+    ctx.fillStyle = name;
+    if (ctx.fillStyle === sentinel) return 0;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillRect(0, 0, 1, 1);
+    var p = ctx.getImageData(0, 0, 1, 1).data;
+    // Scale 8-bit to 16-bit the same way XParseColor's hex paths do.
+    HEAPU16[rPtr >> 1] = (p[0] * 0x101) & 0xFFFF;
+    HEAPU16[gPtr >> 1] = (p[1] * 0x101) & 0xFFFF;
+    HEAPU16[bPtr >> 1] = (p[2] * 0x101) & 0xFFFF;
+    return 1;
   },
 });
