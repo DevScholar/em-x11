@@ -25,6 +25,7 @@ set(EMX11_SOURCES
     src/wm.c
     src/xrm.c
     src/xt_stubs.c
+    src/xaw_stubs.c
     src/ext/shape.c
 )
 

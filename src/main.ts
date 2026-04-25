@@ -3,7 +3,11 @@
  * Real application UX is per-demo under demos/<name>/.
  */
 
-const demos = [{ name: 'hello', description: 'Minimal window with a filled rectangle' }];
+const demos = [
+  { name: 'hello', description: 'Minimal window with a filled rectangle' },
+  { name: 'xt-hello', description: 'libXt Shell + Core child widget' },
+  { name: 'xaw-hello', description: 'libXaw Label widget on top of Xt' },
+];
 
 const root = document.getElementById('app');
 if (root) {
