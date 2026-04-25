@@ -300,15 +300,8 @@ export class Compositor {
     ctx.clip();
   }
 
-  /** Build a canvas path for an X-semantics arc.
-   *
-   *  X arc arguments: (x, y, w, h) is the axis-aligned bounding box of the
-   *  ellipse; angle1 is the start angle and angle2 is the extent, both in
-   *  1/64ths of a degree, measured counterclockwise from 3 o'clock.
-   *
-   *  Canvas 2D ellipse arguments: centre + radii, angles in radians
-   *  measured clockwise from 3 o'clock. We flip the sign on angles to
-   *  switch rotational direction. */
+  /** Build a canvas path for an X-semantics arc. Exposed as a free
+   *  function below so Host can reuse it for pixmap drawing. */
   private arcPath(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -318,15 +311,7 @@ export class Compositor {
     angle1_64: number,
     angle2_64: number,
   ): void {
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-    const rx = w / 2;
-    const ry = h / 2;
-    const toRad = Math.PI / (180 * 64);
-    const start = -angle1_64 * toRad;
-    const end = -(angle1_64 + angle2_64) * toRad;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, start, end, angle2_64 > 0);
+    arcPath(ctx, x, y, w, h, angle1_64, angle2_64);
   }
 
   private markDirty(): void {
@@ -355,4 +340,36 @@ export class Compositor {
     }
     this.dirty = false;
   }
+}
+
+/** Build a canvas path for an X-semantics arc.
+ *
+ *  X arc arguments: (x, y, w, h) is the axis-aligned bounding box of the
+ *  ellipse; angle1 is the start angle and angle2 is the extent, both in
+ *  1/64ths of a degree, measured counterclockwise from 3 o'clock.
+ *
+ *  Canvas 2D ellipse arguments: centre + radii, angles in radians
+ *  measured clockwise from 3 o'clock. We flip the sign on angles to
+ *  switch rotational direction.
+ *
+ *  Exported so Host can paint arcs into pixmap OffscreenCanvases with the
+ *  same semantics as the window path. */
+export function arcPath(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  angle1_64: number,
+  angle2_64: number,
+): void {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const rx = w / 2;
+  const ry = h / 2;
+  const toRad = Math.PI / (180 * 64);
+  const start = -angle1_64 * toRad;
+  const end = -(angle1_64 + angle2_64) * toRad;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, start, end, angle2_64 > 0);
 }

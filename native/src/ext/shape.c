@@ -150,12 +150,27 @@ void XShapeCombineRectangles(Display *dpy, Window dest, int dest_kind,
 
 void XShapeCombineMask(Display *dpy, Window dest, int dest_kind,
                       int x_off, int y_off, Pixmap src, int op) {
-    /* Pixmaps are not yet implemented in em-x11, so we have no way to
-     * decode the bitmap into a shape. Accepted as a no-op for now; the
-     * window remains rectangular. xeyes typically uses this, so this
-     * is the primary TODO blocking xeyes visual correctness. */
-    (void)dpy; (void)dest; (void)dest_kind;
-    (void)x_off; (void)y_off; (void)src; (void)op;
+    /* Only ShapeBounding is wired through rendering + hit-testing right
+     * now; ShapeClip/ShapeInput are accepted silently by
+     * XShapeCombineRectangles so we mirror that here. */
+    if (dest_kind != ShapeBounding) return;
+
+    /* src==None means "no mask" -- the window becomes rectangular. */
+    if (src == None) {
+        EmxWindow *win = emx11_window_find(dpy, dest);
+        if (!win) return;
+        clear_shape(win);
+        push_shape_to_js(win);
+        return;
+    }
+
+    if (!emx11_pixmap_exists(src)) return;
+
+    /* Delegate the bits-to-rectangles work to the JS side: the pixmap
+     * backing lives there (OffscreenCanvas), and getImageData + row
+     * run-length encoding is cheaper done in one place than streaming
+     * every pixel across the wasm boundary. */
+    emx11_js_shape_combine_mask(dest, src, x_off, y_off, op);
 }
 
 void XShapeCombineShape(Display *dpy, Window dest, int dest_kind,

@@ -134,26 +134,14 @@ int XSetRegion(Display *dpy, GC gc, Region r) {
     (void)dpy; (void)gc; (void)r; return 1;
 }
 
-/* -- Pixmap stubs.
- * Pixmap is a server-side offscreen drawable. We have no offscreen
- * backend yet -- everything paints directly to the one canvas -- so
- * these are link-time placeholders. Xaw's Label/Command paths only
- * use Pixmaps when the client provides a bitmap resource, which the
- * default ASCII-label path does not. If a demo starts using Pixmaps,
- * these get promoted to real implementations backed by an ImageData
- * or OffscreenCanvas. */
-
-static XID g_pixmap_next = 0x30000001;
-
-Pixmap XCreatePixmap(Display *dpy, Drawable d, unsigned int w, unsigned int h,
-                     unsigned int depth) {
-    (void)dpy; (void)d; (void)w; (void)h; (void)depth;
-    return (Pixmap)(g_pixmap_next++);
-}
-
-int XFreePixmap(Display *dpy, Pixmap pixmap) {
-    (void)dpy; (void)pixmap; return 1;
-}
+/* -- Pixmap-adjacent stubs.
+ * XCreatePixmap / XFreePixmap now live in pixmap.c with real backing
+ * canvases. XCopyArea / XCopyPlane remain stubs: once we wire canvas-
+ * to-canvas blits they'll move out of here too. The BitmapData loaders
+ * route through the real XCreatePixmap so the id is valid (and cleaned
+ * up by XFreePixmap), but the bitmap bits themselves are not painted
+ * into the pixmap yet -- that matters only when an icon or shape mask
+ * actually feeds these bits back into draw or SHAPE calls. */
 
 int XCopyArea(Display *dpy, Drawable src, Drawable dst, GC gc,
               int src_x, int src_y, unsigned int width, unsigned int height,
@@ -176,9 +164,8 @@ Pixmap XCreatePixmapFromBitmapData(Display *dpy, Drawable d, char *data,
                                    unsigned int w, unsigned int h,
                                    unsigned long fg, unsigned long bg,
                                    unsigned int depth) {
-    (void)dpy; (void)d; (void)data; (void)w; (void)h;
-    (void)fg; (void)bg; (void)depth;
-    return (Pixmap)(g_pixmap_next++);
+    (void)data; (void)fg; (void)bg;
+    return XCreatePixmap(dpy, d, w, h, depth);
 }
 
 int XReadBitmapFileData(_Xconst char *filename, unsigned int *w,

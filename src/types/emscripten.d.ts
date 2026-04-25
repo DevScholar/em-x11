@@ -148,6 +148,21 @@ export interface EmX11Host {
   /** Latest pointer position in canvas CSS pixels. Read by XQueryPointer;
    *  updated by Host on every canvas mousemove regardless of hit-test. */
   getPointerXY(): Point;
+  /** Pixmap lifecycle. Each Pixmap is backed by an OffscreenCanvas on the
+   *  host; create installs the id, destroy drops the reference. depth=1
+   *  pixmaps are the SHAPE-mask path; other depths are accepted but only
+   *  XFillRectangle / XFillArc are currently routed to their ctx. */
+  onPixmapCreate(id: number, width: number, height: number, depth: number): void;
+  onPixmapDestroy(id: number): void;
+  /** XShapeCombineMask: read the source pixmap's bits, convert to
+   *  bounding rectangles, and install on the destination window. */
+  onShapeCombineMask(
+    destId: number,
+    srcId: number,
+    xOff: number,
+    yOff: number,
+    op: number,
+  ): void;
 }
 
 declare global {

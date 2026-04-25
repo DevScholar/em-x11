@@ -267,4 +267,21 @@ extern void emx11_js_window_shape(Window id, const int *rects, int count);
  * responsibility -- we just read the two ints back. */
 extern void emx11_js_pointer_xy(int *x_out, int *y_out);
 
+/* Pixmap lifecycle. Create installs an OffscreenCanvas on the JS side,
+ * keyed by id; destroy drops the reference so its backing bitmap can
+ * be reclaimed. depth is 1 for SHAPE masks, 24/32 for color pixmaps. */
+extern void emx11_js_pixmap_create(Pixmap id, int width, int height,
+                                   int depth);
+extern void emx11_js_pixmap_destroy(Pixmap id);
+
+/* SHAPE: decode a 1-bit pixmap into a bounding region and apply it to
+ * the given window. op mirrors ShapeSet / ShapeUnion / etc. (op values
+ * from X11/extensions/shape.h). */
+extern void emx11_js_shape_combine_mask(Window dest, Pixmap src,
+                                        int x_off, int y_off, int op);
+
+/* Internal pixmap accessors (implemented in pixmap.c). */
+Bool          emx11_pixmap_exists(Pixmap id);
+unsigned int  emx11_pixmap_depth(Pixmap id);
+
 #endif /* EMX11_INTERNAL_H */

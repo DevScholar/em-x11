@@ -11,28 +11,50 @@
  */
 
 import { RootCanvas } from './canvas.js';
+import { pixelToCssColor } from './canvas.js';
 import type { RootCanvasOptions } from './canvas.js';
-import { Compositor } from './compositor.js';
+import { Compositor, arcPath } from './compositor.js';
 import type { EmX11Host, Point, ShapeRect } from '../types/emscripten.js';
 
 export type HostOptions = RootCanvasOptions;
 
+interface Pixmap {
+  canvas: OffscreenCanvas;
+  ctx: OffscreenCanvasRenderingContext2D;
+  width: number;
+  height: number;
+  depth: number;
+}
+
+const MAX_PIXMAP_EDGE = 4096;
+
 export class Host implements EmX11Host {
   readonly canvas: RootCanvas;
   readonly compositor: Compositor;
-  private pointerX = 0;
-  private pointerY = 0;
+  private pointerX: number;
+  private pointerY: number;
+  private readonly pixmaps = new Map<number, Pixmap>();
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
     this.compositor = new Compositor(this.canvas);
 
+    /* Default the pointer to the canvas centre so the first XQueryPointer
+     * after XtRealizeWidget -- which fires before the user has had a
+     * chance to move the mouse -- returns something sensible instead of
+     * the top-left corner. xeyes in particular snaps its pupils here
+     * immediately. */
+    this.pointerX = (this.canvas.element.clientWidth / 2) | 0;
+    this.pointerY = (this.canvas.element.clientHeight / 2) | 0;
+
     /* Track the last-seen pointer position at the host level so polling
      * callers (XQueryPointer; xeyes uses this every 50ms via an Xt timer)
      * can read it without going through the event bridge's hit test.
-     * We listen on the canvas directly -- distinct from EventBridge, which
-     * filters by which window is under the pointer. */
-    this.canvas.element.addEventListener('mousemove', (e) => {
+     * We listen on `window` rather than the canvas so mouse motion
+     * outside the canvas (over browser chrome, over another page region)
+     * still updates the cached position -- pupils that track the mouse
+     * off-canvas look better than pupils that freeze on exit. */
+    window.addEventListener('mousemove', (e) => {
       const rect = this.canvas.element.getBoundingClientRect();
       this.pointerX = (e.clientX - rect.left) | 0;
       this.pointerY = (e.clientY - rect.top) | 0;
@@ -78,6 +100,11 @@ export class Host implements EmX11Host {
   }
 
   onFillRect(id: number, x: number, y: number, w: number, h: number, color: number): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapFillRect(pm, x, y, w, h, color);
+      return;
+    }
     this.compositor.fillRect(id, x, y, w, h, color);
   }
 
@@ -90,6 +117,11 @@ export class Host implements EmX11Host {
     color: number,
     lineWidth: number,
   ): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapLine(pm, x1, y1, x2, y2, color, lineWidth);
+      return;
+    }
     this.compositor.drawLine(id, x1, y1, x2, y2, color, lineWidth);
   }
 
@@ -104,6 +136,11 @@ export class Host implements EmX11Host {
     color: number,
     lineWidth: number,
   ): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapArc(pm, x, y, w, h, angle1, angle2, color, lineWidth);
+      return;
+    }
     this.compositor.drawArc(id, x, y, w, h, angle1, angle2, color, lineWidth);
   }
 
@@ -117,6 +154,11 @@ export class Host implements EmX11Host {
     angle2: number,
     color: number,
   ): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapArc(pm, x, y, w, h, angle1, angle2, color, null);
+      return;
+    }
     this.compositor.fillArc(id, x, y, w, h, angle1, angle2, color);
   }
 
@@ -148,5 +190,144 @@ export class Host implements EmX11Host {
 
   onWindowShape(id: number, rects: ShapeRect[]): void {
     this.compositor.setWindowShape(id, rects);
+  }
+
+  /* -- Pixmap lifecycle --------------------------------------------------- */
+
+  onPixmapCreate(id: number, width: number, height: number, depth: number): void {
+    if (width <= 0 || height <= 0) return;
+    if (width > MAX_PIXMAP_EDGE || height > MAX_PIXMAP_EDGE) {
+      console.warn(
+        `em-x11: refusing pixmap ${id} at ${width}x${height} (cap ${MAX_PIXMAP_EDGE})`,
+      );
+      return;
+    }
+    const oc = new OffscreenCanvas(width, height);
+    const ctx = oc.getContext('2d');
+    if (!ctx) return;
+    this.pixmaps.set(id, { canvas: oc, ctx, width, height, depth });
+  }
+
+  onPixmapDestroy(id: number): void {
+    this.pixmaps.delete(id);
+  }
+
+  /* -- SHAPE: decode pixmap bits into a bounding region ------------------ */
+
+  onShapeCombineMask(
+    destId: number,
+    srcId: number,
+    xOff: number,
+    yOff: number,
+    _op: number,
+  ): void {
+    const pm = this.pixmaps.get(srcId);
+    if (!pm) return;
+
+    const image = pm.ctx.getImageData(0, 0, pm.width, pm.height);
+    const data = image.data;
+    const rects: ShapeRect[] = [];
+
+    /* Row-wise run-length encoding: each horizontal run of "set" pixels
+     * becomes one 1-pixel-tall rectangle. Two eyes @ 200x200 generate
+     * roughly 2 * 2 * radius rects; fine for the compositor's clip path.
+     * We could do better with a proper region coalescing pass, but every
+     * frame re-applies the clip, so O(h) rects per shape change is OK. */
+    for (let y = 0; y < pm.height; y++) {
+      let runStart = -1;
+      for (let x = 0; x < pm.width; x++) {
+        const alpha = data[(y * pm.width + x) * 4 + 3];
+        if (alpha !== undefined && alpha > 0) {
+          if (runStart < 0) runStart = x;
+        } else if (runStart >= 0) {
+          rects.push({ x: runStart + xOff, y: y + yOff, w: x - runStart, h: 1 });
+          runStart = -1;
+        }
+      }
+      if (runStart >= 0) {
+        rects.push({
+          x: runStart + xOff,
+          y: y + yOff,
+          w: pm.width - runStart,
+          h: 1,
+        });
+      }
+    }
+
+    this.compositor.setWindowShape(destId, rects);
+  }
+
+  /* -- Pixmap drawing helpers -------------------------------------------- */
+
+  /** Depth-1 pixmaps treat foreground==0 as "bit off" (transparent) and
+   *  anything else as "bit on" (opaque). Color pixmaps paint the value
+   *  directly as RGB. */
+  private paintPixmapFillRect(
+    pm: Pixmap,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    color: number,
+  ): void {
+    if (pm.depth === 1 && color === 0) {
+      pm.ctx.clearRect(x, y, w, h);
+      return;
+    }
+    pm.ctx.fillStyle = pixelToCssColor(color);
+    pm.ctx.fillRect(x, y, w, h);
+  }
+
+  private paintPixmapArc(
+    pm: Pixmap,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    angle1: number,
+    angle2: number,
+    color: number,
+    lineWidth: number | null,
+  ): void {
+    pm.ctx.save();
+    if (pm.depth === 1 && color === 0) {
+      /* "Erase" -- paint the arc with destination-out so any previously
+       * set bits inside the ellipse become unset. */
+      pm.ctx.globalCompositeOperation = 'destination-out';
+      pm.ctx.fillStyle = '#000';
+    } else if (lineWidth === null) {
+      pm.ctx.fillStyle = pixelToCssColor(color);
+    } else {
+      pm.ctx.strokeStyle = pixelToCssColor(color);
+      pm.ctx.lineWidth = lineWidth || 1;
+    }
+    arcPath(pm.ctx, x, y, w, h, angle1, angle2);
+    if (lineWidth === null) pm.ctx.fill();
+    else pm.ctx.stroke();
+    pm.ctx.restore();
+  }
+
+  private paintPixmapLine(
+    pm: Pixmap,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    color: number,
+    lineWidth: number,
+  ): void {
+    pm.ctx.save();
+    if (pm.depth === 1 && color === 0) {
+      pm.ctx.globalCompositeOperation = 'destination-out';
+      pm.ctx.strokeStyle = '#000';
+    } else {
+      pm.ctx.strokeStyle = pixelToCssColor(color);
+    }
+    pm.ctx.lineWidth = lineWidth || 1;
+    pm.ctx.beginPath();
+    pm.ctx.moveTo(x1 + 0.5, y1 + 0.5);
+    pm.ctx.lineTo(x2 + 0.5, y2 + 0.5);
+    pm.ctx.stroke();
+    pm.ctx.restore();
   }
 }

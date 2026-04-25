@@ -196,4 +196,25 @@ addToLibrary({
     HEAP32[xPtr >> 2] = pt.x | 0;
     HEAP32[yPtr >> 2] = pt.y | 0;
   },
+
+  // Pixmap lifecycle: each allocation gets its own OffscreenCanvas.
+  // Drawing calls that target this id land on the pixmap's ctx via
+  // the same emx11_js_fill_rect / fill_arc bindings (the host
+  // dispatches).
+  emx11_js_pixmap_create: function (id, width, height, depth) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onPixmapCreate(id, width, height, depth);
+  },
+
+  emx11_js_pixmap_destroy: function (id) {
+    globalThis.__EMX11__ && globalThis.__EMX11__.onPixmapDestroy(id);
+  },
+
+  // XShapeCombineMask(dest_window, src_pixmap): read the pixmap's
+  // ImageData, convert opaque cells into row strips, and install the
+  // resulting region on the destination window.
+  emx11_js_shape_combine_mask: function (destId, srcId, xOff, yOff, op) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onShapeCombineMask(destId, srcId, xOff, yOff, op);
+  },
 });

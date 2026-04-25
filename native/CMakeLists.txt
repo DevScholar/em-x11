@@ -24,6 +24,7 @@ set(EMX11_SOURCES
     src/font.c
     src/wm.c
     src/xrm.c
+    src/pixmap.c
     src/xt_stubs.c
     src/xaw_stubs.c
     src/ext/shape.c
