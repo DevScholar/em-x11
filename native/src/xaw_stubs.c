@@ -1,13 +1,14 @@
 /*
- * Xlib/Xt stubs needed specifically by libXaw (and its Xmu dependency).
+ * Xlib/Xt stubs needed by libXaw and by in-tree demos (currently xeyes).
  *
  * Split out from xt_stubs.c so the dependency chain is obvious: libXt
- * needs what's in xt_stubs.c; libXaw needs everything here *plus* what
- * xt_stubs provides. Many of these are "link-time presence, runtime
- * noop" -- Xaw's Label widget references XCopyPlane in its bitmap
- * rendering path, but an ASCII label never actually reaches that
- * branch. The stubs keep the linker happy without pretending to
- * implement machinery we have not yet built.
+ * needs what's in xt_stubs.c; libXaw and the demos need everything here
+ * *plus* what xt_stubs provides. Many of these are "link-time presence,
+ * runtime noop" -- Xaw's Label widget references XCopyPlane in its
+ * bitmap rendering path, xeyes references XIQueryVersion for XInput2
+ * detection, but neither actually reaches a meaningful runtime code
+ * path in em-x11 today. The stubs keep the linker happy without
+ * pretending to implement machinery we have not yet built.
  *
  * Anything that starts to matter at runtime gets promoted from here
  * to a real implementation file.
@@ -16,6 +17,7 @@
 #include "emx11_internal.h"
 
 #include <X11/Xutil.h>
+#include <X11/extensions/XInput2.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -224,20 +226,27 @@ int XUndefineCursor(Display *dpy, Window w) {
 }
 
 /* -- Query stubs. XQueryPointer is called by Xaw's Tip widget for
- * tooltip placement. Return "pointer at (0,0) with no buttons" -- the
- * tooltip will just render off-screen, which is fine for now. */
+ * tooltip placement and by xeyes every 50ms for pupil tracking.
+ * Read the latest canvas pointer position from the JS host; child
+ * hit-testing isn't wired yet, so child_return stays None. */
 
 Bool XQueryPointer(Display *dpy, Window w, Window *root_return,
                    Window *child_return, int *root_x_return, int *root_y_return,
                    int *win_x_return, int *win_y_return,
                    unsigned int *mask_return) {
     (void)w;
+    int px = 0, py = 0;
+    emx11_js_pointer_xy(&px, &py);
     if (root_return)     *root_return     = dpy->screens[0].root;
     if (child_return)    *child_return    = None;
-    if (root_x_return)   *root_x_return   = 0;
-    if (root_y_return)   *root_y_return   = 0;
-    if (win_x_return)    *win_x_return    = 0;
-    if (win_y_return)    *win_y_return    = 0;
+    if (root_x_return)   *root_x_return   = px;
+    if (root_y_return)   *root_y_return   = py;
+    /* No per-window translation yet: hand back the root-relative pair
+     * as the window-relative pair too. xeyes uses XTranslateCoordinates
+     * afterward to map to its own widget, so the compounded offset
+     * still works out. */
+    if (win_x_return)    *win_x_return    = px;
+    if (win_y_return)    *win_y_return    = py;
     if (mask_return)     *mask_return     = 0;
     return True;
 }
@@ -472,4 +481,62 @@ int XmbTextPropertyToTextList(Display *dpy, const XTextProperty *tp,
     *list_return = list;
     *count_return = 1;
     return 0;                                   /* Success */
+}
+
+/* -- xeyes-specific stubs -------------------------------------------------- */
+
+/* XCreateBitmapFromData is the single-plane sibling of
+ * XCreatePixmapFromBitmapData (defined further up). xeyes uses it to mint
+ * icon/mask bitmaps; since em-x11 has no pixmap backend yet, we mint a
+ * unique id and return it unchanged -- the shape path that would actually
+ * decode these bits is a future Pixmap milestone. */
+
+extern Pixmap XCreatePixmapFromBitmapData(Display *, Drawable, char *,
+                                          unsigned int, unsigned int,
+                                          unsigned long, unsigned long,
+                                          unsigned int);
+
+Pixmap XCreateBitmapFromData(Display *dpy, Drawable d, _Xconst char *data,
+                             unsigned int width, unsigned int height) {
+    return XCreatePixmapFromBitmapData(dpy, d, (char *)data, width, height,
+                                       1, 0, 1);
+}
+
+/* Audible bell -- no sound output in browser-land. xeyes rings it when an
+ * unexpected ClientMessage reaches its quit action. */
+int XBell(Display *dpy, int percent) {
+    (void)dpy; (void)percent;
+    return 1;
+}
+
+/* XInput2 version negotiation. xeyes probes for XI2 and, if present, uses
+ * XIRawMotion on the root window to track the pointer without polling.
+ * We do not implement XI2; returning BadRequest routes xeyes to the
+ * XtAppAddTimeOut polling path, which we do support. */
+Status XIQueryVersion(Display *dpy, int *major_version_inout,
+                      int *minor_version_inout) {
+    (void)dpy; (void)major_version_inout; (void)minor_version_inout;
+    return BadRequest;
+}
+
+/* Never reached at runtime (has_xi2() returns 0 above), but xeyes calls
+ * it from select_xi2_events() which is linked even when never invoked. */
+int XISelectEvents(Display *dpy, Window win, XIEventMask *masks,
+                   int num_masks) {
+    (void)dpy; (void)win; (void)masks; (void)num_masks;
+    return Success;
+}
+
+/* -- Locale -- libXt's Initialize.c calls these during XtAppInitialize.
+ * Our font path is UTF-8 via canvas.fillText regardless of locale, so we
+ * report "locale unsupported" (returns False) and accept any modifier
+ * string verbatim. Xt treats False as "fall back to C locale". */
+
+Bool XSupportsLocale(void) {
+    return False;
+}
+
+char *XSetLocaleModifiers(_Xconst char *modifier_list) {
+    (void)modifier_list;
+    return (char *)"";
 }

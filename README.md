@@ -54,7 +54,7 @@ code dequeues via `XNextEvent`.
 │   └────┬────────────────────────────────────┘               │
 │        │ <X11/Xlib.h>                                       │
 │   ┌────┴────────────────────────────────────┐               │
-│   │  client program (demos/, xapps/)        │               │
+│   │  client program (demos/, third-party/) │               │
 │   └─────────────────────────────────────────┘               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -76,9 +76,8 @@ em-x11/
 │   ├── loader/
 │   └── types/
 ├── demos/              # In-tree demos (hello, xt-hello, xaw-hello)
-├── xapps/              # Target third-party X programs (xeyes, xclock)
-├── third-party/        # libXt / libXaw / libXmu / libXpm (gitignored;
-│                       # rehydrated by scripts/fetch-third-party.sh)
+├── third-party/        # libXt / libXaw / libXmu / libXpm + xeyes / xclock
+│                       # (gitignored; rehydrated by scripts/fetch-third-party.sh)
 ├── scripts/            # Build-support scripts + third-party overlays
 │                       # (CMakeLists / config.h / patches for third-party)
 ├── references/         # READ-ONLY: XFree86/Xming/x11-docs source trees

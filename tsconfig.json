@@ -33,5 +33,5 @@
     }
   },
   "include": ["src/**/*.ts", "demos/**/*.ts"],
-  "exclude": ["node_modules", "dist", "build", "references", "native", "xapps"]
+  "exclude": ["node_modules", "dist", "build", "references", "native", "third-party"]
 }

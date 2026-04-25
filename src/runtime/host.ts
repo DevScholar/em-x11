@@ -20,14 +20,31 @@ export type HostOptions = RootCanvasOptions;
 export class Host implements EmX11Host {
   readonly canvas: RootCanvas;
   readonly compositor: Compositor;
+  private pointerX = 0;
+  private pointerY = 0;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
     this.compositor = new Compositor(this.canvas);
+
+    /* Track the last-seen pointer position at the host level so polling
+     * callers (XQueryPointer; xeyes uses this every 50ms via an Xt timer)
+     * can read it without going through the event bridge's hit test.
+     * We listen on the canvas directly -- distinct from EventBridge, which
+     * filters by which window is under the pointer. */
+    this.canvas.element.addEventListener('mousemove', (e) => {
+      const rect = this.canvas.element.getBoundingClientRect();
+      this.pointerX = (e.clientX - rect.left) | 0;
+      this.pointerY = (e.clientY - rect.top) | 0;
+    });
   }
 
   install(): void {
     globalThis.__EMX11__ = this;
+  }
+
+  getPointerXY(): Point {
+    return { x: this.pointerX, y: this.pointerY };
   }
 
   onInit(_screenWidth: number, _screenHeight: number): void {

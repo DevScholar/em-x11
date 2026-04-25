@@ -145,6 +145,9 @@ export interface EmX11Host {
   /** SHAPE extension: replace the window's bounding region. An empty
    *  array means "no shape" -- render the whole window rectangle. */
   onWindowShape(id: number, rects: ShapeRect[]): void;
+  /** Latest pointer position in canvas CSS pixels. Read by XQueryPointer;
+   *  updated by Host on every canvas mousemove regardless of hit-test. */
+  getPointerXY(): Point;
 }
 
 declare global {

@@ -23,5 +23,5 @@
     "node": true,
     "es2022": true
   },
-  "ignorePatterns": ["dist", "build", "node_modules", "references", "native", "xapps"]
+  "ignorePatterns": ["dist", "build", "node_modules", "references", "native", "third-party"]
 }

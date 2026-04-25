@@ -36,19 +36,22 @@ have curl
 have tar
 have patch
 
-# Each entry: logical-name  upstream-dir-prefix  version  url-base
-# url-base defaults to the X.Org individual-lib release tree.
+# Each entry: logical-name  upstream-dir-prefix  version  url-base  layout
+# layout=lib  -> upstream has src/ + include/; we copy those (libraries).
+# layout=app  -> upstream is flat (sources at root); we mirror the whole tree.
 LIBS=(
-    "libXt   libXt   1.3.1   https://www.x.org/releases/individual/lib"
-    "libXaw  libXaw  1.0.16  https://www.x.org/releases/individual/lib"
-    "libXmu  libXmu  1.2.1   https://www.x.org/releases/individual/lib"
-    "libXpm  libXpm  3.5.17  https://www.x.org/releases/individual/lib"
+    "libXt   libXt   1.3.1   https://www.x.org/releases/individual/lib  lib"
+    "libXaw  libXaw  1.0.16  https://www.x.org/releases/individual/lib  lib"
+    "libXmu  libXmu  1.2.1   https://www.x.org/releases/individual/lib  lib"
+    "libXpm  libXpm  3.5.17  https://www.x.org/releases/individual/lib  lib"
+    "xeyes   xeyes   1.3.1   https://www.x.org/releases/individual/app  app"
+    "xclock  xclock  1.1.1   https://www.x.org/releases/individual/app  app"
 )
 
 mkdir -p "$THIRD_PARTY_DIR"
 
 fetch_one() {
-    local name="$1" up="$2" ver="$3" url_base="$4"
+    local name="$1" up="$2" ver="$3" url_base="$4" layout="${5:-lib}"
     local tarball="$up-$ver.tar.xz"
     local url="$url_base/$tarball"
     local dst="$THIRD_PARTY_DIR/$name"
@@ -83,10 +86,22 @@ fetch_one() {
     rm -rf "$dst"
     mkdir -p "$dst"
 
-    # Upstream source files we keep verbatim.
-    [ -d "$extracted/src" ]     && cp -r "$extracted/src"     "$dst/src"
-    [ -d "$extracted/include" ] && cp -r "$extracted/include" "$dst/include"
-    [ -f "$extracted/COPYING" ] && cp    "$extracted/COPYING" "$dst/COPYING"
+    # Upstream source files we keep verbatim. Libraries expose src/
+    # and include/; apps ship a flat tree with the .c/.h files at
+    # the root, so mirror the whole extracted directory in that case.
+    case "$layout" in
+        lib)
+            [ -d "$extracted/src" ]     && cp -r "$extracted/src"     "$dst/src"
+            [ -d "$extracted/include" ] && cp -r "$extracted/include" "$dst/include"
+            [ -f "$extracted/COPYING" ] && cp    "$extracted/COPYING" "$dst/COPYING"
+            ;;
+        app)
+            cp -r "$extracted/." "$dst/"
+            ;;
+        *)
+            die "unknown layout '$layout' for $name"
+            ;;
+    esac
 
     # Overlay em-x11 meta files.
     for f in CMakeLists.txt config.h ORIGIN.txt; do
@@ -121,7 +136,7 @@ fetch_one() {
 for row in "${LIBS[@]}"; do
     # shellcheck disable=SC2086
     set -- $row
-    fetch_one "$1" "$2" "$3" "$4"
+    fetch_one "$1" "$2" "$3" "$4" "$5"
 done
 
 printf '\ndone. third-party/ is ready.\n'

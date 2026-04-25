@@ -262,4 +262,9 @@ extern int emx11_js_measure_string(const char *font_css,
  * plain rectangle). */
 extern void emx11_js_window_shape(Window id, const int *rects, int count);
 
+/* Last-known pointer position in canvas CSS pixels. XQueryPointer polls
+ * this every time xeyes fires its 50ms tick. Writes are the JS host's
+ * responsibility -- we just read the two ints back. */
+extern void emx11_js_pointer_xy(int *x_out, int *y_out);
+
 #endif /* EMX11_INTERNAL_H */

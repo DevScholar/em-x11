@@ -181,4 +181,19 @@ addToLibrary({
     }
     globalThis.__EMX11__.onWindowShape(id, rects);
   },
+
+  // Last-known pointer position (root-relative canvas CSS pixels).
+  // XQueryPointer polls this; the host maintains it off a canvas
+  // mousemove listener that runs regardless of which window is under
+  // the cursor.
+  emx11_js_pointer_xy: function (xPtr, yPtr) {
+    if (!globalThis.__EMX11__) {
+      HEAP32[xPtr >> 2] = 0;
+      HEAP32[yPtr >> 2] = 0;
+      return;
+    }
+    var pt = globalThis.__EMX11__.getPointerXY();
+    HEAP32[xPtr >> 2] = pt.x | 0;
+    HEAP32[yPtr >> 2] = pt.y | 0;
+  },
 });
