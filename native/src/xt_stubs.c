@@ -17,6 +17,7 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/Xresource.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -140,22 +141,112 @@ int XFreeCursor(Display *dpy, Cursor cursor) {
 
 /* -- Font sets (XIM path) ---------------------------------------------
  *
- * Xt calls XCreateFontSet when a locale is set; we always return NULL
- * and let Xt fall back to the single-font XLoadQueryFont path. */
+ * Xlib's XFontSet is a bundle of XFontStructs that together cover the
+ * charsets needed by a locale. Real implementations load a font per
+ * charset and switch at draw time. In em-x11 every font renders via
+ * canvas.fillText (UTF-8 out of the box), so one underlying font
+ * covers everything and the "set" is a thin wrapper.
+ *
+ * We used to return NULL here, which made libXaw print "Unable to
+ * load any usable fontset" even though the 8-bit fallback worked
+ * fine. Handing back a real handle silences the warning and routes
+ * the Xmb... / Xwc... text calls through the same glyph path as
+ * XDrawString.
+ *
+ * `struct _XOC` is opaque in Xlib.h (`typedef struct _XOC *XFontSet`),
+ * so we get to define it any way we like. */
+
+struct _XOC {
+    XFontStruct     *font;                      /* single underlying font */
+    XFontStruct     *fonts_list[1];             /* XFontsOfFontSet */
+    char            *names_list[1];             /* XFontsOfFontSet */
+    XFontSetExtents  extents;
+    char             base_name[96];
+};
 
 XFontSet XCreateFontSet(Display *dpy, _Xconst char *base_font_name_list,
                         char ***missing_charset_list_return,
                         int *missing_charset_count_return,
                         char **def_string_return) {
-    (void)dpy; (void)base_font_name_list;
     if (missing_charset_list_return)  *missing_charset_list_return  = NULL;
     if (missing_charset_count_return) *missing_charset_count_return = 0;
     if (def_string_return)            *def_string_return            = (char *)"";
-    return NULL;
+
+    /* The base name list can be a comma-separated XLFD list. Pick the
+     * first entry; if it's empty or lookup fails, try the canonical
+     * "fixed" alias that our font.c always resolves. */
+    char first[96] = "fixed";
+    if (base_font_name_list) {
+        size_t i = 0;
+        while (base_font_name_list[i] && base_font_name_list[i] != ','
+               && i + 1 < sizeof first) {
+            first[i] = base_font_name_list[i];
+            i++;
+        }
+        if (i > 0) first[i] = '\0';
+    }
+
+    XFontStruct *fs = XLoadQueryFont(dpy, first);
+    if (!fs) fs = XLoadQueryFont(dpy, "fixed");
+    if (!fs) return NULL;
+
+    struct _XOC *set = calloc(1, sizeof *set);
+    if (!set) return NULL;
+    set->font = fs;
+    set->fonts_list[0] = fs;
+    /* names_list entries are not individually freed by XFontsOfFontSet;
+     * we point at an inline buffer so cleanup is trivial. */
+    set->names_list[0] = set->base_name;
+    snprintf(set->base_name, sizeof set->base_name, "%s", first);
+
+    /* Extents: the logical extent covers the font's full cell; ink
+     * extent is the same since we have no real glyph-ink metrics. */
+    int w = fs->max_bounds.width > 0 ? fs->max_bounds.width : 8;
+    int h = fs->ascent + fs->descent;
+    set->extents.max_logical_extent.x      = 0;
+    set->extents.max_logical_extent.y      = (short)(-fs->ascent);
+    set->extents.max_logical_extent.width  = (unsigned short)w;
+    set->extents.max_logical_extent.height = (unsigned short)(h > 0 ? h : 12);
+    set->extents.max_ink_extent = set->extents.max_logical_extent;
+
+    return (XFontSet)set;
 }
 
 void XFreeFontSet(Display *dpy, XFontSet font_set) {
-    (void)dpy; (void)font_set;
+    struct _XOC *set = (struct _XOC *)font_set;
+    if (!set) return;
+    if (set->font) XFreeFont(dpy, set->font);
+    free(set);
+}
+
+XFontSetExtents *XExtentsOfFontSet(XFontSet font_set) {
+    struct _XOC *set = (struct _XOC *)font_set;
+    if (set) return &set->extents;
+    /* Xaw occasionally queries extents without checking for NULL.
+     * Return a static "empty metrics" sentinel so it gets safe zeros. */
+    static XFontSetExtents empty;
+    return &empty;
+}
+
+int XFontsOfFontSet(XFontSet font_set, XFontStruct ***font_struct_list_return,
+                    char ***font_name_list_return) {
+    struct _XOC *set = (struct _XOC *)font_set;
+    if (!set) {
+        if (font_struct_list_return) *font_struct_list_return = NULL;
+        if (font_name_list_return)   *font_name_list_return   = NULL;
+        return 0;
+    }
+    if (font_struct_list_return) *font_struct_list_return = set->fonts_list;
+    if (font_name_list_return)   *font_name_list_return   = set->names_list;
+    return 1;
+}
+
+/* Internal accessor for xaw_stubs.c -- pulls the single underlying
+ * font back out of an opaque XFontSet. NULL-safe; returns NULL if the
+ * set was never created or is being torn down. */
+XFontStruct *emx11_fontset_font(XFontSet font_set) {
+    struct _XOC *set = (struct _XOC *)font_set;
+    return set ? set->font : NULL;
 }
 
 void XFreeStringList(char **list) {

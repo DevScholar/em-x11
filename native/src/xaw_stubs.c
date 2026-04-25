@@ -53,10 +53,13 @@ int XTextWidth16(XFontStruct *fs, _Xconst XChar2b *string, int count) {
     return w;
 }
 
-/* Multibyte variants with XFontSet: we always hand out a NULL FontSet
- * (see xt_stubs.c XCreateFontSet) so any real call path falls back to
- * the single-font XDrawString equivalent. These are included so Xaw's
- * internationalized-text code paths still link. */
+/* Multibyte variants with XFontSet: xt_stubs.c hands back a real
+ * (non-NULL) wrapper over a single underlying XFontStruct. Pull the
+ * wrapped font out via the internal accessor and route through the
+ * 8-bit XDrawString / XTextWidth paths. That way Xmb callers get the
+ * same glyph coverage as the rest of the toolkit. */
+
+extern XFontStruct *emx11_fontset_font(XFontSet font_set);
 
 void XmbDrawString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
                    int x, int y, _Xconst char *text, int bytes) {
@@ -65,37 +68,31 @@ void XmbDrawString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
 }
 
 int XmbTextEscapement(XFontSet font_set, _Xconst char *text, int bytes) {
-    (void)font_set;
-    /* No font metrics without a fontset; approximate at 7 px/char so
-     * Label's width calculation at least grows with the string. */
-    return bytes * 7;
+    XFontStruct *fs = emx11_fontset_font(font_set);
+    if (fs) return XTextWidth(fs, text, bytes);
+    return bytes * 7;                           /* last-ditch fallback */
 }
 
 int XmbTextExtents(XFontSet font_set, _Xconst char *text, int nbytes,
                    XRectangle *ink, XRectangle *logical) {
-    (void)font_set; (void)text;
-    if (ink)     { ink->x = 0;     ink->y = -10; ink->width  = (unsigned short)(nbytes * 7); ink->height     = 12; }
-    if (logical) { logical->x = 0; logical->y = -10; logical->width = (unsigned short)(nbytes * 7); logical->height = 12; }
-    return nbytes * 7;
+    XFontStruct *fs = emx11_fontset_font(font_set);
+    int width   = fs ? XTextWidth(fs, text, nbytes) : nbytes * 7;
+    int ascent  = fs ? fs->ascent  : 10;
+    int descent = fs ? fs->descent : 2;
+    if (ink) {
+        ink->x      = 0;
+        ink->y      = (short)-ascent;
+        ink->width  = (unsigned short)width;
+        ink->height = (unsigned short)(ascent + descent);
+    }
+    if (logical) *logical = ink ? *ink :
+        (XRectangle){0, (short)-ascent, (unsigned short)width,
+                     (unsigned short)(ascent + descent)};
+    return width;
 }
 
-/* XFontSet accessors: our XCreateFontSet returns NULL. Xaw guards
- * with `if (fontset)` in most places, but a few spots don't. Return
- * safe defaults. */
-
-XFontSetExtents *XExtentsOfFontSet(XFontSet font_set) {
-    (void)font_set;
-    static XFontSetExtents extents;             /* zero-initialised */
-    return &extents;
-}
-
-int XFontsOfFontSet(XFontSet font_set, XFontStruct ***font_struct_list_return,
-                    char ***font_name_list_return) {
-    (void)font_set;
-    if (font_struct_list_return) *font_struct_list_return = NULL;
-    if (font_name_list_return)   *font_name_list_return   = NULL;
-    return 0;
-}
+/* XFontSet accessor shims live in xt_stubs.c alongside XCreateFontSet
+ * now that the opaque _XOC struct is defined there. */
 
 /* -- GC setter stubs.
  * Our GC only tracks foreground/background/line_width/line_style/fill_style/font.
