@@ -18,9 +18,12 @@ set(EMX11_SOURCES
     src/drawing.c
     src/event.c
     src/atom.c
+    src/property.c
     src/color.c
     src/error.c
     src/font.c
+    src/wm.c
+    src/xrm.c
     src/ext/shape.c
 )
 

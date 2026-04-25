@@ -56,6 +56,7 @@ typedef struct EmxWindow {
     long           event_mask;
     bool           mapped;
     bool           in_use;
+    bool           override_redirect;
     char           name[64];
 
     /* SHAPE extension state (bounding region only for v1).
@@ -65,7 +66,19 @@ typedef struct EmxWindow {
      * each in window-local coordinates. */
     XRectangle    *shape_bounding;
     int            shape_bounding_count;
+
+    /* Linked list of XChangeProperty payloads. See property.c. */
+    struct EmxProperty *properties;
 } EmxWindow;
+
+typedef struct EmxProperty {
+    struct EmxProperty *next;
+    Atom                name;
+    Atom                type;
+    int                 format;         /* 8, 16, or 32 */
+    int                 nitems;
+    unsigned char      *data;           /* raw bytes, length = nitems * fmt/8 */
+} EmxProperty;
 
 /* ------------------------------------------------------------------------- */
 /*  struct _XDisplay                                                         */
@@ -168,6 +181,9 @@ KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym);
 /* Look up the CSS font string bound to a loaded Font id. Returns NULL
  * if the font hasn't been loaded (caller falls back to a default). */
 const char *emx11_font_css(Font font);
+
+/* Release the linked list of XChangeProperty payloads on destroy. */
+void emx11_window_free_properties(EmxWindow *win);
 
 /* ------------------------------------------------------------------------- */
 /*  JS bridge. These symbols are defined by src/bindings/emx11.library.js   */
