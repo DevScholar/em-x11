@@ -118,6 +118,23 @@ export class Compositor {
     return w ? { width: w.width, height: w.height } : null;
   }
 
+  /** Full authoritative attribute snapshot for cross-connection
+   *  XGetWindowAttributes. Local shadows drift (a WM never mirrors
+   *  another client's window), so when a client queries a window it
+   *  doesn't own, Xlib falls back to this via the JS bridge.
+   *  Per dix/window.c, window state is server-authoritative by XID;
+   *  this accessor is how we present that view without a full
+   *  refactor of the per-client shadow tables. */
+  attrsOf(id: number): {
+    x: number; y: number; width: number; height: number;
+    mapped: boolean; parent: number;
+  } | null {
+    const w = this.windows.get(id);
+    if (!w) return null;
+    return { x: w.x, y: w.y, width: w.width, height: w.height,
+             mapped: w.mapped, parent: w.parent };
+  }
+
   /** Resolve a window's origin to canvas-absolute coordinates by
    *  summing local (x, y) up the parent chain. ManagedWindow.{x,y} is
    *  local-to-parent (matching X semantics); the compositor needs
@@ -348,34 +365,41 @@ export class Compositor {
   }
 
   findWindowAt(cssX: number, cssY: number): number | null {
-    /* Naive hit test in insertion order (top-most last). Honours SHAPE:
-     * a point outside the shape rectangles does not count as a hit.
+    /* Hit test in the same parent-before-child DFS order used by
+     * present(), so the topmost painted window under the cursor wins.
+     * Honours SHAPE: a point outside the shape rectangles doesn't hit.
      * Uses absOrigin so reparented windows land where they're drawn. */
     let hit: number | null = null;
-    for (const w of this.windows.values()) {
-      if (!w.mapped) continue;
-      const { ax, ay } = this.absOrigin(w);
-      if (
-        cssX < ax ||
-        cssX >= ax + w.width ||
-        cssY < ay ||
-        cssY >= ay + w.height
-      ) {
-        continue;
-      }
-      if (w.shape) {
-        const lx = cssX - ax;
-        const ly = cssY - ay;
-        let inside = false;
-        for (const r of w.shape) {
-          if (lx >= r.x && lx < r.x + r.w && ly >= r.y && ly < r.y + r.h) {
-            inside = true;
-            break;
+    const probe = (w: ManagedWindow): void => {
+      if (w.mapped) {
+        const { ax, ay } = this.absOrigin(w);
+        if (
+          cssX >= ax &&
+          cssX < ax + w.width &&
+          cssY >= ay &&
+          cssY < ay + w.height
+        ) {
+          let inside = true;
+          if (w.shape) {
+            inside = false;
+            const lx = cssX - ax;
+            const ly = cssY - ay;
+            for (const r of w.shape) {
+              if (lx >= r.x && lx < r.x + r.w && ly >= r.y && ly < r.y + r.h) {
+                inside = true;
+                break;
+              }
+            }
           }
+          if (inside) hit = w.id;
         }
-        if (!inside) continue;
       }
-      hit = w.id;
+      for (const child of this.windows.values()) {
+        if (child.parent === w.id) probe(child);
+      }
+    };
+    for (const w of this.windows.values()) {
+      if (w.parent === 0) probe(w);
     }
     return hit;
   }
@@ -444,17 +468,30 @@ export class Compositor {
   private present(): void {
     this.rafScheduled = false;
     if (!this.dirty) return;
-    /* Skeleton: background-fill the viewport, then let subsequent drawing
-     * calls paint into clipped regions. Dirty-rect tracking comes with the
-     * full backing-store implementation. */
     this.canvas.clear('#111');
+    /* Paint in parent-before-child order so children naturally stack
+     * on top of their parents' backgrounds. X guarantees this: after a
+     * reparent, the child must cover its new parent, not the other way
+     * around. Our windows Map is keyed by XID and iterates in insertion
+     * order, which is NOT the tree order after any reparent -- twm's
+     * frame is inserted after xeyes's shell but becomes the shell's
+     * parent, so flat iteration would paint the frame's background
+     * over the shell. DFS from every root-level window, siblings kept
+     * in insertion order (closest we have to X's stacking order). */
+    const ctx = this.canvas.ctx;
+    const paint = (w: ManagedWindow): void => {
+      if (w.mapped) {
+        ctx.save();
+        this.applyWindowClip(ctx, w);
+        this.paintBackgroundRect(ctx, w, 0, 0, w.width, w.height);
+        ctx.restore();
+      }
+      for (const child of this.windows.values()) {
+        if (child.parent === w.id) paint(child);
+      }
+    };
     for (const w of this.windows.values()) {
-      if (!w.mapped) continue;
-      const ctx = this.canvas.ctx;
-      ctx.save();
-      this.applyWindowClip(ctx, w);
-      this.paintBackgroundRect(ctx, w, 0, 0, w.width, w.height);
-      ctx.restore();
+      if (w.parent === 0) paint(w);
     }
     this.dirty = false;
   }

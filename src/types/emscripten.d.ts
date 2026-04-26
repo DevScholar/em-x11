@@ -3,6 +3,16 @@
  * cover cleanly when em-x11 is built with `-s MODULARIZE=1 -s EXPORT_ES6=1`.
  */
 
+/**
+ * MEMFS handle exposed by Emscripten's filesystem support. We only use
+ * writeFile (to stage twmrc and other config files before main runs);
+ * the rest of the FS API is intentionally not typed here.
+ */
+export interface EmscriptenFS {
+  writeFile(path: string, data: string | Uint8Array): void;
+  mkdir?(path: string): void;
+}
+
 export interface EmscriptenModule {
   HEAPU8: Uint8Array;
   HEAP32: Int32Array;
@@ -31,6 +41,16 @@ export interface EmscriptenModule {
 
   addFunction?(fn: (...args: unknown[]) => unknown, signature: string): number;
   removeFunction?(fn: number): void;
+
+  /** Process argv (excluding argv[0], which Emscripten sets to ./this.program).
+   *  Settable via the factory argument; read by the wasm's main(). */
+  arguments?: string[];
+  /** Hooks fired between FS init and main(). Use for staging files into
+   *  MEMFS so the program sees them at startup (e.g. config files). */
+  preRun?: ((mod: EmscriptenModule) => void)[];
+  /** MEMFS handle. Available inside preRun and afterwards; not on the
+   *  factory-arg side. */
+  FS?: EmscriptenFS;
 }
 
 /**

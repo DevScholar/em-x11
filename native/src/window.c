@@ -236,14 +236,47 @@ int XSetWindowBackgroundPixmap(Display *display, Window w, Pixmap pm) {
 
 Status XGetWindowAttributes(Display *display, Window w,
                             XWindowAttributes *attrs_return) {
+    if (!attrs_return) return 0;
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win || !attrs_return) return 0;
+    if (win) {
+        memset(attrs_return, 0, sizeof(*attrs_return));
+        attrs_return->x                = win->x;
+        attrs_return->y                = win->y;
+        attrs_return->width            = (int)win->width;
+        attrs_return->height           = (int)win->height;
+        attrs_return->border_width     = (int)win->border_width;
+        attrs_return->depth            = display->screens[0].root_depth;
+        attrs_return->visual           = display->screens[0].root_visual;
+        attrs_return->root             = display->screens[0].root;
+        attrs_return->class            = InputOutput;
+        attrs_return->bit_gravity      = ForgetGravity;
+        attrs_return->win_gravity      = NorthWestGravity;
+        attrs_return->backing_store    = NotUseful;
+        attrs_return->save_under       = False;
+        attrs_return->colormap         = display->screens[0].cmap;
+        attrs_return->map_installed    = True;
+        attrs_return->map_state        = win->mapped ? IsViewable : IsUnmapped;
+        attrs_return->all_event_masks  = win->event_mask;
+        attrs_return->your_event_mask  = win->event_mask;
+        attrs_return->do_not_propagate_mask = 0;
+        attrs_return->override_redirect = win->override_redirect;
+        attrs_return->screen           = &display->screens[0];
+        return 1;
+    }
+
+    /* Cross-connection fallback: the caller has no local shadow for this
+     * XID (WM case -- twm querying xeyes's shell to size its frame).
+     * dix/window.c treats window state as server-authoritative by XID,
+     * so we reach through to the Host for the canonical record. */
+    int a[8];
+    emx11_js_get_window_attrs(w, a);
+    if (!a[0]) return 0;
     memset(attrs_return, 0, sizeof(*attrs_return));
-    attrs_return->x                = win->x;
-    attrs_return->y                = win->y;
-    attrs_return->width            = (int)win->width;
-    attrs_return->height           = (int)win->height;
-    attrs_return->border_width     = (int)win->border_width;
+    attrs_return->x                = a[1];
+    attrs_return->y                = a[2];
+    attrs_return->width            = a[3];
+    attrs_return->height           = a[4];
+    attrs_return->border_width     = a[7];
     attrs_return->depth            = display->screens[0].root_depth;
     attrs_return->visual           = display->screens[0].root_visual;
     attrs_return->root             = display->screens[0].root;
@@ -254,11 +287,11 @@ Status XGetWindowAttributes(Display *display, Window w,
     attrs_return->save_under       = False;
     attrs_return->colormap         = display->screens[0].cmap;
     attrs_return->map_installed    = True;
-    attrs_return->map_state        = win->mapped ? IsViewable : IsUnmapped;
-    attrs_return->all_event_masks  = win->event_mask;
-    attrs_return->your_event_mask  = win->event_mask;
+    attrs_return->map_state        = a[5] ? IsViewable : IsUnmapped;
+    attrs_return->all_event_masks  = 0;
+    attrs_return->your_event_mask  = 0;
     attrs_return->do_not_propagate_mask = 0;
-    attrs_return->override_redirect = win->override_redirect;
+    attrs_return->override_redirect = a[6] ? True : False;
     attrs_return->screen           = &display->screens[0];
     return 1;
 }
@@ -269,13 +302,28 @@ Status XGetGeometry(Display *display, Drawable d,
                     unsigned int *border_width_return,
                     unsigned int *depth_return) {
     EmxWindow *win = emx11_window_find(display, (Window)d);
-    if (!win) return 0;
+    if (win) {
+        if (root_return)         *root_return         = display->screens[0].root;
+        if (x_return)            *x_return            = win->x;
+        if (y_return)            *y_return            = win->y;
+        if (width_return)        *width_return        = win->width;
+        if (height_return)       *height_return       = win->height;
+        if (border_width_return) *border_width_return = win->border_width;
+        if (depth_return)        *depth_return        = (unsigned int)display->screens[0].root_depth;
+        return 1;
+    }
+
+    /* Cross-connection fallback: same story as XGetWindowAttributes --
+     * twm.c:845 queries a managed client's shell geometry. */
+    int a[8];
+    emx11_js_get_window_attrs((Window)d, a);
+    if (!a[0]) return 0;
     if (root_return)         *root_return         = display->screens[0].root;
-    if (x_return)            *x_return            = win->x;
-    if (y_return)            *y_return            = win->y;
-    if (width_return)        *width_return        = win->width;
-    if (height_return)       *height_return       = win->height;
-    if (border_width_return) *border_width_return = win->border_width;
+    if (x_return)            *x_return            = a[1];
+    if (y_return)            *y_return            = a[2];
+    if (width_return)        *width_return        = (unsigned int)a[3];
+    if (height_return)       *height_return       = (unsigned int)a[4];
+    if (border_width_return) *border_width_return = (unsigned int)a[7];
     if (depth_return)        *depth_return        = (unsigned int)display->screens[0].root_depth;
     return 1;
 }

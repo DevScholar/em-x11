@@ -338,6 +338,43 @@ extern void emx11_js_window_shape(Window id, const int *rects, int count);
  * responsibility -- we just read the two ints back. */
 extern void emx11_js_pointer_xy(int *x_out, int *y_out);
 
+/* Cross-connection XGetWindowAttributes fallback. When the caller has
+ * no local EmxWindow for `id` (the WM case: twm querying xeyes's shell),
+ * this returns the Host-authoritative state. `out` is an int[8] buffer:
+ *   [0] found (0/1)  [1] x  [2] y
+ *   [3] width        [4] height  [5] mapped
+ *   [6] override_redirect  [7] border_width (Host tracks 0 for now)
+ * When [0]==0, the Host doesn't know the window either; caller should
+ * return 0 from XGetWindowAttributes. */
+extern void emx11_js_get_window_attrs(Window id, int *out);
+
+/* -- Property bridges (Host-owned storage, dix/property.c layout).
+ * Properties are keyed by (XID, atom) server-side so any client can
+ * read back what any client wrote. The four entry points mirror the
+ * Xlib calls we expose. */
+extern int  emx11_js_change_property(Window w, Atom atom, Atom type,
+                                     int format, int mode,
+                                     const unsigned char *data,
+                                     int nelements);
+/* XGetWindowProperty: two-call pattern so C owns the output buffer.
+ * First call returns meta + required buffer size; second call copies
+ * bytes into a caller-provided buffer and optionally deletes the
+ * property atomically. meta layout (int[8]):
+ *   [0] found (0/1)          [1] actual_type   [2] actual_format
+ *   [3] nitems_returned      [4] bytes_after   [5] data_bytes
+ *   [6] valid_window (0 => BadWindow, caller returns BadWindow)
+ *   [7] reserved */
+extern void emx11_js_get_property_meta(Window w, Atom atom, Atom req_type,
+                                       long long_offset, long long_length,
+                                       int *meta_out);
+extern void emx11_js_get_property_data(Window w, Atom atom, Atom req_type,
+                                       long long_offset, long long_length,
+                                       int delete_flag,
+                                       unsigned char *dst, int capacity);
+extern void emx11_js_delete_property(Window w, Atom atom);
+extern int  emx11_js_list_properties_count(Window w);
+extern int  emx11_js_list_properties_fetch(Window w, Atom *dst, int capacity);
+
 /* Pixmap lifecycle. Create installs an OffscreenCanvas on the JS side,
  * keyed by id; destroy drops the reference so its backing bitmap can
  * be reclaimed. depth is 1 for SHAPE masks, 24/32 for color pixmaps. */

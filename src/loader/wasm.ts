@@ -17,6 +17,14 @@ export interface LoadOptions {
   glueUrl: string;
   /** URL of the .wasm binary. Usually co-located with the glue. */
   wasmUrl: string;
+  /** Argv to pass to main(), excluding argv[0]. Emscripten substitutes
+   *  ./this.program for argv[0] regardless. Used by twm to load a custom
+   *  twmrc via `-f /em-x11.twmrc` -- see launchTwm. */
+  arguments?: string[];
+  /** Hooks fired after MEMFS is initialised but before main() runs. The
+   *  Module argument has FS available, so callers can stage files (e.g.
+   *  the twmrc) into MEMFS before the program reads them. */
+  preRun?: ((mod: EmscriptenModule) => void)[];
 }
 
 export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> {
@@ -32,5 +40,7 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
       }
       return path;
     },
+    arguments: options.arguments,
+    preRun: options.preRun,
   });
 }

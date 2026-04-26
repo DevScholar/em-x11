@@ -34,6 +34,26 @@ interface Pixmap {
   depth: number;
 }
 
+/* Per-window property value. dix/property.c holds property storage
+ * on the server's WindowPtr keyed by atom; we mirror that layout at
+ * Host level so any client can reach it by (XID, atom). The `data`
+ * field is raw bytes -- length = nitems * format/8. */
+interface PropertyEntry {
+  type: number;
+  format: 8 | 16 | 32;
+  nitems: number;
+  data: Uint8Array;
+}
+
+/* X11 property modes (X.h). Matches the `mode` argument of
+ * XChangeProperty verbatim. */
+const PropModeReplace = 0;
+const PropModePrepend = 1;
+const PropModeAppend = 2;
+
+/* X11 AnyPropertyType sentinel (Xatom.h). */
+const AnyPropertyType = 0;
+
 /* Per-connection bookkeeping. Each wasm Module that calls XOpenDisplay
  * gets one of these. Step 2 hangs owned windows and the ccall-back
  * Module reference off it; Step 3 will add substructure-redirect claims
@@ -102,6 +122,19 @@ export class Host implements EmX11Host {
   /** override_redirect flag per window (CWOverrideRedirect). True means
    *  "WM stays out" -- Host skips the redirect path for this window. */
   private readonly overrideRedirect = new Map<number, boolean>();
+  /** Window properties, keyed by (XID, atom). Per dix/property.c,
+   *  property storage hangs off the server's WindowPtr and is keyed by
+   *  XID + atom -- independent of which connection set it. Moving the
+   *  store here from per-connection C tables is what lets a WM read the
+   *  managed client's WM_NAME / WM_HINTS / WM_PROTOCOLS at all.
+   *
+   *  Caveat: atom IDs themselves are still per-connection in C (each
+   *  wasm module has its own atom counter). For predefined atoms
+   *  (XA_WM_NAME=39, XA_WM_CLASS=67, etc.) the values agree trivially.
+   *  For custom atoms like WM_PROTOCOLS / WM_DELETE_WINDOW the numbers
+   *  can diverge between connections and queries will miss. That's a
+   *  separate step (move the atom table to Host too). */
+  private readonly properties = new Map<number, Map<number, PropertyEntry>>();
   private nextConnId = 0;
   private pendingLaunch: PendingLaunch | null = null;
   /** Last window that received a ButtonPress, by connection id. Key
@@ -226,6 +259,144 @@ export class Host implements EmX11Host {
     return { x: this.pointerX, y: this.pointerY };
   }
 
+  /** Cross-connection XGetWindowAttributes fallback. When twm queries
+   *  xeyes's shell for geometry, twm's local shadow table has no entry
+   *  for it (a WM doesn't mirror other clients' windows). Xlib calls
+   *  the emx11_js_get_window_attrs bridge, which lands here.
+   *  dix/window.c treats window state as XID-keyed server state; this
+   *  accessor is how we present that to a querying client. */
+  getWindowAttrs(id: number): {
+    x: number; y: number; width: number; height: number;
+    mapped: boolean; overrideRedirect: boolean; borderWidth: number;
+  } | null {
+    const geom = this.compositor.attrsOf(id);
+    if (!geom) return null;
+    return {
+      x: geom.x, y: geom.y, width: geom.width, height: geom.height,
+      mapped: geom.mapped,
+      overrideRedirect: this.overrideRedirect.get(id) ?? false,
+      /* Host doesn't currently track border_width; twm ignores it for
+       * frame sizing (it reads tmp_win->old_bw from XGetGeometry) so 0
+       * is adequate here. Revisit if another WM needs it. */
+      borderWidth: 0,
+    };
+  }
+
+  /** XChangeProperty -- server-authoritative path (dix/property.c
+   *  dixChangeWindowProperty). Stores by (window XID, atom) so any
+   *  client can read it back regardless of who wrote it.
+   *  @returns true on success, false on BadMatch (format/type mismatch
+   *  with existing entry under Append/Prepend). */
+  changeProperty(
+    window: number, atom: number, type: number,
+    format: 8 | 16 | 32, mode: number,
+    data: Uint8Array,
+  ): boolean {
+    if (!this.compositor.attrsOf(window)) {
+      /* BadWindow -- caller returns BadWindow. In real X this goes
+       * through the resource manager; here the compositor is our
+       * source of truth for "does this window exist". */
+      return false;
+    }
+    let table = this.properties.get(window);
+    if (!table) {
+      table = new Map();
+      this.properties.set(window, table);
+    }
+    const existing = table.get(atom);
+    if (!existing || mode === PropModeReplace) {
+      const entry: PropertyEntry = {
+        type,
+        format,
+        nitems: (data.length * 8) / format,
+        data: new Uint8Array(data),
+      };
+      table.set(atom, entry);
+      return true;
+    }
+    /* Append / Prepend: format and type must match existing. */
+    if (existing.format !== format || existing.type !== type) return false;
+    if (data.length === 0) return true;
+    const merged = new Uint8Array(existing.data.length + data.length);
+    if (mode === PropModeAppend) {
+      merged.set(existing.data, 0);
+      merged.set(data, existing.data.length);
+    } else {
+      /* Prepend */
+      merged.set(data, 0);
+      merged.set(existing.data, data.length);
+    }
+    existing.data = merged;
+    existing.nitems = (merged.length * 8) / format;
+    return true;
+  }
+
+  /** XGetWindowProperty -- server-authoritative path (dix/property.c
+   *  ProcGetProperty). Returns meta + a data slice corresponding to
+   *  long_offset / long_length, both in 32-bit units per X protocol.
+   *  `null` means BadWindow (unknown XID).
+   *  When the atom doesn't exist, returns found=false with other
+   *  fields zeroed -- matches Xlib's Success with type=None.
+   *  When the stored type doesn't match reqType (and reqType isn't
+   *  AnyPropertyType), returns found=false BUT with actualType/format
+   *  populated so the caller can report them. */
+  peekProperty(
+    window: number, atom: number, reqType: number,
+    longOffset: number, longLength: number, deleteFlag: boolean,
+  ): {
+    found: boolean; type: number; format: number;
+    nitems: number; bytesAfter: number; data: Uint8Array;
+  } | null {
+    if (!this.compositor.attrsOf(window)) return null;
+    const table = this.properties.get(window);
+    const entry = table?.get(atom);
+    if (!entry) {
+      return { found: false, type: 0, format: 0, nitems: 0, bytesAfter: 0,
+               data: new Uint8Array(0) };
+    }
+    if (reqType !== AnyPropertyType && reqType !== entry.type) {
+      return { found: false, type: entry.type, format: entry.format,
+               nitems: 0, bytesAfter: 0, data: new Uint8Array(0) };
+    }
+    /* X protocol: long_offset and long_length are in 32-bit units,
+     * regardless of format. Data slice in bytes = (total_bytes - 4*offset)
+     * clamped to 4*length. */
+    const totalBytes = entry.data.length;
+    const startByte = Math.min(Math.max(longOffset, 0) * 4, totalBytes);
+    const wantBytes = Math.max(longLength, 0) * 4;
+    const availBytes = totalBytes - startByte;
+    const sliceBytes = Math.min(availBytes, wantBytes);
+    const data = entry.data.subarray(startByte, startByte + sliceBytes);
+    const bytesAfter = availBytes - sliceBytes;
+    const unit = entry.format / 8;
+    const nitemsReturned = unit > 0 ? sliceBytes / unit : 0;
+
+    if (deleteFlag && bytesAfter === 0 && startByte === 0) {
+      table!.delete(atom);
+      if (table!.size === 0) this.properties.delete(window);
+    }
+    return {
+      found: true, type: entry.type, format: entry.format,
+      nitems: nitemsReturned, bytesAfter,
+      data: new Uint8Array(data),
+    };
+  }
+
+  /** XDeleteProperty (dix/property.c DeleteProperty). */
+  deleteProperty(window: number, atom: number): void {
+    const table = this.properties.get(window);
+    if (!table) return;
+    table.delete(atom);
+    if (table.size === 0) this.properties.delete(window);
+  }
+
+  /** XListProperties (dix/property.c ProcListProperties). */
+  listProperties(window: number): number[] {
+    const table = this.properties.get(window);
+    if (!table) return [];
+    return Array.from(table.keys());
+  }
+
   onInit(_screenWidth: number, _screenHeight: number): void {
     /* C expects us to adopt its idea of screen size, but the browser is the
      * authority. We ignore the hint and the C side will be corrected the
@@ -260,6 +431,7 @@ export class Host implements EmX11Host {
       this.windowToConn.delete(winId);
       this.windowSubscriptions.delete(winId);
       this.overrideRedirect.delete(winId);
+      this.properties.delete(winId);
     }
     /* Also drop this connection's subscription entries on OTHER
      * clients' windows (a WM that observed substructure on root
@@ -280,6 +452,7 @@ export class Host implements EmX11Host {
     height: number,
     background: number,
   ): void {
+    console.info(`em-x11: create win=${id} conn=${connId} parent=${parent} geom=${x},${y},${width}x${height}`);
     const conn = this.connections.get(connId);
     if (conn) {
       conn.ownedWindows.add(id);
@@ -313,6 +486,7 @@ export class Host implements EmX11Host {
       this.dispatchMapRequest(holderConnId, parent, id);
       return;
     }
+    console.info(`em-x11: map win=${id} conn=${connId} parent=${parent}`);
     this.compositor.mapWindow(id);
     /* No Expose synthesis here: that lives in C's XMapWindow. Doing
      * it Host-side via mod.ccall would race the launchClient handoff
@@ -338,6 +512,7 @@ export class Host implements EmX11Host {
     }
     this.windowSubscriptions.delete(id);
     this.overrideRedirect.delete(id);
+    this.properties.delete(id);           /* dix/property.c::DeleteAllWindowProperties */
     this.compositor.destroyWindow(id);
   }
 
@@ -385,6 +560,7 @@ export class Host implements EmX11Host {
   }
 
   onReparentWindow(id: number, parent: number, x: number, y: number): void {
+    console.info(`em-x11: reparent win=${id} parent=${parent} to ${x},${y}`);
     this.compositor.reparentWindow(id, parent, x, y);
   }
 
