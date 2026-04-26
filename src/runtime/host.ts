@@ -898,7 +898,9 @@ export class Host implements EmX11Host {
   private attachInputBridge(): void {
     const el = this.canvas.element;
     el.addEventListener('mousedown', (e) => this.onMouseButton(e, X_ButtonPress));
-    el.addEventListener('mouseup', (e) => this.onMouseButton(e, X_ButtonRelease));
+    // Listen on window so a ButtonRelease outside the canvas (pointer moved
+    // off during a drag) still reaches the grab window via the C-side grab.
+    window.addEventListener('mouseup', (e) => this.onMouseButton(e, X_ButtonRelease));
     el.addEventListener('mousemove', (e) => this.onMouseMove(e));
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('mousedown', () => el.focus());

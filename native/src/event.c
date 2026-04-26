@@ -438,15 +438,52 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
  * button/motion and re-run the hit test here with authoritative parent
  * data from the EmxWindow table. */
 
+/* Implicit pointer grab state (x11protocol.txt §523).
+ * A ButtonPress initiates a grab: subsequent ButtonRelease and MotionNotify
+ * events are routed to the grab window regardless of current pointer position.
+ * The grab is released when the last simultaneously-held button is released.
+ * grab_pointer_inside tracks whether the pointer was inside the grab window
+ * on the last motion, so LeaveNotify/EnterNotify can be synthesized. */
+static Window       grab_window         = None;
+static unsigned int grab_button_count   = 0;
+static bool         grab_pointer_inside = true;
+
 EMSCRIPTEN_KEEPALIVE
 void emx11_push_button_event(int type, Window window, int x, int y,
                              int x_root, int y_root, unsigned int button,
                              unsigned int state) {
     (void)window; (void)x; (void)y;             /* hint from JS, discarded */
     Display *dpy = emx11_get_display();
-    long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
     int lx = 0, ly = 0;
-    EmxWindow *target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
+    EmxWindow *target;
+
+    if (type == ButtonRelease && grab_window != None) {
+        /* Implicit grab: deliver ButtonRelease to the grab window even if
+         * the pointer has moved elsewhere. Compute local coords from the
+         * grab window's current absolute position. */
+        target = emx11_window_find(dpy, grab_window);
+        if (target) {
+            int ax = 0, ay = 0, depth;
+            window_abs_origin(dpy, target, &ax, &ay, &depth);
+            lx = x_root - ax;
+            ly = y_root - ay;
+        }
+        if (grab_button_count > 0) grab_button_count--;
+        if (grab_button_count == 0) {
+            grab_window = None;
+            grab_pointer_inside = true;
+        }
+    } else {
+        long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
+        target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
+        if (target && type == ButtonPress) {
+            if (grab_button_count == 0) {
+                grab_window = target->id;
+                grab_pointer_inside = true;   /* pointer is inside at press time */
+            }
+            grab_button_count++;
+        }
+    }
     if (!target) return;
 
     XEvent ev;
@@ -470,6 +507,82 @@ void emx11_push_motion_event(Window window, int x, int y,
                              unsigned int state) {
     (void)window; (void)x; (void)y;
     Display *dpy = emx11_get_display();
+
+    if (grab_window != None) {
+        /* Implicit grab: route motion to grab window and synthesize
+         * LeaveNotify / EnterNotify when the pointer crosses its boundary.
+         * This lets widgets (Tk buttons etc.) update their visual state
+         * while a button is held. */
+        EmxWindow *target = emx11_window_find(dpy, grab_window);
+        if (!target || !target->mapped) return;
+
+        int ax = 0, ay = 0, depth;
+        window_abs_origin(dpy, target, &ax, &ay, &depth);
+        bool inside = (x_root >= ax && y_root >= ay &&
+                       x_root < ax + (int)target->width &&
+                       y_root < ay + (int)target->height);
+
+        if (grab_pointer_inside && !inside) {
+            if (target->event_mask & LeaveWindowMask) {
+                XEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.type                  = LeaveNotify;
+                ev.xcrossing.display     = dpy;
+                ev.xcrossing.window      = target->id;
+                ev.xcrossing.root        = dpy->screens[0].root;
+                ev.xcrossing.x           = x_root - ax;
+                ev.xcrossing.y           = y_root - ay;
+                ev.xcrossing.x_root      = x_root;
+                ev.xcrossing.y_root      = y_root;
+                ev.xcrossing.mode        = NotifyNormal;
+                ev.xcrossing.detail      = NotifyNonlinear;
+                ev.xcrossing.same_screen = True;
+                ev.xcrossing.focus       = (target->id == dpy->focus_window);
+                ev.xcrossing.state       = state;
+                emx11_event_queue_push(dpy, &ev);
+            }
+            grab_pointer_inside = false;
+        } else if (!grab_pointer_inside && inside) {
+            if (target->event_mask & EnterWindowMask) {
+                XEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.type                  = EnterNotify;
+                ev.xcrossing.display     = dpy;
+                ev.xcrossing.window      = target->id;
+                ev.xcrossing.root        = dpy->screens[0].root;
+                ev.xcrossing.x           = x_root - ax;
+                ev.xcrossing.y           = y_root - ay;
+                ev.xcrossing.x_root      = x_root;
+                ev.xcrossing.y_root      = y_root;
+                ev.xcrossing.mode        = NotifyNormal;
+                ev.xcrossing.detail      = NotifyNonlinear;
+                ev.xcrossing.same_screen = True;
+                ev.xcrossing.focus       = (target->id == dpy->focus_window);
+                ev.xcrossing.state       = state;
+                emx11_event_queue_push(dpy, &ev);
+            }
+            grab_pointer_inside = true;
+        }
+
+        if (!(target->event_mask & (PointerMotionMask | ButtonMotionMask)))
+            return;
+
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.xmotion.type        = MotionNotify;
+        ev.xmotion.display     = dpy;
+        ev.xmotion.window      = target->id;
+        ev.xmotion.x           = x_root - ax;
+        ev.xmotion.y           = y_root - ay;
+        ev.xmotion.x_root      = x_root;
+        ev.xmotion.y_root      = y_root;
+        ev.xmotion.state       = state;
+        ev.xmotion.is_hint     = NotifyNormal;
+        ev.xmotion.same_screen = True;
+        emx11_event_queue_push(dpy, &ev);
+        return;
+    }
+
     int lx = 0, ly = 0;
     EmxWindow *target = hit_test(dpy, x_root, y_root,
                                  PointerMotionMask | ButtonMotionMask,
