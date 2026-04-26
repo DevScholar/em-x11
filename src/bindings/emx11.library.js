@@ -423,6 +423,28 @@ addToLibrary({
       globalThis.__EMX11__.onShapeCombineMask(destId, srcId, xOff, yOff, op);
   },
 
+  // Atom table (non-predefined, id >= 69). The C side (atom.c) still
+  // owns 1..68 so the hot predefined lookups don't round-trip. Anything
+  // else is Host-allocated so cross-module interning converges on one
+  // id per name -- the fix for WM_PROTOCOLS / WM_DELETE_WINDOW
+  // divergence in the old per-module tables.
+  emx11_js_intern_atom: function (namePtr, onlyIfExists) {
+    if (!globalThis.__EMX11__ || namePtr === 0) return 0;
+    var name = UTF8ToString(namePtr);
+    return globalThis.__EMX11__.internAtom(name, onlyIfExists !== 0) >>> 0;
+  },
+
+  // Returns a malloc'd C string that the caller releases via XFree/free,
+  // matching Xlib's ownership contract. Returns 0 (NULL) for unknown
+  // ids; atom.c surfaces that as NULL which Xlib docs define as BadAtom.
+  emx11_js_get_atom_name__deps: ['$stringToNewUTF8'],
+  emx11_js_get_atom_name: function (atom) {
+    if (!globalThis.__EMX11__) return 0;
+    var name = globalThis.__EMX11__.getAtomName(atom >>> 0);
+    if (name === null) return 0;
+    return stringToNewUTF8(name);
+  },
+
   // Named-colour parse. XParseColor already handles "#RRGGBB" and
   // "rgb:R/G/B" in C; bare names (the ~600 entries of X11's rgb.txt --
   // "slategrey", "gray85", "rebeccapurple", etc.) we delegate to the

@@ -388,6 +388,15 @@ extern void emx11_js_pixmap_destroy(Pixmap id);
 extern void emx11_js_shape_combine_mask(Window dest, Pixmap src,
                                         int x_off, int y_off, int op);
 
+/* Atom table. Predefined atoms 1..68 are still resolved locally in
+ * atom.c for zero round-trip cost; anything else goes through Host
+ * so every wasm module in the same page agrees on the id. Fixes the
+ * WM_PROTOCOLS / WM_DELETE_WINDOW divergence the per-module tables
+ * used to have. emx11_js_get_atom_name returns a malloc'd string
+ * that the caller releases via XFree (== free). */
+extern Atom  emx11_js_intern_atom(const char *name, Bool only_if_exists);
+extern char *emx11_js_get_atom_name(Atom atom);
+
 /* Internal pixmap accessors (implemented in pixmap.c). */
 Bool          emx11_pixmap_exists(Pixmap id);
 unsigned int  emx11_pixmap_depth(Pixmap id);

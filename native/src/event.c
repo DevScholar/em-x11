@@ -133,6 +133,66 @@ int XNextEvent(Display *display, XEvent *event_return) {
     return emx11_event_queue_pop(display, event_return) ? 1 : 0;
 }
 
+/* Deliver a synthesized event. In real X this round-trips to the server,
+ * which re-dispatches per the event_mask / propagate rules; we deliver
+ * directly into our own queue because em-x11 is a single-process "server".
+ *
+ * Tk uses XSendEvent heavily for self-addressed traffic: WM_DELETE_WINDOW
+ * via ClientMessage, `event generate` virtual events, focus-in/out
+ * synthetics. Most of those pass event_mask=NoEventMask (= 0), which
+ * means "deliver regardless of selection" -- the simple path.
+ *
+ * Propagation semantics (x11protocol.txt §SendEvent): if propagate=True
+ * and no client on `w` selects any bit of event_mask, walk up the parent
+ * chain until one does, or until a window has that bit in its
+ * do_not_propagate_mask (we don't track that yet -- TODO). If nothing
+ * along the chain matches, the event is discarded.
+ *
+ * PointerWindow / InputFocus as `w`: real Xlib resolves these against
+ * current pointer / focus state. em-x11 has no focus tracker yet, so we
+ * treat them as literal XIDs; Tk's routing code inspects xany.window
+ * post-delivery and copes. Revisit when XSetInputFocus is promoted from
+ * stub to real. */
+Status XSendEvent(Display *display, Window w, Bool propagate,
+                  long event_mask, XEvent *event_send) {
+    if (!display || !event_send) return 0;
+
+    XEvent ev = *event_send;                    /* caller may reuse buffer */
+    ev.xany.display    = display;
+    ev.xany.send_event = True;
+    ev.xany.window     = w;
+
+    /* NoEventMask or unmaskable event type: deliver to `w` unconditionally. */
+    if (event_mask == 0) {
+        return emx11_event_queue_push(display, &ev) ? 1 : 0;
+    }
+
+    /* Find the closest window up from `w` that selects any bit of
+     * event_mask. If propagate=False, only `w` itself is a candidate. */
+    EmxWindow *target = (w == PointerWindow || w == InputFocus)
+                            ? NULL
+                            : emx11_window_find(display, w);
+    Window root = display->screens[0].root;
+    while (target) {
+        if (target->event_mask & event_mask) {
+            ev.xany.window = target->id;
+            return emx11_event_queue_push(display, &ev) ? 1 : 0;
+        }
+        if (!propagate) break;
+        if (target->parent == None || target->parent == target->id) break;
+        if (target->id == root) break;
+        target = emx11_window_find(display, target->parent);
+    }
+
+    /* Nothing along the chain selected for this event. Matches real X's
+     * "discard" outcome, but we still queue it on `w` so Tk's direct
+     * self-sends (XSendEvent to its own shell with a mask the shell
+     * happens not to select) don't silently disappear. Revisit once
+     * event_mask selection is well-exercised by real Tk traffic. */
+    ev.xany.window = w;
+    return emx11_event_queue_push(display, &ev) ? 1 : 0;
+}
+
 /* -- Keymap management ---------------------------------------------------- */
 
 KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym) {

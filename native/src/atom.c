@@ -3,13 +3,16 @@
  *
  * X interns strings into small integer identifiers (atoms) that are
  * referenced in protocol messages. In real X the server owns the atom
- * table and hands out ids on request. em-x11 runs that table in-process.
+ * table and hands out ids on request. em-x11 runs that table at the
+ * Host layer (TypeScript side) so every wasm module in the page --
+ * every "X client" -- resolves the same name to the same id. That's
+ * the fix for WM_PROTOCOLS / WM_DELETE_WINDOW mismatches the old
+ * per-module counters used to produce.
  *
- * The predefined atoms XA_PRIMARY..XA_LAST_PREDEFINED (1..68) have fixed
- * numeric values specified by the X protocol. Clients may pass those
- * numeric constants directly or look up "PRIMARY", "WM_NAME", etc. via
- * XInternAtom; both must resolve to the same id. We pre-seed the table
- * accordingly at first use so both paths agree.
+ * The predefined atoms XA_PRIMARY..XA_LAST_PREDEFINED (1..68) are
+ * still answered in-process because their ids are fixed by the X
+ * protocol and every module agrees on them trivially. Hot paths like
+ * XA_WM_NAME (39) never round-trip to JS.
  */
 
 #include "emx11_internal.h"
@@ -18,19 +21,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define EMX11_MAX_ATOMS 4096
-
-typedef struct {
-    Atom   id;
-    char  *name;
-} AtomEntry;
-
-static AtomEntry g_atoms[EMX11_MAX_ATOMS];
-static Atom      g_next_atom     = 1;            /* 0 is "None" */
-static bool      g_atoms_seeded  = false;
-
-/* Fixed-id predefined atoms. Names must match the X11 predefined atom
- * set in X11/Xatom.h so round-tripping is stable. */
+/* Fixed-id predefined atoms (x11protocol.txt §PredefinedAtoms). Names
+ * must match the X11 predefined atom set in X11/Xatom.h so
+ * round-tripping is stable. Index in the array == atom id. */
 static const char *const PREDEFINED_ATOMS[] = {
     NULL,                                   /* 0  = None */
     "PRIMARY",                              /* 1  */
@@ -100,21 +93,12 @@ static const char *const PREDEFINED_ATOMS[] = {
 
 #define PREDEFINED_COUNT (sizeof(PREDEFINED_ATOMS) / sizeof(PREDEFINED_ATOMS[0]))
 
-static void seed_predefined(void) {
-    if (g_atoms_seeded) return;
+/* Linear scan of the 68-entry table. Tk's hot predefined lookups
+ * (WM_NAME, WM_PROTOCOLS isn't predefined but WM_HINTS is) bottom
+ * out here without touching JS. */
+static Atom find_predefined(const char *name) {
     for (Atom i = 1; i < PREDEFINED_COUNT; i++) {
-        g_atoms[i].id   = i;
-        g_atoms[i].name = strdup(PREDEFINED_ATOMS[i]);
-    }
-    g_next_atom = PREDEFINED_COUNT;             /* next free slot */
-    g_atoms_seeded = true;
-}
-
-static Atom find_atom(const char *name) {
-    for (Atom i = 1; i < g_next_atom && i < EMX11_MAX_ATOMS; i++) {
-        if (g_atoms[i].name && strcmp(g_atoms[i].name, name) == 0) {
-            return i;
-        }
+        if (strcmp(PREDEFINED_ATOMS[i], name) == 0) return i;
     }
     return None;
 }
@@ -122,17 +106,9 @@ static Atom find_atom(const char *name) {
 Atom XInternAtom(Display *dpy, _Xconst char *name, Bool only_if_exists) {
     (void)dpy;
     if (!name) return None;
-    seed_predefined();
-
-    Atom existing = find_atom(name);
-    if (existing != None) return existing;
-    if (only_if_exists)   return None;
-
-    if (g_next_atom >= EMX11_MAX_ATOMS) return None;
-    Atom id = g_next_atom++;
-    g_atoms[id].id   = id;
-    g_atoms[id].name = strdup(name);
-    return id;
+    Atom pre = find_predefined(name);
+    if (pre != None) return pre;
+    return emx11_js_intern_atom(name, only_if_exists);
 }
 
 Status XInternAtoms(Display *dpy, char **names, int count,
@@ -148,9 +124,12 @@ Status XInternAtoms(Display *dpy, char **names, int count,
 
 char *XGetAtomName(Display *dpy, Atom atom) {
     (void)dpy;
-    seed_predefined();
-    if (atom == None || atom >= g_next_atom) return NULL;
-    return strdup(g_atoms[atom].name ? g_atoms[atom].name : "");
+    if (atom == None) return NULL;
+    if (atom < PREDEFINED_COUNT) {
+        /* strdup so the caller can XFree(== free) unconditionally. */
+        return strdup(PREDEFINED_ATOMS[atom]);
+    }
+    return emx11_js_get_atom_name(atom);
 }
 
 Status XGetAtomNames(Display *dpy, Atom *atoms, int count, char **names_return) {

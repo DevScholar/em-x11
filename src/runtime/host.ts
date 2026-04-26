@@ -45,10 +45,9 @@ interface PropertyEntry {
   data: Uint8Array;
 }
 
-/* X11 property modes (X.h). Matches the `mode` argument of
- * XChangeProperty verbatim. */
+/* X11 property modes we branch on explicitly (X.h). Prepend (= 1) is
+ * handled implicitly as the else-branch of Append in changeProperty. */
 const PropModeReplace = 0;
-const PropModePrepend = 1;
 const PropModeAppend = 2;
 
 /* X11 AnyPropertyType sentinel (Xatom.h). */
@@ -128,13 +127,19 @@ export class Host implements EmX11Host {
    *  store here from per-connection C tables is what lets a WM read the
    *  managed client's WM_NAME / WM_HINTS / WM_PROTOCOLS at all.
    *
-   *  Caveat: atom IDs themselves are still per-connection in C (each
-   *  wasm module has its own atom counter). For predefined atoms
-   *  (XA_WM_NAME=39, XA_WM_CLASS=67, etc.) the values agree trivially.
-   *  For custom atoms like WM_PROTOCOLS / WM_DELETE_WINDOW the numbers
-   *  can diverge between connections and queries will miss. That's a
-   *  separate step (move the atom table to Host too). */
+   *  Atom IDs are Host-allocated (see atomsByName / atomsById below) so
+   *  every connection resolves the same name to the same id. WM_PROTOCOLS,
+   *  WM_DELETE_WINDOW, _NET_* and friends therefore match across clients. */
   private readonly properties = new Map<number, Map<number, PropertyEntry>>();
+  /** Host-owned atom table. Replaces the per-wasm-module table that used
+   *  to live in C (native/src/atom.c). Predefined atoms 1..68 are still
+   *  resolved locally in C for zero round-trip cost; anything beyond 68
+   *  goes through internAtom / getAtomName on the Host so cross-module
+   *  interning agrees. Counter starts at 69 (one past the last predefined,
+   *  which is XA_WM_TRANSIENT_FOR = 68). */
+  private readonly atomsByName = new Map<string, number>();
+  private readonly atomsById = new Map<number, string>();
+  private nextAtom = 69;
   /** Exposes deferred during the bootstrap window between a connection's
    *  XOpenDisplay and the matching launchClient resolution. While the
    *  client's main() runs (including its first XMapWindow), conn.module
@@ -300,6 +305,28 @@ export class Host implements EmX11Host {
        * is adequate here. Revisit if another WM needs it. */
       borderWidth: 0,
     };
+  }
+
+  /** XInternAtom for atoms beyond the predefined 1..68 range (which C
+   *  resolves locally). Allocates a fresh id on first sight of a name;
+   *  subsequent calls from any connection return the same id. Returns
+   *  0 (None) when onlyIfExists is true and the name has never been
+   *  seen before. */
+  internAtom(name: string, onlyIfExists: boolean): number {
+    const hit = this.atomsByName.get(name);
+    if (hit !== undefined) return hit;
+    if (onlyIfExists) return 0;
+    const id = this.nextAtom++;
+    this.atomsByName.set(name, id);
+    this.atomsById.set(id, name);
+    return id;
+  }
+
+  /** XGetAtomName for Host-allocated atoms (id >= 69). Returns null for
+   *  unknown ids; caller (library.js) surfaces that as a NULL return
+   *  from XGetAtomName, which Xlib docs define as BadAtom. */
+  getAtomName(atom: number): string | null {
+    return this.atomsById.get(atom) ?? null;
   }
 
   /** XChangeProperty -- server-authoritative path (dix/property.c

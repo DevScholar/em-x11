@@ -227,6 +227,16 @@ export interface EmX11Host {
     yOff: number,
     op: number,
   ): void;
+  /** XInternAtom -- Host-allocated id for atoms above the 1..68
+   *  predefined range. Same name always resolves to the same id across
+   *  connections, which fixes the WM_PROTOCOLS / WM_DELETE_WINDOW
+   *  divergence that used to happen when each wasm module owned its
+   *  own counter. Returns 0 (None) when onlyIfExists is true and the
+   *  name has never been seen. */
+  internAtom(name: string, onlyIfExists: boolean): number;
+  /** XGetAtomName for Host-allocated atoms. Returns null when the id
+   *  is unknown (caller maps that to NULL / BadAtom). */
+  getAtomName(atom: number): string | null;
 }
 
 declare global {
