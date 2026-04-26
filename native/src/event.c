@@ -12,6 +12,11 @@ bool emx11_event_queue_push(Display *dpy, const XEvent *event) {
     }
     dpy->event_queue[dpy->event_tail] = *event;
     dpy->event_tail = next_tail;
+    /* Keep Xlib's public qlen field in sync. Tk's TransferXEventsToTcl
+     * reads QLength(display) (= dpy->qlen) to decide whether to drain
+     * with XNextEvent; without this update Tk sees 0 events regardless
+     * of what XEventsQueued / XPending report. */
+    dpy->qlen = (int)emx11_event_queue_size(dpy);
     return true;
 }
 
@@ -21,6 +26,7 @@ bool emx11_event_queue_pop(Display *dpy, XEvent *out) {
     }
     *out = dpy->event_queue[dpy->event_head];
     dpy->event_head = (dpy->event_head + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+    dpy->qlen = (int)emx11_event_queue_size(dpy);
     return true;
 }
 
@@ -80,6 +86,7 @@ static void queue_remove_at(Display *dpy, unsigned int idx) {
         cur = next;
     }
     dpy->event_tail = (dpy->event_tail + cap - 1) % cap;
+    dpy->qlen = (int)emx11_event_queue_size(dpy);
 }
 
 bool emx11_event_queue_peek_match(Display *dpy, long mask, XEvent *out) {
@@ -127,11 +134,6 @@ int XEventsQueued(Display *display, int mode) {
 int XNextEvent(Display *display, XEvent *event_return) {
     /* XNextEvent blocks in real X. emscripten_sleep yields to the browser
      * event loop; Asyncify must be enabled at link time for this to work. */
-    static int call_count = 0;
-    if (++call_count < 20) {
-        fprintf(stderr, "[emx11] XNextEvent #%d queue_size=%u\n",
-                call_count, emx11_event_queue_size(display));
-    }
     while (emx11_event_queue_size(display) == 0) {
         emscripten_sleep(1);
     }

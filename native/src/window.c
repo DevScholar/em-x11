@@ -21,14 +21,6 @@
  * still needs solving via Host.onWindowMap / onWindowConfigure (already
  * in place for Expose); we leave those paths alone here. */
 static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
-    fprintf(stderr, "[emx11] push_map_notify win=%lu mapped=%d mask=0x%lx gated=%d\n",
-            (unsigned long)win->id, mapped, win->event_mask,
-            !(win->event_mask & StructureNotifyMask));
-    /* NOTE(diagnostic): mask gate removed while we verify ordering. If
-     * button appears with unconditional push but not with the gate, Tk
-     * calls XMapWindow before XSelectInput and we must either defer the
-     * notify until XSelectInput arrives or just accept the wider
-     * delivery. Restore once the empirical answer is in. */
     XEvent ev = {0};
     if (mapped) {
         ev.type = MapNotify;
@@ -51,11 +43,6 @@ static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
 }
 
 static void push_configure_notify(Display *dpy, EmxWindow *win) {
-    fprintf(stderr, "[emx11] push_configure_notify win=%lu geom=%dx%d+%d+%d mask=0x%lx gated=%d\n",
-            (unsigned long)win->id, (int)win->width, (int)win->height,
-            win->x, win->y, win->event_mask,
-            !(win->event_mask & StructureNotifyMask));
-    /* Same diagnostic gate removal as push_map_notify. */
     XEvent ev = {0};
     ev.type = ConfigureNotify;
     ev.xconfigure.serial     = 0;
