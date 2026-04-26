@@ -127,6 +127,11 @@ int XEventsQueued(Display *display, int mode) {
 int XNextEvent(Display *display, XEvent *event_return) {
     /* XNextEvent blocks in real X. emscripten_sleep yields to the browser
      * event loop; Asyncify must be enabled at link time for this to work. */
+    static int call_count = 0;
+    if (++call_count < 20) {
+        fprintf(stderr, "[emx11] XNextEvent #%d queue_size=%u\n",
+                call_count, emx11_event_queue_size(display));
+    }
     while (emx11_event_queue_size(display) == 0) {
         emscripten_sleep(1);
     }

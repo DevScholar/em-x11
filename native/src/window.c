@@ -1,14 +1,85 @@
 #include "emx11_internal.h"
 
 #include <X11/Xatom.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* -- StructureNotify synthesis ---------------------------------------- */
+
+/* Real X server delivers MapNotify / UnmapNotify / ConfigureNotify to
+ * every client that selected StructureNotifyMask on the window (and
+ * SubstructureNotifyMask on its parent). Tk's Tk_MakeWindowExist /
+ * TkpWmSetState / TkDoWhenIdle paths all do exactly that -- they
+ * latch `ismapped` and the recorded geometry from these events rather
+ * than from their own XMap/XConfigure call-site. Without synthesis,
+ * Tk's widget tree stays at `ismapped=0, geometry=1x1+0+0` forever,
+ * which is the symptom tk-hello was hitting.
+ *
+ * For single-client demos (tk-hello) the local queue is where the
+ * notify has to land. When a WM is involved the cross-connection case
+ * still needs solving via Host.onWindowMap / onWindowConfigure (already
+ * in place for Expose); we leave those paths alone here. */
+static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
+    fprintf(stderr, "[emx11] push_map_notify win=%lu mapped=%d mask=0x%lx gated=%d\n",
+            (unsigned long)win->id, mapped, win->event_mask,
+            !(win->event_mask & StructureNotifyMask));
+    /* NOTE(diagnostic): mask gate removed while we verify ordering. If
+     * button appears with unconditional push but not with the gate, Tk
+     * calls XMapWindow before XSelectInput and we must either defer the
+     * notify until XSelectInput arrives or just accept the wider
+     * delivery. Restore once the empirical answer is in. */
+    XEvent ev = {0};
+    if (mapped) {
+        ev.type = MapNotify;
+        ev.xmap.serial     = 0;
+        ev.xmap.send_event = False;
+        ev.xmap.display    = dpy;
+        ev.xmap.event      = win->id;
+        ev.xmap.window     = win->id;
+        ev.xmap.override_redirect = win->override_redirect ? True : False;
+    } else {
+        ev.type = UnmapNotify;
+        ev.xunmap.serial     = 0;
+        ev.xunmap.send_event = False;
+        ev.xunmap.display    = dpy;
+        ev.xunmap.event      = win->id;
+        ev.xunmap.window     = win->id;
+        ev.xunmap.from_configure = False;
+    }
+    emx11_event_queue_push(dpy, &ev);
+}
+
+static void push_configure_notify(Display *dpy, EmxWindow *win) {
+    fprintf(stderr, "[emx11] push_configure_notify win=%lu geom=%dx%d+%d+%d mask=0x%lx gated=%d\n",
+            (unsigned long)win->id, (int)win->width, (int)win->height,
+            win->x, win->y, win->event_mask,
+            !(win->event_mask & StructureNotifyMask));
+    /* Same diagnostic gate removal as push_map_notify. */
+    XEvent ev = {0};
+    ev.type = ConfigureNotify;
+    ev.xconfigure.serial     = 0;
+    ev.xconfigure.send_event = False;
+    ev.xconfigure.display    = dpy;
+    ev.xconfigure.event      = win->id;
+    ev.xconfigure.window     = win->id;
+    ev.xconfigure.x          = win->x;
+    ev.xconfigure.y          = win->y;
+    ev.xconfigure.width      = (int)win->width;
+    ev.xconfigure.height     = (int)win->height;
+    ev.xconfigure.border_width = (int)win->border_width;
+    ev.xconfigure.above      = None;
+    ev.xconfigure.override_redirect = win->override_redirect ? True : False;
+    emx11_event_queue_push(dpy, &ev);
+}
 
 Window XCreateSimpleWindow(Display *display, Window parent,
                            int x, int y,
                            unsigned int width, unsigned int height,
                            unsigned int border_width,
                            unsigned long border, unsigned long background) {
+    fprintf(stderr, "[emx11] XCreateSimpleWindow parent=%lu %dx%d+%d+%d\n",
+            (unsigned long)parent, (int)width, (int)height, x, y);
     EmxWindow *w = emx11_window_alloc(display);
     if (!w) {
         return None;
@@ -41,6 +112,8 @@ Window XCreateWindow(Display *display, Window parent,
                      int depth, unsigned int class_,
                      Visual *visual, unsigned long valuemask,
                      XSetWindowAttributes *attrs) {
+    fprintf(stderr, "[emx11] XCreateWindow parent=%lu %dx%d+%d+%d mask=0x%lx\n",
+            (unsigned long)parent, (int)width, (int)height, x, y, valuemask);
     (void)depth; (void)class_; (void)visual;
 
     unsigned long bg = 0x00000000UL;
@@ -72,16 +145,28 @@ int XMapWindow(Display *display, Window w) {
      * Standalone clients still get their Expose -- Host queues it during
      * the initial XOpenDisplay → XMapWindow burst (when conn.module is
      * still null because launchClient hasn't resolved) and drains the
-     * queue after launchClient binds the Module. */
+     * queue after launchClient binds the Module.
+     *
+     * MapNotify is a different story: it must land in the MAPPING
+     * client's queue so its Tk / Xt layer can latch `TK_MAPPED` and
+     * advance the realize state machine. In the single-client demo
+     * case (tk-hello) the caller and owner are the same connection,
+     * so a local push is exactly right. */
     EmxWindow *win = emx11_window_find(display, w);
-    if (win) win->mapped = true;
+    if (win) {
+        win->mapped = true;
+        push_map_notify(display, win, true);
+    }
     emx11_js_window_map(display->conn_id, w);
     return 1;
 }
 
 int XUnmapWindow(Display *display, Window w) {
     EmxWindow *win = emx11_window_find(display, w);
-    if (win) win->mapped = false;
+    if (win) {
+        win->mapped = false;
+        push_map_notify(display, win, false);
+    }
     emx11_js_window_unmap(display->conn_id, w);
     return 1;
 }
@@ -106,7 +191,7 @@ int XDestroyWindow(Display *display, Window w) {
  *    every size/position change so it can redraw, so we push through
  *    emx11_js_window_create when a window is logically "re-set". */
 
-static void notify_js_reconfigure(EmxWindow *win) {
+static void notify_js_reconfigure(Display *dpy, EmxWindow *win) {
     /* Geometry-only path: window already exists on Host; just update
      * its (x, y, w, h). We deliberately avoid re-calling window_create
      * here -- doing so stomped on parent / shape / background_pixmap.
@@ -114,9 +199,15 @@ static void notify_js_reconfigure(EmxWindow *win) {
      * Expose synthesis on a configured-while-mapped window lives Host-
      * side (Host.onWindowConfigure) for the same reason as XMapWindow:
      * a WM reconfiguring a managed client's shell is a cross-connection
-     * call, and only the Host knows the shell's owner module to ccall. */
+     * call, and only the Host knows the shell's owner module to ccall.
+     *
+     * ConfigureNotify, on the other hand, must land in the CONFIGURED
+     * client's queue so Tk can update its recorded geometry and mark
+     * the widget for paint. Without this, Tk's TopLevel stays at
+     * `geometry=1x1+0+0` after `pack` -- which is the tk-hello symptom. */
     emx11_js_window_configure(win->id, win->x, win->y,
                               win->width, win->height);
+    push_configure_notify(dpy, win);
 }
 
 int XMoveWindow(Display *display, Window w, int x, int y) {
@@ -124,7 +215,7 @@ int XMoveWindow(Display *display, Window w, int x, int y) {
     if (!win) return 0;
     win->x = x;
     win->y = y;
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 
@@ -134,7 +225,7 @@ int XResizeWindow(Display *display, Window w,
     if (!win) return 0;
     win->width  = width;
     win->height = height;
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 
@@ -146,7 +237,7 @@ int XMoveResizeWindow(Display *display, Window w, int x, int y,
     win->y = y;
     win->width  = width;
     win->height = height;
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 
@@ -160,7 +251,7 @@ int XConfigureWindow(Display *display, Window w,
     if (valuemask & CWHeight)      win->height = (unsigned int)values->height;
     if (valuemask & CWBorderWidth) win->border_width = (unsigned int)values->border_width;
     /* CWStackMode / CWSibling: z-order management not yet implemented. */
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 

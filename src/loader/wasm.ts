@@ -38,7 +38,15 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
       if (path.endsWith('.wasm')) {
         return options.wasmUrl;
       }
-      return path;
+      /* `--preload-file` produces a sibling .data blob the glue fetches
+       * by its basename. Resolve it (and anything else) against the
+       * glue URL's directory so relative fetches don't fall through to
+       * the dev server's SPA fallback. */
+      const baseDir = options.glueUrl.slice(0, options.glueUrl.lastIndexOf('/') + 1);
+      const resolved = baseDir + path;
+      // eslint-disable-next-line no-console
+      console.log('[wasm.ts] locateFile:', path, '->', resolved);
+      return resolved;
     },
     arguments: options.arguments,
     preRun: options.preRun,

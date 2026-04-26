@@ -13,6 +13,7 @@
  */
 
 #include "emx11_internal.h"
+#include "keysym_table.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
@@ -314,6 +315,75 @@ int XIntersectRegion(Region src1, Region src2, Region dst) {
     return 1;
 }
 
+int XUnionRegion(Region src1, Region src2, Region dst) {
+    EmxRegion *a = (EmxRegion *)src1;
+    EmxRegion *b = (EmxRegion *)src2;
+    EmxRegion *d = (EmxRegion *)dst;
+    if (!d) return 0;
+    int empty_a = (!a || a->is_empty);
+    int empty_b = (!b || b->is_empty);
+    if (empty_a && empty_b) {
+        d->is_empty = 1;
+        d->x1 = d->y1 = d->x2 = d->y2 = 0;
+        return 1;
+    }
+    if (empty_a) {
+        d->x1 = b->x1; d->y1 = b->y1;
+        d->x2 = b->x2; d->y2 = b->y2;
+        d->is_empty = 0;
+        return 1;
+    }
+    if (empty_b) {
+        d->x1 = a->x1; d->y1 = a->y1;
+        d->x2 = a->x2; d->y2 = a->y2;
+        d->is_empty = 0;
+        return 1;
+    }
+    d->x1 = a->x1 < b->x1 ? a->x1 : b->x1;
+    d->y1 = a->y1 < b->y1 ? a->y1 : b->y1;
+    d->x2 = a->x2 > b->x2 ? a->x2 : b->x2;
+    d->y2 = a->y2 > b->y2 ? a->y2 : b->y2;
+    d->is_empty = 0;
+    return 1;
+}
+
+Bool XPointInRegion(Region r, int x, int y) {
+    EmxRegion *er = (EmxRegion *)r;
+    if (!er || er->is_empty) return False;
+    return (x >= er->x1 && x < er->x2 && y >= er->y1 && y < er->y2)
+           ? True : False;
+}
+
+/* XPolygonRegion: Tk uses this for non-rectangular clip regions (e.g.
+ * canvas polygon items, rounded buttons). With our bounding-rect model
+ * we collapse the polygon to its AABB -- the clip becomes rectangular,
+ * losing concavity but still tight to the shape's extent. That matches
+ * every other region op we do. `fill_rule` is ignored. */
+Region XPolygonRegion(XPoint *points, int n, int fill_rule) {
+    (void)fill_rule;
+    EmxRegion *r = calloc(1, sizeof(EmxRegion));
+    if (!r) return NULL;
+    if (!points || n <= 0) {
+        r->is_empty = 1;
+        return (Region)r;
+    }
+    int x1 = points[0].x, y1 = points[0].y;
+    int x2 = x1, y2 = y1;
+    for (int i = 1; i < n; i++) {
+        if (points[i].x < x1) x1 = points[i].x;
+        if (points[i].y < y1) y1 = points[i].y;
+        if (points[i].x > x2) x2 = points[i].x;
+        if (points[i].y > y2) y2 = points[i].y;
+    }
+    /* Xlib polygons are fill-inclusive on the top-left edge and exclusive
+     * on the bottom-right; +1 so XPointInRegion on a 1x1 polygon still
+     * returns True. */
+    r->x1 = x1; r->y1 = y1;
+    r->x2 = x2 + 1; r->y2 = y2 + 1;
+    r->is_empty = 0;
+    return (Region)r;
+}
+
 /* -- Event helpers ----------------------------------------------------
  *
  * Xt uses XCheckIfEvent during selection transfer, XIfEvent / XPeekEvent
@@ -420,37 +490,14 @@ int XRefreshKeyboardMapping(XMappingEvent *event) {
     return 0;
 }
 
-/* -- Keysym <-> name. Xt parses translation tables like
- *    "<Key>Return: commit()" which needs StringToKeysym. A full table
- *    is large; for now we recognise the keysyms we actually produce
- *    and fall back to NoSymbol otherwise. */
-
-struct KeysymEntry {
-    const char *name;
-    KeySym      keysym;
-};
-
-static const struct KeysymEntry g_keysym_table[] = {
-    {"space",       0x0020},
-    {"Return",      0xff0d},
-    {"Tab",         0xff09},
-    {"BackSpace",   0xff08},
-    {"Escape",      0xff1b},
-    {"Delete",      0xffff},
-    {"Left",        0xff51},
-    {"Up",          0xff52},
-    {"Right",       0xff53},
-    {"Down",        0xff54},
-    {"Shift_L",     0xffe1},
-    {"Shift_R",     0xffe2},
-    {"Control_L",   0xffe3},
-    {"Control_R",   0xffe4},
-    {"Meta_L",      0xffe7},
-    {"Meta_R",      0xffe8},
-    {"Alt_L",       0xffe9},
-    {"Alt_R",       0xffea},
-    {NULL, 0}
-};
+/* -- Keysym <-> name. The table is auto-generated from keysymdef.h
+ *    (see keysym_table.c / gen_keysyms.awk). Tk's tk.tcl parses binding
+ *    specs like `<Control-Key-slash>` at startup and calls
+ *    XStringToKeysym on every named keysym; any NoSymbol return aborts
+ *    Tk_Init with "bad event type or keysym". A hand-rolled table can't
+ *    keep up with Tk's full name set, so we ship the full ~2000-entry
+ *    X11 table and fall back to the single-ASCII-char passthrough only
+ *    after a miss. */
 
 char *XKeysymToString(KeySym keysym) {
     for (const struct KeysymEntry *e = g_keysym_table; e->name; e++) {
