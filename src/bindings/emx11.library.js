@@ -445,6 +445,41 @@ addToLibrary({
     return stringToNewUTF8(name);
   },
 
+  // XCopyArea -- Host dispatches by (src, dst) pixmap/window identity.
+  // The C side just flattens the Xlib call into this bridge.
+  emx11_js_copy_area: function (srcId, dstId, srcX, srcY, w, h, dstX, dstY) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onCopyArea(
+        srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY,
+      );
+  },
+
+  // XCopyPlane -- simplified to the (depth-1 pixmap source) path Xaw and
+  // Tk actually use. `applyBg` reflects gc->function + plane_mask
+  // semantics that collapse to "paint unset bits with bg".
+  emx11_js_copy_plane: function (srcId, dstId, srcX, srcY, w, h, dstX, dstY, plane, fg, bg, applyBg) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onCopyPlane(
+        srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY,
+        plane >>> 0, fg >>> 0, bg >>> 0, applyBg !== 0,
+      );
+  },
+
+  // XPutImage -- C side memcpys the XImage->data slice into `dataPtr`
+  // (length = bytesPerLine * height) and passes format/depth so Host
+  // can pick XYBitmap vs ZPixmap decoding.
+  emx11_js_put_image: function (dstId, dstX, dstY, w, h, format, depth, bytesPerLine, dataPtr, dataLen, fg, bg) {
+    if (!globalThis.__EMX11__) return;
+    var data =
+      dataLen > 0 && dataPtr !== 0
+        ? HEAPU8.slice(dataPtr, dataPtr + dataLen)
+        : new Uint8Array(0);
+    globalThis.__EMX11__.onPutImage(
+      dstId >>> 0, dstX, dstY, w, h, format, depth, bytesPerLine,
+      data, fg >>> 0, bg >>> 0,
+    );
+  },
+
   // Named-colour parse. XParseColor already handles "#RRGGBB" and
   // "rgb:R/G/B" in C; bare names (the ~600 entries of X11's rgb.txt --
   // "slategrey", "gray85", "rebeccapurple", etc.) we delegate to the

@@ -137,30 +137,12 @@ int XSetRegion(Display *dpy, GC gc, Region r) {
 }
 
 /* -- Pixmap-adjacent stubs.
- * XCreatePixmap / XFreePixmap now live in pixmap.c with real backing
- * canvases. XCopyArea / XCopyPlane remain stubs: once we wire canvas-
- * to-canvas blits they'll move out of here too. The BitmapData loaders
- * route through the real XCreatePixmap so the id is valid (and cleaned
- * up by XFreePixmap), but the bitmap bits themselves are not painted
- * into the pixmap yet -- that matters only when an icon or shape mask
- * actually feeds these bits back into draw or SHAPE calls. */
-
-int XCopyArea(Display *dpy, Drawable src, Drawable dst, GC gc,
-              int src_x, int src_y, unsigned int width, unsigned int height,
-              int dst_x, int dst_y) {
-    (void)dpy; (void)src; (void)dst; (void)gc;
-    (void)src_x; (void)src_y; (void)width; (void)height; (void)dst_x; (void)dst_y;
-    return 1;
-}
-
-int XCopyPlane(Display *dpy, Drawable src, Drawable dst, GC gc,
-               int src_x, int src_y, unsigned int width, unsigned int height,
-               int dst_x, int dst_y, unsigned long plane) {
-    (void)dpy; (void)src; (void)dst; (void)gc;
-    (void)src_x; (void)src_y; (void)width; (void)height;
-    (void)dst_x; (void)dst_y; (void)plane;
-    return 1;
-}
+ * XCreatePixmap / XFreePixmap live in pixmap.c with real backing canvases;
+ * XCopyArea / XCopyPlane / XPutImage live in drawing.c. The BitmapData
+ * loaders below route through real XCreatePixmap so the id is valid and
+ * is cleaned up by XFreePixmap, but the bitmap bits themselves are not
+ * painted into the pixmap yet -- that would need XReadBitmapFileData to
+ * decode the X11 bitmap file format, which nothing currently exercises. */
 
 Pixmap XCreatePixmapFromBitmapData(Display *dpy, Drawable d, char *data,
                                    unsigned int w, unsigned int h,
@@ -401,10 +383,9 @@ emx11_close_display_proc XESetCloseDisplay(Display *dpy, int extension,
     return NULL;
 }
 
-/* -- Image stubs. Real XCreateImage / XPutImage would marshal pixel
- * data; libXpm uses them to upload a decoded XPM. Since we never
- * successfully load a pixmap (XPM loader returns failure), XPutImage
- * never runs -- but the linker still wants it. */
+/* -- Image stubs. XPutImage lives in drawing.c; XCreateImage still stays
+ * here because it's pure housekeeping -- the wasm side allocates the
+ * XImage header and data buffer; XPutImage is what copies to a Drawable. */
 
 XImage *XCreateImage(Display *dpy, Visual *visual, unsigned int depth,
                      int format, int offset, char *data,
@@ -422,14 +403,6 @@ XImage *XCreateImage(Display *dpy, Visual *visual, unsigned int depth,
     img->bytes_per_line = bytes_per_line ? bytes_per_line : (int)(width * 4);
     img->bits_per_pixel = 32;
     return img;
-}
-
-int XPutImage(Display *dpy, Drawable d, GC gc, XImage *image,
-              int src_x, int src_y, int dst_x, int dst_y,
-              unsigned int w, unsigned int h) {
-    (void)dpy; (void)d; (void)gc; (void)image;
-    (void)src_x; (void)src_y; (void)dst_x; (void)dst_y; (void)w; (void)h;
-    return 1;
 }
 
 /* -- More cursor variants. Same story as XDefineCursor: we ignore

@@ -425,6 +425,60 @@ export class Compositor {
     ctx.restore();
   }
 
+  /** XCopyArea source half: grab an (x,y,w,h) rectangle from the window's
+   *  painted area on the root canvas and paint it into `dstCtx` at
+   *  (dstX,dstY). Coords are window-local on the source side. Returns
+   *  silently when the window is unknown or unmapped -- match X semantics
+   *  of "unpainted source = zero-filled result" by leaving dstCtx alone
+   *  (callers that care can clear first). */
+  blitWindowTo(
+    srcId: number,
+    srcX: number,
+    srcY: number,
+    w: number,
+    h: number,
+    dstCtx: OffscreenCanvasRenderingContext2D,
+    dstX: number,
+    dstY: number,
+  ): void {
+    const win = this.windows.get(srcId);
+    if (!win || !win.mapped) return;
+    const { ax, ay } = this.absOrigin(win);
+    dstCtx.drawImage(
+      this.canvas.ctx.canvas as unknown as CanvasImageSource,
+      ax + srcX,
+      ay + srcY,
+      w,
+      h,
+      dstX,
+      dstY,
+      w,
+      h,
+    );
+  }
+
+  /** XCopyArea destination half: draw an image source rectangle onto the
+   *  root canvas clipped to the destination window. */
+  blitImageToWindow(
+    dstId: number,
+    dstX: number,
+    dstY: number,
+    src: CanvasImageSource,
+    srcX: number,
+    srcY: number,
+    w: number,
+    h: number,
+  ): void {
+    const win = this.windows.get(dstId);
+    if (!win || !win.mapped) return;
+    const { ax, ay } = this.absOrigin(win);
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    this.applyWindowClip(ctx, win);
+    ctx.drawImage(src, srcX, srcY, w, h, ax + dstX, ay + dstY, w, h);
+    ctx.restore();
+  }
+
   findWindowAt(cssX: number, cssY: number): number | null {
     /* Hit test in the same parent-before-child DFS order used for
      * paint, so the topmost painted window under the cursor wins.

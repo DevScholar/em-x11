@@ -777,10 +777,20 @@ export class Host implements EmX11Host {
   }
 
   onFillPolygon(id: number, points: Point[], shape: number, mode: number, color: number): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapPolygon(pm, points, color);
+      return;
+    }
     this.compositor.fillPolygon(id, points, shape, mode, color);
   }
 
   onDrawPoints(id: number, points: Point[], mode: number, color: number): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapPoints(pm, points, color);
+      return;
+    }
     this.compositor.drawPoints(id, points, mode, color);
   }
 
@@ -794,6 +804,11 @@ export class Host implements EmX11Host {
     bgColor: number,
     imageMode: number,
   ): void {
+    const pm = this.pixmaps.get(id);
+    if (pm) {
+      this.paintPixmapString(pm, x, y, font, text, fgColor, bgColor, imageMode !== 0);
+      return;
+    }
     this.compositor.drawString(id, x, y, font, text, fgColor, bgColor, imageMode !== 0);
   }
 
@@ -1038,5 +1053,260 @@ export class Host implements EmX11Host {
     pm.ctx.lineTo(x2 + 0.5, y2 + 0.5);
     pm.ctx.stroke();
     pm.ctx.restore();
+  }
+
+  private paintPixmapPolygon(pm: Pixmap, points: Point[], color: number): void {
+    if (points.length < 3) return;
+    pm.ctx.save();
+    if (pm.depth === 1 && color === 0) {
+      pm.ctx.globalCompositeOperation = 'destination-out';
+      pm.ctx.fillStyle = '#000';
+    } else {
+      pm.ctx.fillStyle = pixelToCssColor(color);
+    }
+    pm.ctx.beginPath();
+    const first = points[0]!;
+    pm.ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i]!;
+      pm.ctx.lineTo(p.x, p.y);
+    }
+    pm.ctx.closePath();
+    pm.ctx.fill();
+    pm.ctx.restore();
+  }
+
+  private paintPixmapPoints(pm: Pixmap, points: Point[], color: number): void {
+    if (points.length === 0) return;
+    pm.ctx.save();
+    if (pm.depth === 1 && color === 0) {
+      pm.ctx.globalCompositeOperation = 'destination-out';
+      pm.ctx.fillStyle = '#000';
+    } else {
+      pm.ctx.fillStyle = pixelToCssColor(color);
+    }
+    for (const p of points) pm.ctx.fillRect(p.x, p.y, 1, 1);
+    pm.ctx.restore();
+  }
+
+  private paintPixmapString(
+    pm: Pixmap,
+    x: number,
+    y: number,
+    font: string,
+    text: string,
+    fgColor: number,
+    bgColor: number,
+    imageMode: boolean,
+  ): void {
+    if (text.length === 0) return;
+    pm.ctx.save();
+    pm.ctx.font = font;
+    pm.ctx.textBaseline = 'alphabetic';
+    pm.ctx.textAlign = 'left';
+    if (imageMode) {
+      const metrics = pm.ctx.measureText(text);
+      const ascent =
+        metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent ?? 10;
+      const descent =
+        metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
+      if (pm.depth === 1 && bgColor === 0) {
+        pm.ctx.save();
+        pm.ctx.globalCompositeOperation = 'destination-out';
+        pm.ctx.fillStyle = '#000';
+        pm.ctx.fillRect(x, y - ascent, metrics.width, ascent + descent);
+        pm.ctx.restore();
+      } else {
+        pm.ctx.fillStyle = pixelToCssColor(bgColor);
+        pm.ctx.fillRect(x, y - ascent, metrics.width, ascent + descent);
+      }
+    }
+    if (pm.depth === 1 && fgColor === 0) {
+      pm.ctx.globalCompositeOperation = 'destination-out';
+      pm.ctx.fillStyle = '#000';
+    } else {
+      pm.ctx.fillStyle = pixelToCssColor(fgColor);
+    }
+    pm.ctx.fillText(text, x, y);
+    pm.ctx.restore();
+  }
+
+  /* -- Drawable-to-drawable copy ---------------------------------------- */
+
+  /** XCopyArea: blit a rectangle from src drawable to dst drawable. Either
+   *  endpoint may be a Window or a Pixmap; any combination is legal per
+   *  xorg/xserver's ProcCopyArea. W→W can't use same-canvas drawImage
+   *  safely (spec says overlap is impl-defined), so we stage through an
+   *  OffscreenCanvas. Also the reason clipped-to-visible-root bytes
+   *  satisfy Tk's double-buffering path: the source window's pixels on
+   *  the root canvas ARE the current contents. */
+  onCopyArea(
+    srcId: number,
+    dstId: number,
+    srcX: number,
+    srcY: number,
+    w: number,
+    h: number,
+    dstX: number,
+    dstY: number,
+  ): void {
+    if (w <= 0 || h <= 0) return;
+    const srcPm = this.pixmaps.get(srcId);
+    const dstPm = this.pixmaps.get(dstId);
+    if (dstPm) {
+      if (srcPm) {
+        dstPm.ctx.drawImage(srcPm.canvas, srcX, srcY, w, h, dstX, dstY, w, h);
+      } else {
+        this.compositor.blitWindowTo(srcId, srcX, srcY, w, h, dstPm.ctx, dstX, dstY);
+      }
+      return;
+    }
+    if (srcPm) {
+      this.compositor.blitImageToWindow(
+        dstId,
+        dstX,
+        dstY,
+        srcPm.canvas,
+        srcX,
+        srcY,
+        w,
+        h,
+      );
+      return;
+    }
+    /* W→W: capture through an intermediate so drawImage doesn't overlap
+     * the root canvas with itself. */
+    const stage = new OffscreenCanvas(w, h);
+    const sctx = stage.getContext('2d');
+    if (!sctx) return;
+    this.compositor.blitWindowTo(srcId, srcX, srcY, w, h, sctx, 0, 0);
+    this.compositor.blitImageToWindow(dstId, dstX, dstY, stage, 0, 0, w, h);
+  }
+
+  /** XCopyPlane: simplified to the case Tk/Xaw actually use -- a depth-1
+   *  source pixmap whose set bits paint with `fg` and unset bits (when
+   *  `applyBg` is true) paint with `bg`. `plane` is accepted for signature
+   *  fidelity but ignored (the source canvas's alpha IS the only plane).
+   *  W→anything CopyPlane is not exercised by our callers. */
+  onCopyPlane(
+    srcId: number,
+    dstId: number,
+    srcX: number,
+    srcY: number,
+    w: number,
+    h: number,
+    dstX: number,
+    dstY: number,
+    _plane: number,
+    fg: number,
+    bg: number,
+    applyBg: boolean,
+  ): void {
+    if (w <= 0 || h <= 0) return;
+    const srcPm = this.pixmaps.get(srcId);
+    if (!srcPm) return;
+    /* Build a coloured stencil: fg where src alpha>0, bg where alpha==0
+     * (if applyBg), transparent otherwise. Then blit to dst. */
+    const stage = new OffscreenCanvas(w, h);
+    const sctx = stage.getContext('2d');
+    if (!sctx) return;
+    if (applyBg) {
+      sctx.fillStyle = pixelToCssColor(bg);
+      sctx.fillRect(0, 0, w, h);
+    }
+    /* Paint the src canvas clipped to (srcX, srcY, w, h) into a mask,
+     * then use source-in to colour the mask with fg. */
+    const maskCtx = new OffscreenCanvas(w, h).getContext('2d');
+    if (!maskCtx) return;
+    maskCtx.drawImage(srcPm.canvas, srcX, srcY, w, h, 0, 0, w, h);
+    maskCtx.globalCompositeOperation = 'source-in';
+    maskCtx.fillStyle = pixelToCssColor(fg);
+    maskCtx.fillRect(0, 0, w, h);
+    sctx.drawImage(maskCtx.canvas, 0, 0);
+
+    const dstPm = this.pixmaps.get(dstId);
+    if (dstPm) {
+      dstPm.ctx.drawImage(stage, 0, 0, w, h, dstX, dstY, w, h);
+      return;
+    }
+    this.compositor.blitImageToWindow(dstId, dstX, dstY, stage, 0, 0, w, h);
+  }
+
+  /** XPutImage: blit a raw pixel buffer (ZPixmap, RGBA-ish) or 1-bit
+   *  bitmap (XYBitmap) into a Drawable. ZPixmap arrives as 32bpp BGRA in
+   *  memory order on little-endian wasm (format0 is LSBFirst, per
+   *  display.c). We reorder into RGBA for ImageData. XYBitmap treats each
+   *  set bit as gc->foreground, unset as gc->background. */
+  onPutImage(
+    dstId: number,
+    dstX: number,
+    dstY: number,
+    w: number,
+    h: number,
+    format: number,
+    depth: number,
+    bytesPerLine: number,
+    data: Uint8Array,
+    fg: number,
+    bg: number,
+  ): void {
+    if (w <= 0 || h <= 0) return;
+    const stage = new OffscreenCanvas(w, h);
+    const sctx = stage.getContext('2d');
+    if (!sctx) return;
+    const img = sctx.createImageData(w, h);
+    const out = img.data;
+    /* format: 0=XYBitmap (depth must be 1), 2=ZPixmap. */
+    if (format === 0 || depth === 1) {
+      const fgR = (fg >> 16) & 0xff;
+      const fgG = (fg >> 8) & 0xff;
+      const fgB = fg & 0xff;
+      const bgR = (bg >> 16) & 0xff;
+      const bgG = (bg >> 8) & 0xff;
+      const bgB = bg & 0xff;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const byte = data[y * bytesPerLine + (x >> 3)] ?? 0;
+          /* bitmap_bit_order LSBFirst (display.c). */
+          const bit = (byte >> (x & 7)) & 1;
+          const o = (y * w + x) * 4;
+          if (bit) {
+            out[o] = fgR;
+            out[o + 1] = fgG;
+            out[o + 2] = fgB;
+            out[o + 3] = 0xff;
+          } else {
+            out[o] = bgR;
+            out[o + 1] = bgG;
+            out[o + 2] = bgB;
+            out[o + 3] = 0xff;
+          }
+        }
+      }
+    } else {
+      /* ZPixmap 32bpp. display.c advertises LSBFirst + 32-bit unit, so
+       * pixel layout in bytes is B,G,R,A. Convert to canvas ImageData
+       * (R,G,B,A). */
+      for (let y = 0; y < h; y++) {
+        const src = y * bytesPerLine;
+        const dst = y * w * 4;
+        for (let x = 0; x < w; x++) {
+          const si = src + x * 4;
+          const di = dst + x * 4;
+          out[di] = data[si + 2] ?? 0;
+          out[di + 1] = data[si + 1] ?? 0;
+          out[di + 2] = data[si] ?? 0;
+          out[di + 3] = data[si + 3] ?? 0xff;
+        }
+      }
+    }
+    sctx.putImageData(img, 0, 0);
+
+    const dstPm = this.pixmaps.get(dstId);
+    if (dstPm) {
+      dstPm.ctx.drawImage(stage, 0, 0, w, h, dstX, dstY, w, h);
+      return;
+    }
+    this.compositor.blitImageToWindow(dstId, dstX, dstY, stage, 0, 0, w, h);
   }
 }

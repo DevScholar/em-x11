@@ -237,6 +237,53 @@ export interface EmX11Host {
   /** XGetAtomName for Host-allocated atoms. Returns null when the id
    *  is unknown (caller maps that to NULL / BadAtom). */
   getAtomName(atom: number): string | null;
+  /** XCopyArea: blit between any two Drawables (Window or Pixmap).
+   *  Host picks the path (pixmap canvas vs root canvas rectangle)
+   *  based on which ids are Pixmap-registered. Tk's double-buffering
+   *  flow is Pixmap→Window. */
+  onCopyArea(
+    srcId: number,
+    dstId: number,
+    srcX: number,
+    srcY: number,
+    w: number,
+    h: number,
+    dstX: number,
+    dstY: number,
+  ): void;
+  /** XCopyPlane: simplified to a depth-1 source pixmap whose alpha is
+   *  the plane. Set bits paint with fg; unset bits paint with bg if
+   *  applyBg is true (GXcopy + opaque stipple). */
+  onCopyPlane(
+    srcId: number,
+    dstId: number,
+    srcX: number,
+    srcY: number,
+    w: number,
+    h: number,
+    dstX: number,
+    dstY: number,
+    plane: number,
+    fg: number,
+    bg: number,
+    applyBg: boolean,
+  ): void;
+  /** XPutImage: blit raw pixel data into a Drawable. format==0 (XYBitmap)
+   *  + depth==1 paints as fg/bg stencil; format==2 (ZPixmap) expects
+   *  32bpp BGRA in the byte stream matching display.c's format0. */
+  onPutImage(
+    dstId: number,
+    dstX: number,
+    dstY: number,
+    w: number,
+    h: number,
+    format: number,
+    depth: number,
+    bytesPerLine: number,
+    data: Uint8Array,
+    fg: number,
+    bg: number,
+  ): void;
 }
 
 declare global {

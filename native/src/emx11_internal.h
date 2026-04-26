@@ -404,6 +404,29 @@ extern void emx11_js_pixmap_destroy(Pixmap id);
 extern void emx11_js_shape_combine_mask(Window dest, Pixmap src,
                                         int x_off, int y_off, int op);
 
+/* XCopyArea / XCopyPlane / XPutImage bridges. Host dispatches by looking
+ * up src/dst ids in its pixmap table: unknown id = window path, known =
+ * OffscreenCanvas path. XCopyPlane is simplified to the depth-1 pixmap
+ * source that Xaw/Tk actually use (see host.ts onCopyPlane). XPutImage
+ * takes the already-sliced byte buffer; the C side is responsible for
+ * computing bytes_per_line * height and pointing at image->data. */
+extern void emx11_js_copy_area(Drawable src, Drawable dst,
+                               int src_x, int src_y,
+                               unsigned int width, unsigned int height,
+                               int dst_x, int dst_y);
+extern void emx11_js_copy_plane(Drawable src, Drawable dst,
+                                int src_x, int src_y,
+                                unsigned int width, unsigned int height,
+                                int dst_x, int dst_y,
+                                unsigned long plane,
+                                unsigned long fg, unsigned long bg,
+                                int apply_bg);
+extern void emx11_js_put_image(Drawable dst, int dst_x, int dst_y,
+                               unsigned int width, unsigned int height,
+                               int format, int depth, int bytes_per_line,
+                               const unsigned char *data, int data_len,
+                               unsigned long fg, unsigned long bg);
+
 /* Atom table. Predefined atoms 1..68 are still resolved locally in
  * atom.c for zero round-trip cost; anything else goes through Host
  * so every wasm module in the same page agrees on the id. Fixes the

@@ -171,3 +171,70 @@ int XClearArea(Display *display, Window w,
     emx11_js_clear_area(w, x, y, width, height);
     return 1;
 }
+
+/* ------------------------------------------------------------------------- */
+/*  Drawable-to-drawable copy: XCopyArea / XCopyPlane / XPutImage.           */
+/*                                                                           */
+/*  Routing happens JS-side in Host.onCopy* / onPutImage -- it decides       */
+/*  "is this id a pixmap or a window" for each endpoint. The C side just     */
+/*  flattens Xlib args across the bridge. GC fields we use are foreground,   */
+/*  background (XCopyPlane, XPutImage bitmap path). gc->function and         */
+/*  plane_mask aren't plumbed through our simplified GC struct; we behave    */
+/*  as if they're GXcopy + AllPlanes, matching what Xaw/Tk expect.           */
+/* ------------------------------------------------------------------------- */
+
+int XCopyArea(Display *dpy, Drawable src, Drawable dst, GC gc,
+              int src_x, int src_y, unsigned int width, unsigned int height,
+              int dst_x, int dst_y) {
+    (void)dpy; (void)gc;
+    if (width == 0 || height == 0) return 1;
+    emx11_js_copy_area(src, dst, src_x, src_y, width, height, dst_x, dst_y);
+    return 1;
+}
+
+int XCopyPlane(Display *dpy, Drawable src, Drawable dst, GC gc,
+               int src_x, int src_y, unsigned int width, unsigned int height,
+               int dst_x, int dst_y, unsigned long plane) {
+    (void)dpy;
+    if (!gc || width == 0 || height == 0) return 1;
+    /* apply_bg: "paint unset bits with gc->background". In X semantics
+     * this depends on gc->function (GXcopy) and whether the client wants
+     * opaque stipple behaviour. Without gc->function in our struct, we
+     * default to opaque: Xaw's Label + Tk's bitmap images both want the
+     * bg painted. Clients that need transparent overlays use GXand,
+     * which we don't currently expose. */
+    emx11_js_copy_plane(src, dst, src_x, src_y, width, height,
+                        dst_x, dst_y, plane,
+                        gc->foreground, gc->background, 1);
+    return 1;
+}
+
+int XPutImage(Display *dpy, Drawable d, GC gc, XImage *image,
+              int src_x, int src_y, int dst_x, int dst_y,
+              unsigned int w, unsigned int h) {
+    (void)dpy;
+    if (!gc || !image || !image->data || w == 0 || h == 0) return 1;
+    /* Slice a (src_x, src_y, w, h) sub-rectangle out of the XImage and
+     * hand the raw bytes to Host. We pass the full scanline stride so
+     * Host can step source rows without additional copying; Host uses
+     * (src_x, src_y) == (0, 0) implicitly by pointing at the right
+     * offset. For simplicity here we just bump the pointer. */
+    int bpl = image->bytes_per_line;
+    int bpp = image->bits_per_pixel;
+    const unsigned char *base = (const unsigned char *)image->data;
+    int byte_offset;
+    if (image->format == XYBitmap || image->depth == 1) {
+        /* 1 bit per pixel; src_x may not be byte-aligned. We push the
+         * whole scanline starting at byte-aligned src_x_floor and let
+         * Host pick bits from column (src_x % 8) onward. For the common
+         * case src_x == 0 the math collapses to "start of row". */
+        byte_offset = src_y * bpl + (src_x >> 3);
+    } else {
+        byte_offset = src_y * bpl + src_x * (bpp >> 3);
+    }
+    int data_len = (int)h * bpl;
+    emx11_js_put_image(d, dst_x, dst_y, w, h, image->format, image->depth,
+                       bpl, base + byte_offset, data_len,
+                       gc->foreground, gc->background);
+    return 1;
+}
