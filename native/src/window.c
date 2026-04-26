@@ -120,12 +120,36 @@ int XDestroyWindow(Display *display, Window w) {
  *    every size/position change so it can redraw, so we push through
  *    emx11_js_window_create when a window is logically "re-set". */
 
-static void notify_js_reconfigure(EmxWindow *win) {
+static void notify_js_reconfigure(Display *display, EmxWindow *win) {
     /* Geometry-only path: window already exists on Host; just update
      * its (x, y, w, h). We deliberately avoid re-calling window_create
      * here -- doing so stomped on parent / shape / background_pixmap. */
     emx11_js_window_configure(win->id, win->x, win->y,
                               win->width, win->height);
+
+    /* The compositor's configureWindow erases the window's old absolute
+     * rect and paints fresh background at the new rect, but the
+     * application's own drawing (text, arcs, fills) is gone -- we have
+     * no per-window backing store. Push an Expose so the application
+     * redraws its content into the new rect on its next XNextEvent.
+     *
+     * Only push if the window is currently mapped: configuring an
+     * unmapped window doesn't need exposure (it isn't visible anyway).
+     * Children that moved with their parent don't get Expose under
+     * this model (real X traverses the tree); accepted as a known
+     * visual gap until backing store lands. */
+    if (!win->mapped) return;
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xexpose.type    = Expose;
+    ev.xexpose.display = display;
+    ev.xexpose.window  = win->id;
+    ev.xexpose.x       = 0;
+    ev.xexpose.y       = 0;
+    ev.xexpose.width   = (int)win->width;
+    ev.xexpose.height  = (int)win->height;
+    ev.xexpose.count   = 0;
+    emx11_event_queue_push(display, &ev);
 }
 
 int XMoveWindow(Display *display, Window w, int x, int y) {
@@ -133,7 +157,7 @@ int XMoveWindow(Display *display, Window w, int x, int y) {
     if (!win) return 0;
     win->x = x;
     win->y = y;
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 
@@ -143,7 +167,7 @@ int XResizeWindow(Display *display, Window w,
     if (!win) return 0;
     win->width  = width;
     win->height = height;
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 
@@ -155,7 +179,7 @@ int XMoveResizeWindow(Display *display, Window w, int x, int y,
     win->y = y;
     win->width  = width;
     win->height = height;
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 
@@ -169,7 +193,7 @@ int XConfigureWindow(Display *display, Window w,
     if (valuemask & CWHeight)      win->height = (unsigned int)values->height;
     if (valuemask & CWBorderWidth) win->border_width = (unsigned int)values->border_width;
     /* CWStackMode / CWSibling: z-order management not yet implemented. */
-    notify_js_reconfigure(win);
+    notify_js_reconfigure(display, win);
     return 1;
 }
 

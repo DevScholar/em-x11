@@ -7,6 +7,21 @@ const demos = [
   { name: 'hello', description: 'Minimal window with a filled rectangle' },
   { name: 'xt-hello', description: 'libXt Shell + Core child widget' },
   { name: 'xaw-hello', description: 'libXaw Label widget on top of Xt' },
+  { name: 'xeyes', description: 'Classic eyes-track-mouse demo (SHAPE + arc drawing)' },
+  {
+    name: 'twm',
+    description:
+      'Tab Window Manager — BUGGY. Loads and registers redirect on root, ' +
+      'but managed-client framing has known gaps (Expose timing across ' +
+      'connections, atom divergence, no GXxor); see README.',
+  },
+  {
+    name: 'session',
+    description:
+      'twm + xeyes together — also BUGGY (same gaps as the twm demo). ' +
+      'Useful to see redirect dispatch, frame-of-xeyes attempt, and the ' +
+      'remaining DIX-alignment gaps in action.',
+  },
 ];
 
 const root = document.getElementById('app');

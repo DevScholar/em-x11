@@ -97,16 +97,37 @@ export class Compositor {
 
   /** Geometry-only update for an existing window. Preserves parent,
    *  shape, background_pixmap, and mapped state. No-op if id is unknown.
-   *  Does NOT repaint -- moving/resizing leaves the previous area as-is
-   *  on canvas (X expects the application to redraw on Expose anyway,
-   *  which we don't re-synthesize at the moment). */
+   *
+   *  Repaint strategy: erase the OLD absolute rect (paints whatever's
+   *  underneath -- root + ancestors + still-mapped siblings that
+   *  intersect), then paint the moved window's subtree at the NEW
+   *  absolute position. The window's app-level drawings are gone; the C
+   *  side synthesizes an Expose in notify_js_reconfigure so the client
+   *  redraws content. Children that moved with their parent ALSO lost
+   *  their drawings -- they don't get Expose under our model (real X
+   *  has backing store; we don't), accepted as a known visual gap. */
   configureWindow(id: number, x: number, y: number, w: number, h: number): void {
     const win = this.windows.get(id);
     if (!win) return;
+    let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
+    if (win.mapped) {
+      const { ax, ay } = this.absOrigin(win);
+      oldRect = { ax, ay, w: win.width, h: win.height };
+    }
     win.x = x;
     win.y = y;
     win.width = w;
     win.height = h;
+    if (oldRect) {
+      /* Erase old position. mapped is still true at this point but the
+       * window now sits at the NEW position, so painting from root will
+       * fill the old rect with parents/siblings, and the window's bg
+       * lands at the new rect (which intersects oldRect only on a
+       * shrinking move -- harmless, the new paint goes on top below). */
+      this.repaintAbsoluteRect(oldRect.ax, oldRect.ay, oldRect.w, oldRect.h);
+      /* Paint new position fresh. paintWindowSubtree handles children. */
+      this.paintWindowSubtree(win);
+    }
   }
 
   /** XReparentWindow: change a window's parent link and local origin.
@@ -207,14 +228,34 @@ export class Compositor {
   unmapWindow(id: number): void {
     const w = this.windows.get(id);
     if (!w) return;
+    if (!w.mapped) return;
+    const { ax, ay } = this.absOrigin(w);
+    const oldW = w.width;
+    const oldH = w.height;
     w.mapped = false;
-    /* No repaint: leaving the previous drawing on canvas is harmless
-     * for our current demos (xeyes/xt-hello/xaw-hello don't unmap and
-     * remap). A backing-store rewrite would clear to parent's bg. */
+    /* Repaint the freed area from root downwards. The just-unmapped
+     * window is skipped (mapped=false), so the parent + still-mapped
+     * siblings get to fill in. Note: any sibling whose drawing
+     * intersected this rect loses it (we paint sibling backgrounds,
+     * not their app content) -- a backing-store rewrite would fix
+     * that. Current demos don't have overlapping siblings. */
+    this.repaintAbsoluteRect(ax, ay, oldW, oldH);
   }
 
   destroyWindow(id: number): void {
+    const w = this.windows.get(id);
+    if (!w) return;
+    let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
+    if (w.mapped) {
+      const { ax, ay } = this.absOrigin(w);
+      oldRect = { ax, ay, w: w.width, h: w.height };
+    }
     this.windows.delete(id);
+    if (oldRect) {
+      /* Same caveat as unmapWindow: siblings overlapping the destroyed
+       * window's rect lose their drawn content. */
+      this.repaintAbsoluteRect(oldRect.ax, oldRect.ay, oldRect.w, oldRect.h);
+    }
   }
 
   fillRect(
@@ -480,6 +521,72 @@ export class Compositor {
     for (const child of this.windows.values()) {
       if (child.parent === w.id) this.paintWindowSubtree(child);
     }
+  }
+
+  /** Erase a canvas rectangle by repainting it from the window tree.
+   *  Used for unmap, destroy, and the "old position" half of move/
+   *  resize. Walks every root window DFS, painting its background
+   *  (clipped to its own rect intersected with the dirty rect) only
+   *  if it intersects the dirty rect.
+   *
+   *  The clip stack is set up so each window's bg paint can't escape
+   *  the dirty rect. applyWindowClip inside the loop adds the window's
+   *  own bounding clip on top, so siblings outside the rect aren't
+   *  touched even if their bg paint call covers their full rectangle.
+   *
+   *  Note: this paints sibling backgrounds, which overwrites whatever
+   *  application drawings those siblings had inside the dirty rect. In
+   *  real X the server would send Expose to those siblings; we don't
+   *  re-synthesize Expose here. Acceptable for current demos (no
+   *  overlapping siblings). For overlapping cases (e.g. a WM with
+   *  managed windows), the affected siblings need to redraw via some
+   *  other trigger. */
+  private repaintAbsoluteRect(
+    rax: number,
+    ray: number,
+    rw: number,
+    rh: number,
+  ): void {
+    if (rw <= 0 || rh <= 0) return;
+    const ctx = this.canvas.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rax, ray, rw, rh);
+    ctx.clip();
+    const visit = (win: ManagedWindow): void => {
+      if (win.mapped && this.intersectsAbsRect(win, rax, ray, rw, rh)) {
+        ctx.save();
+        this.applyWindowClip(ctx, win);
+        this.paintBackgroundRect(ctx, win, 0, 0, win.width, win.height);
+        ctx.restore();
+      }
+      for (const child of this.windows.values()) {
+        if (child.parent === win.id) visit(child);
+      }
+    };
+    for (const win of this.windows.values()) {
+      if (win.parent === 0) visit(win);
+    }
+    ctx.restore();
+  }
+
+  /** Axis-aligned rect overlap test, comparing the window's absolute
+   *  bounds with the given rect. Used by repaintAbsoluteRect to skip
+   *  windows that don't intersect the dirty area. */
+  private intersectsAbsRect(
+    win: ManagedWindow,
+    rax: number,
+    ray: number,
+    rw: number,
+    rh: number,
+  ): boolean {
+    const { ax, ay } = this.absOrigin(win);
+    return (
+      ax < rax + rw &&
+      ax + win.width > rax &&
+      ay < ray + rh &&
+      ay + win.height > ray
+    );
   }
 
   /** Build a canvas path for an X-semantics arc. Exposed as a free

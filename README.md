@@ -78,7 +78,8 @@ em-x11/
 │   ├── bindings/       # --js-library glue (emscripten side)
 │   ├── loader/
 │   └── types/
-├── demos/              # In-tree demos (hello, xt-hello, xaw-hello)
+├── demos/              # In-tree demos (hello, xt-hello, xaw-hello,
+│                       # xeyes, twm — see Demos section below)
 ├── third-party/        # libXt / libXaw / libXmu / libXpm + xeyes / xclock
 │                       # (gitignored; rehydrated by scripts/fetch-third-party.sh)
 ├── scripts/            # Build-support scripts + third-party overlays
@@ -160,6 +161,49 @@ pnpm dev
 Vite listens on `http://localhost:5173`. WSL2 forwards the port to the
 Windows host automatically, so you can open the URL in any browser on
 Windows.
+
+## Demos
+
+Open the dev server and pick one from the landing page. Each demo lives
+under `demos/<name>/` and is a small TypeScript harness around a wasm
+client.
+
+| Demo        | What it shows                                                                            | Status        |
+| ----------- | ---------------------------------------------------------------------------------------- | ------------- |
+| `hello`     | Raw Xlib: filled rectangles, no toolkit.                                                 | works         |
+| `xt-hello`  | libXt shell with a Core child widget; basic event dispatch.                              | works         |
+| `xaw-hello` | libXaw `Label` on top of Xt/Xmu/Xpm.                                                     | works         |
+| `xeyes`     | Classic eyes-track-mouse demo; exercises SHAPE + arc drawing + Xt timers.                | works         |
+| `twm`       | The Tab Window Manager. Boots, holds SubstructureRedirect on root, reads our staged twmrc. | **buggy** ⚠️ |
+| `session`   | twm + xeyes launched together; exercises the redirect / cross-connection paths.            | **buggy** ⚠️ |
+
+### Why twm is marked buggy
+
+twm boots and registers itself as the WM, but **managed-client framing
+doesn't render correctly**. Known gaps that aren't trivially fixable
+without a deeper compositor + DIX-aligned WM rewrite:
+
+- **Expose timing across connections.** The C side pushes Expose to the
+  caller's local queue at `XMapWindow` time, but for a redirect-bound
+  map the shell isn't actually mapped until twm runs later. Expose
+  arrives before the window is in its final position.
+- **Atom IDs diverge across wasm modules.** Each module has its own
+  atom counter. Predefined atoms (`XA_WM_NAME` = 39 etc.) agree, but
+  custom atoms (`WM_PROTOCOLS`, `WM_DELETE_WINDOW`) don't, so cross-
+  client property reads silently miss.
+- **No GXxor.** twm's `MoveOutline` uses XOR raster ops to draw the
+  drag outline; we don't implement them.
+- **No cross-connection event delivery.** DIX's `DeliverEventsToWindow`
+  walks the parent chain across clients; we don't.
+- **No DestroyWindow recursion** (DIX `CrushTree`).
+- **No ConfigureRequest / CirculateRequest redirect.**
+
+The redirect plumbing (`windowSubscriptions`, `redirectHolderFor`,
+`dispatchMapRequest` in [src/runtime/host.ts](src/runtime/host.ts))
+is in place — it's the surrounding semantics that aren't. WM work is
+paused; the demo stays as a smoke test that twm at least loads,
+holds the redirect, and parses a twmrc. See the WM-direction memory
+for resume notes.
 
 ## Roadmap
 
