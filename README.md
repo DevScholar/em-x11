@@ -8,6 +8,8 @@ instead of a real X server. Programs written against Xlib are compiled
 with Emscripten, link against `em-x11`, and draw directly to a browser
 canvas — there is **no** X protocol byte stream and no server process.
 
+![Xeyes Screenshot](screenshots/xeyes.png)
+
 > Status: **libXt + libXaw linked and running.** The in-tree demos
 > cover raw Xlib (`hello` — filled rectangles), libXt + Core child
 > widgets with event dispatch (`xt-hello`), and libXaw Label on top
@@ -183,20 +185,18 @@ twm boots and registers itself as the WM, but **managed-client framing
 doesn't render correctly**. Known gaps that aren't trivially fixable
 without a deeper compositor + DIX-aligned WM rewrite:
 
-- **Expose timing across connections.** The C side pushes Expose to the
-  caller's local queue at `XMapWindow` time, but for a redirect-bound
-  map the shell isn't actually mapped until twm runs later. Expose
-  arrives before the window is in its final position.
-- **Atom IDs diverge across wasm modules.** Each module has its own
-  atom counter. Predefined atoms (`XA_WM_NAME` = 39 etc.) agree, but
-  custom atoms (`WM_PROTOCOLS`, `WM_DELETE_WINDOW`) don't, so cross-
-  client property reads silently miss.
 - **No GXxor.** twm's `MoveOutline` uses XOR raster ops to draw the
   drag outline; we don't implement them.
 - **No cross-connection event delivery.** DIX's `DeliverEventsToWindow`
-  walks the parent chain across clients; we don't.
+  walks the parent chain across clients; we don't, so children of a
+  reparented shell never receive Expose / pointer events from the WM
+  side of the connection.
 - **No DestroyWindow recursion** (DIX `CrushTree`).
 - **No ConfigureRequest / CirculateRequest redirect.**
+- **Custom atom IDs diverge across wasm modules.** Each C module owns
+  its own atom counter. Predefined atoms (`XA_WM_NAME` = 39, etc.)
+  agree trivially, but custom atoms like `WM_PROTOCOLS` /
+  `WM_DELETE_WINDOW` don't, so polite-close handshakes silently miss.
 
 The redirect plumbing (`windowSubscriptions`, `redirectHolderFor`,
 `dispatchMapRequest` in [src/runtime/host.ts](src/runtime/host.ts))

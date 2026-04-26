@@ -135,6 +135,13 @@ export class Host implements EmX11Host {
    *  can diverge between connections and queries will miss. That's a
    *  separate step (move the atom table to Host too). */
   private readonly properties = new Map<number, Map<number, PropertyEntry>>();
+  /** Exposes deferred during the bootstrap window between a connection's
+   *  XOpenDisplay and the matching launchClient resolution. While the
+   *  client's main() runs (including its first XMapWindow), conn.module
+   *  is still null so a Host->C ccall would no-op. We stash the window
+   *  IDs here and drain them in launchClient once `conn.module` lands.
+   *  Keyed by connId; inner Set holds windows pending an Expose. */
+  private readonly pendingExposes = new Map<number, Set<number>>();
   private nextConnId = 0;
   private pendingLaunch: PendingLaunch | null = null;
   /** Last window that received a ButtonPress, by connection id. Key
@@ -252,6 +259,19 @@ export class Host implements EmX11Host {
       );
     }
     conn.module = module;
+    /* Drain Exposes that were deferred while conn.module was null.
+     * onWindowMap / onWindowConfigure parked them here; now that the
+     * client's queue is reachable via ccall, push them through. The
+     * client's main() has already suspended in XNextEvent's
+     * emscripten_sleep, so the pushed events wake it on the next yield
+     * and its handler paints the window content. */
+    const deferred = this.pendingExposes.get(pending.connId);
+    if (deferred) {
+      for (const winId of deferred) {
+        this.pushExposeForWindow(winId, module);
+      }
+      this.pendingExposes.delete(pending.connId);
+    }
     return { connId: pending.connId, module };
   }
 
@@ -462,6 +482,14 @@ export class Host implements EmX11Host {
 
   onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void {
     this.compositor.configureWindow(id, x, y, w, h);
+    /* Configuring a mapped window erases its old content (we have no
+     * per-window backing store), so the owner needs an Expose to redraw.
+     * Routes via the window's owner module rather than the calling
+     * connection: a WM resizing a managed client's shell is a cross-
+     * connection call. attrsOf() reflects the post-configure state, so
+     * we read mapped from there. */
+    const attrs = this.compositor.attrsOf(id);
+    if (attrs?.mapped) this.pushExposeForWindow(id, null);
   }
 
   onWindowMap(connId: number, id: number): void {
@@ -485,13 +513,20 @@ export class Host implements EmX11Host {
       return;
     }
     this.compositor.mapWindow(id);
-    /* No Expose synthesis here: that lives in C's XMapWindow. Doing
-     * it Host-side via mod.ccall would race the launchClient handoff
-     * (conn.module is null during the initial map that happens inside
-     * loadWasm's awaited factory, before launchClient stitches the
-     * Module reference onto the Connection). Re-add a Host-side path
-     * only if we revive SubstructureRedirect, where the map might be
-     * served by a different connection than the owner. */
+    /* Expose synthesis: route to the window's actual owner, not the
+     * calling connection. C-side XMapWindow used to push directly into
+     * the caller's queue, which only worked for self-mapped windows --
+     * a WM mapping a managed client's shell is the canonical case where
+     * caller != owner, and the previous shape sent Expose to the WM
+     * instead of the client whose shell just appeared on screen.
+     *
+     * pushExposeForWindow handles both bound and unbound owner modules:
+     * during the initial XOpenDisplay -> XMapWindow burst, the owner's
+     * Module reference isn't installed yet (launchClient awaits the
+     * factory which only resolves after main() suspends in XNextEvent's
+     * emscripten_sleep). Those Exposes get queued in pendingExposes and
+     * drained from launchClient once `conn.module` lands. */
+    this.pushExposeForWindow(id, null);
   }
 
   onWindowUnmap(_connId: number, id: number): void {
@@ -569,6 +604,52 @@ export class Host implements EmX11Host {
       if (mask & SubstructureRedirectMask) return connId;
     }
     return null;
+  }
+
+  /** Push a full-window Expose to the owner of `id`, via ccall on the
+   *  owner's Module. Used by onWindowMap and onWindowConfigure to keep
+   *  Expose routing consistent regardless of which connection initiated
+   *  the structural change.
+   *
+   *  When the owner has no Module yet (XOpenDisplay returned but
+   *  launchClient hasn't resolved its factory), park the window in
+   *  pendingExposes; launchClient drains it when it binds the Module.
+   *  Pass `forceModule` from launchClient itself to bypass the owner
+   *  lookup -- at drain time we already have the freshly-bound module
+   *  in hand and the conn record reflects it. */
+  private pushExposeForWindow(
+    id: number,
+    forceModule: EmscriptenModule | null,
+  ): void {
+    const geom = this.compositor.geometryOf(id);
+    if (!geom) return;
+    let module: EmscriptenModule | null = forceModule;
+    if (!module) {
+      const ownerConnId = this.windowToConn.get(id);
+      if (ownerConnId === undefined) return;
+      /* Host-owned windows (conn 0, currently just the root) have no
+       * client to expose. Skip silently. */
+      if (ownerConnId === 0) return;
+      const conn = this.connections.get(ownerConnId);
+      if (!conn) return;
+      if (!conn.module) {
+        /* Bootstrap: queue and let launchClient drain. */
+        let pending = this.pendingExposes.get(ownerConnId);
+        if (!pending) {
+          pending = new Set();
+          this.pendingExposes.set(ownerConnId, pending);
+        }
+        pending.add(id);
+        return;
+      }
+      module = conn.module;
+    }
+    module.ccall(
+      'emx11_push_expose_event',
+      null,
+      ['number', 'number', 'number', 'number', 'number'],
+      [id, 0, 0, geom.width, geom.height],
+    );
   }
 
   /** Push a MapRequest into the holder's event queue via ccall. The
