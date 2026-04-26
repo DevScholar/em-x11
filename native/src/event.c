@@ -149,13 +149,23 @@ int XNextEvent(Display *display, XEvent *event_return) {
  * along the chain matches, the event is discarded.
  *
  * PointerWindow / InputFocus as `w`: real Xlib resolves these against
- * current pointer / focus state. em-x11 has no focus tracker yet, so we
- * treat them as literal XIDs; Tk's routing code inspects xany.window
- * post-delivery and copes. Revisit when XSetInputFocus is promoted from
- * stub to real. */
+ * current pointer / focus state. InputFocus resolves to
+ * display->focus_window (wired below); PointerWindow is still a TODO
+ * (needs a pointer-position hit test, which means a JS round-trip we
+ * haven't needed yet). Tk's explicit-send paths use real XIDs, not
+ * these sentinels, so the gap hasn't bitten in practice. */
 Status XSendEvent(Display *display, Window w, Bool propagate,
                   long event_mask, XEvent *event_send) {
     if (!display || !event_send) return 0;
+
+    /* Resolve InputFocus sentinel to the concrete focus XID before any
+     * further bookkeeping -- the rest of this function treats `w` as a
+     * real window id. PointerWindow (= 0) coincides numerically with
+     * None so we leave it alone; the caller gets delivery on xany.window
+     * == 0, which Tk self-filters. */
+    if (w == InputFocus) {
+        w = display->focus_window;
+    }
 
     XEvent ev = *event_send;                    /* caller may reuse buffer */
     ev.xany.display    = display;
@@ -169,7 +179,7 @@ Status XSendEvent(Display *display, Window w, Bool propagate,
 
     /* Find the closest window up from `w` that selects any bit of
      * event_mask. If propagate=False, only `w` itself is a candidate. */
-    EmxWindow *target = (w == PointerWindow || w == InputFocus)
+    EmxWindow *target = (w == PointerWindow || w == None)
                             ? NULL
                             : emx11_window_find(display, w);
     Window root = display->screens[0].root;
@@ -191,6 +201,60 @@ Status XSendEvent(Display *display, Window w, Bool propagate,
      * event_mask selection is well-exercised by real Tk traffic. */
     ev.xany.window = w;
     return emx11_event_queue_push(display, &ev) ? 1 : 0;
+}
+
+/* -- Input focus ---------------------------------------------------------- */
+
+/* Push a FocusIn or FocusOut event onto the queue. `mode` / `detail` are
+ * the X protocol classifications; NotifyNormal + NotifyNonlinear is the
+ * standard pair for an explicit XSetInputFocus between unrelated
+ * windows. PointerRoot and None don't get synthetic events -- there's
+ * no target window to address. */
+static void push_focus_change(Display *dpy, int type, Window w,
+                              int mode, int detail) {
+    if (w == None || w == PointerRoot) return;
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xfocus.type    = type;
+    ev.xfocus.display = dpy;
+    ev.xfocus.window  = w;
+    ev.xfocus.mode    = mode;
+    ev.xfocus.detail  = detail;
+    emx11_event_queue_push(dpy, &ev);
+}
+
+/* x11protocol.txt §SetInputFocus: update focus iff `time` is no earlier
+ * than the last-focus-change-time. CurrentTime (0) in the request is
+ * accepted unconditionally and treated as "now". We synthesize a
+ * FocusOut on the outgoing window and a FocusIn on the incoming one so
+ * Tk's focus tracker (tk/generic/tkFocus.c) sees the transition. */
+int XSetInputFocus(Display *display, Window focus, int revert_to, Time time) {
+    if (!display) return 0;
+    if (time != CurrentTime && time < display->focus_last_time) {
+        return 1;                               /* too old -- silent no-op  */
+    }
+
+    Window old_focus = display->focus_window;
+    display->focus_window    = focus;
+    display->focus_revert_to = revert_to;
+    display->focus_last_time = (time == CurrentTime) ? display->focus_last_time
+                                                      : time;
+
+    if (old_focus != focus) {
+        push_focus_change(display, FocusOut, old_focus,
+                          NotifyNormal, NotifyNonlinear);
+        push_focus_change(display, FocusIn,  focus,
+                          NotifyNormal, NotifyNonlinear);
+    }
+    return 1;
+}
+
+int XGetInputFocus(Display *display, Window *focus_return,
+                   int *revert_to_return) {
+    if (!display) return 0;
+    if (focus_return)     *focus_return     = display->focus_window;
+    if (revert_to_return) *revert_to_return = display->focus_revert_to;
+    return 1;
 }
 
 /* -- Keymap management ---------------------------------------------------- */

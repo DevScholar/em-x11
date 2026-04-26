@@ -580,12 +580,6 @@ int XSyncGetPriority(Display *dpy, XID client_resource_id,
 int XAddToSaveSet(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
 int XRemoveFromSaveSet(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
 
-/* Focus. We have no keyboard-focus concept yet; pretend we honoured it. */
-int XSetInputFocus(Display *dpy, Window focus, int revert_to, Time t) {
-    (void)dpy; (void)focus; (void)revert_to; (void)t;
-    return 1;
-}
-
 /* Subwindow circulation: rotate z-order. No z-order here yet. */
 int XCirculateSubwindowsDown(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
 int XCirculateSubwindowsUp(Display *dpy, Window w)   { (void)dpy; (void)w; return 1; }

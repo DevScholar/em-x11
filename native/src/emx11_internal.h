@@ -177,6 +177,22 @@ struct _XDisplay {
      * so we start allocating at 8. */
     KeySym                     keysym_table[256];
     unsigned int               next_keycode;    /* next free keycode >= 8   */
+
+    /* Input focus (XSetInputFocus / XGetInputFocus).
+     *   focus_window    = current focus; None (0) or PointerRoot (1) are
+     *                     the X sentinel values, otherwise a real XID.
+     *   focus_revert_to = one of RevertToNone / RevertToPointerRoot /
+     *                     RevertToParent; stored verbatim and echoed back
+     *                     by XGetInputFocus. We don't yet act on revert
+     *                     when the focus window becomes unviewable; Tk's
+     *                     first-window path doesn't exercise that.
+     *   focus_last_time = CurrentTime-ordering per x11protocol.txt
+     *                     §SetInputFocus: a request with time < this is
+     *                     ignored. CurrentTime (0) in the request always
+     *                     wins (treated as "now"). */
+    Window                     focus_window;
+    int                        focus_revert_to;
+    Time                       focus_last_time;
 };
 
 /* ------------------------------------------------------------------------- */
