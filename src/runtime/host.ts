@@ -452,7 +452,6 @@ export class Host implements EmX11Host {
     height: number,
     background: number,
   ): void {
-    console.info(`em-x11: create win=${id} conn=${connId} parent=${parent} geom=${x},${y},${width}x${height}`);
     const conn = this.connections.get(connId);
     if (conn) {
       conn.ownedWindows.add(id);
@@ -470,7 +469,10 @@ export class Host implements EmX11Host {
      *   Redirect applies iff the window's PARENT has a connection
      *   that selected SubstructureRedirectMask on it, AND the caller
      *   is a different connection, AND override_redirect is False.
-     * Otherwise proceed with the actual map. */
+     * Otherwise proceed with the actual map. The redirect path is
+     * dormant in current demos -- no client subscribes to it -- but
+     * the plumbing stays so a future WM (Host-embedded or another
+     * X-client WM port) can light it up without touching Host. */
     const parent = this.compositor.parentOf(id);
     const holderConnId = parent !== 0 ? this.redirectHolderFor(parent) : null;
     const overrideRedirect = this.overrideRedirect.get(id) ?? false;
@@ -479,14 +481,9 @@ export class Host implements EmX11Host {
       holderConnId !== connId &&
       !overrideRedirect
     ) {
-      console.info(
-        `em-x11: redirect map(conn=${connId}, win=${id}, parent=${parent}) ` +
-          `-> holder conn=${holderConnId}`,
-      );
       this.dispatchMapRequest(holderConnId, parent, id);
       return;
     }
-    console.info(`em-x11: map win=${id} conn=${connId} parent=${parent}`);
     this.compositor.mapWindow(id);
     /* No Expose synthesis here: that lives in C's XMapWindow. Doing
      * it Host-side via mod.ccall would race the launchClient handoff
@@ -560,7 +557,6 @@ export class Host implements EmX11Host {
   }
 
   onReparentWindow(id: number, parent: number, x: number, y: number): void {
-    console.info(`em-x11: reparent win=${id} parent=${parent} to ${x},${y}`);
     this.compositor.reparentWindow(id, parent, x, y);
   }
 

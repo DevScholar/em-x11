@@ -2,13 +2,25 @@
  * Software compositor.
  *
  * Owns the list of mapped X windows, their positions, sizes, and per-window
- * pixel buffers. On each frame it composites them onto the RootCanvas in
- * z-order. A dirty-rectangle set is maintained so we don't repaint the
- * whole screen on every draw call.
+ * pixel buffers. Paints onto the RootCanvas synchronously at the moment a
+ * structural change happens (mapWindow / setWindowBackgroundPixmap /
+ * setWindowShape) -- no RAF/markDirty cycle.
  *
- * The skeleton's compositor is intentionally minimal: one top-level window
- * fills from a single pixel buffer, no z-order shuffling, no clipping of
- * overlapping windows. v1 will flesh this out to match X semantics.
+ * Why synchronous: an RAF-deferred present() that wipes the canvas and
+ * repaints window backgrounds runs AFTER the wasm client's Expose handler
+ * (which fires synchronously between XMapWindow and the next emscripten_sleep
+ * yield). The wipe then erases application drawings -- xeyes paints its
+ * eye sockets in Expose, present() runs on the next browser frame, sockets
+ * disappear, the canvas-bg colour shows through where the SHAPE clip
+ * passes, and pupil moves leave white trails on the now-black sockets.
+ *
+ * Sync paint puts the background down BEFORE the Expose is processed, so
+ * the application's drawings layer on top and persist. Real X has the same
+ * ordering guarantee via per-window backing store; we approximate it by
+ * touching the canvas at the same instant the C side requests it. Edge
+ * cases (move/resize, unmap leaving ghost regions) need a full backing-
+ * store rewrite; for now they're tolerated -- xeyes/xt-hello/xaw-hello
+ * don't trip them.
  */
 
 import type { RootCanvas } from './canvas.js';
@@ -42,8 +54,6 @@ export class Compositor {
   private readonly canvas: RootCanvas;
   private readonly pixmapLookup: PixmapLookup;
   private readonly windows = new Map<number, ManagedWindow>();
-  private dirty = true;
-  private rafScheduled = false;
 
   constructor(canvas: RootCanvas, pixmapLookup: PixmapLookup = () => null) {
     this.canvas = canvas;
@@ -59,6 +69,8 @@ export class Compositor {
     height: number,
     background: number,
   ): void {
+    /* Create only stores state -- the window isn't visible until
+     * mapWindow flips `mapped` and triggers the sync paint. */
     this.windows.set(id, {
       id,
       parent,
@@ -71,18 +83,23 @@ export class Compositor {
       mapped: false,
       shape: null,
     });
-    this.markDirty();
   }
 
   setWindowBackgroundPixmap(id: number, pmId: number): void {
     const w = this.windows.get(id);
     if (!w) return;
     w.backgroundPixmap = pmId > 0 ? pmId : null;
-    this.markDirty();
+    /* Repaint sync if the window is currently visible: shared-root
+     * setup calls this AFTER mapWindow(root), so we need the weave
+     * to land without waiting for some external trigger. */
+    if (w.mapped) this.paintWindowSubtree(w);
   }
 
   /** Geometry-only update for an existing window. Preserves parent,
-   *  shape, background_pixmap, and mapped state. No-op if id is unknown. */
+   *  shape, background_pixmap, and mapped state. No-op if id is unknown.
+   *  Does NOT repaint -- moving/resizing leaves the previous area as-is
+   *  on canvas (X expects the application to redraw on Expose anyway,
+   *  which we don't re-synthesize at the moment). */
   configureWindow(id: number, x: number, y: number, w: number, h: number): void {
     const win = this.windows.get(id);
     if (!win) return;
@@ -90,7 +107,6 @@ export class Compositor {
     win.y = y;
     win.width = w;
     win.height = h;
-    this.markDirty();
   }
 
   /** XReparentWindow: change a window's parent link and local origin.
@@ -102,7 +118,6 @@ export class Compositor {
     win.parent = parent;
     win.x = x;
     win.y = y;
-    this.markDirty();
   }
 
   /** Read-only accessor for redirect decisions in Host. Returns the
@@ -171,32 +186,37 @@ export class Compositor {
     const w = this.windows.get(id);
     if (!w) return;
     w.shape = rects.length > 0 ? rects : null;
-    this.markDirty();
+    /* Shape change while mapped means the visible region just changed;
+     * repaint so newly-uncovered parts pick up bg and newly-covered
+     * parts get clipped on next paint. */
+    if (w.mapped) this.paintWindowSubtree(w);
   }
 
   mapWindow(id: number): void {
     const w = this.windows.get(id);
     if (!w) return;
     w.mapped = true;
-    this.markDirty();
+    /* Sync paint: the C-side XMapWindow synthesizes an Expose to the
+     * caller's queue immediately after this call returns. The Expose
+     * handler runs synchronously before the next emscripten_sleep yield,
+     * so we MUST have the bg down before then or the handler's drawing
+     * gets overwritten on the next RAF. */
+    this.paintWindowSubtree(w);
   }
 
   unmapWindow(id: number): void {
     const w = this.windows.get(id);
     if (!w) return;
     w.mapped = false;
-    this.markDirty();
+    /* No repaint: leaving the previous drawing on canvas is harmless
+     * for our current demos (xeyes/xt-hello/xaw-hello don't unmap and
+     * remap). A backing-store rewrite would clear to parent's bg. */
   }
 
   destroyWindow(id: number): void {
     this.windows.delete(id);
-    this.markDirty();
   }
 
-  /** Immediate-mode fill. In the skeleton we paint straight onto the root
-   *  canvas, clipped to the window rectangle (and its shape, if any).
-   *  Real implementation will go through per-window offscreen buffers +
-   *  deferred compositing. */
   fillRect(
     id: number,
     x: number,
@@ -365,8 +385,8 @@ export class Compositor {
   }
 
   findWindowAt(cssX: number, cssY: number): number | null {
-    /* Hit test in the same parent-before-child DFS order used by
-     * present(), so the topmost painted window under the cursor wins.
+    /* Hit test in the same parent-before-child DFS order used for
+     * paint, so the topmost painted window under the cursor wins.
      * Honours SHAPE: a point outside the shape rectangles doesn't hit.
      * Uses absOrigin so reparented windows land where they're drawn. */
     let hit: number | null = null;
@@ -443,6 +463,25 @@ export class Compositor {
     }
   }
 
+  /** Paint a window's background, then recurse into its mapped children
+   *  in insertion order (closest we have to X stacking order). DFS in
+   *  parent-before-child order matches X: a child must paint over its
+   *  parent's background, never the other way around. After a reparent
+   *  the Map's insertion order is no longer tree order, so flat
+   *  iteration would put the wrong thing on top. */
+  private paintWindowSubtree(w: ManagedWindow): void {
+    if (w.mapped) {
+      const ctx = this.canvas.ctx;
+      ctx.save();
+      this.applyWindowClip(ctx, w);
+      this.paintBackgroundRect(ctx, w, 0, 0, w.width, w.height);
+      ctx.restore();
+    }
+    for (const child of this.windows.values()) {
+      if (child.parent === w.id) this.paintWindowSubtree(child);
+    }
+  }
+
   /** Build a canvas path for an X-semantics arc. Exposed as a free
    *  function below so Host can reuse it for pixmap drawing. */
   private arcPath(
@@ -455,45 +494,6 @@ export class Compositor {
     angle2_64: number,
   ): void {
     arcPath(ctx, x, y, w, h, angle1_64, angle2_64);
-  }
-
-  private markDirty(): void {
-    this.dirty = true;
-    if (!this.rafScheduled) {
-      this.rafScheduled = true;
-      requestAnimationFrame(() => this.present());
-    }
-  }
-
-  private present(): void {
-    this.rafScheduled = false;
-    if (!this.dirty) return;
-    this.canvas.clear('#111');
-    /* Paint in parent-before-child order so children naturally stack
-     * on top of their parents' backgrounds. X guarantees this: after a
-     * reparent, the child must cover its new parent, not the other way
-     * around. Our windows Map is keyed by XID and iterates in insertion
-     * order, which is NOT the tree order after any reparent -- twm's
-     * frame is inserted after xeyes's shell but becomes the shell's
-     * parent, so flat iteration would paint the frame's background
-     * over the shell. DFS from every root-level window, siblings kept
-     * in insertion order (closest we have to X's stacking order). */
-    const ctx = this.canvas.ctx;
-    const paint = (w: ManagedWindow): void => {
-      if (w.mapped) {
-        ctx.save();
-        this.applyWindowClip(ctx, w);
-        this.paintBackgroundRect(ctx, w, 0, 0, w.width, w.height);
-        ctx.restore();
-      }
-      for (const child of this.windows.values()) {
-        if (child.parent === w.id) paint(child);
-      }
-    };
-    for (const w of this.windows.values()) {
-      if (w.parent === 0) paint(w);
-    }
-    this.dirty = false;
   }
 
   /** Paint a (window-local) rectangle using the window's current
