@@ -132,19 +132,56 @@ export class Compositor {
 
   /** XReparentWindow: change a window's parent link and local origin.
    *  Does not affect mapped state. Unknown id is a no-op (cross-
-   *  connection callers may race ahead of the owner's create). */
+   *  connection callers may race ahead of the owner's create).
+   *
+   *  In a real X server reparenting a mapped window implicitly unmaps
+   *  (erasing the old pixel rect on the old parent) and remaps (painting
+   *  background at the new parent's coordinate system, then sending
+   *  Expose) -- x11protocol.txt §1040. Our compositor has no backing
+   *  store, so the canvas under the old position has to be reconstructed
+   *  from the window tree and the new position has to be painted fresh.
+   *  Without this, twm reparenting xeyes' shell left the xeyes drawing
+   *  stranded at its original root-relative coordinates while the new
+   *  frame+shell composite never actually hit the canvas. */
   reparentWindow(id: number, parent: number, x: number, y: number): void {
     const win = this.windows.get(id);
     if (!win) return;
+    let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
+    if (win.mapped) {
+      const { ax, ay } = this.absOrigin(win);
+      oldRect = { ax, ay, w: win.width, h: win.height };
+    }
     win.parent = parent;
     win.x = x;
     win.y = y;
+    if (oldRect) {
+      this.repaintAbsoluteRect(oldRect.ax, oldRect.ay, oldRect.w, oldRect.h);
+      this.paintWindowSubtree(win);
+    }
   }
 
   /** Read-only accessor for redirect decisions in Host. Returns the
    *  parent XID or 0 when the window is unknown / parentless. */
   parentOf(id: number): number {
     return this.windows.get(id)?.parent ?? 0;
+  }
+
+  /** Enumerate the mapped descendants of `id` in parent-before-child DFS
+   *  order. Used by Host to synthesize Expose events for every visible
+   *  window whose content was wiped by a subtree repaint (map, move,
+   *  resize). `id` itself is NOT included. */
+  mappedDescendants(id: number): number[] {
+    const out: number[] = [];
+    const recurse = (parentId: number): void => {
+      for (const child of this.windows.values()) {
+        if (child.parent === parentId) {
+          if (child.mapped) out.push(child.id);
+          recurse(child.id);
+        }
+      }
+    };
+    recurse(id);
+    return out;
   }
 
   /** Read-only geometry accessor for Host-side event synthesis

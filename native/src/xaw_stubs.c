@@ -16,6 +16,7 @@
 
 #include "emx11_internal.h"
 
+#include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/XInput2.h>
 #include <emscripten.h>
@@ -666,9 +667,30 @@ int XMaskEvent(Display *dpy, long event_mask, XEvent *ev) {
  * subsystem yet; return "nothing" so twm falls back to defaults. */
 
 Status XFetchName(Display *dpy, Window w, char **name_return) {
-    (void)dpy; (void)w;
     if (name_return) *name_return = NULL;
-    return 0;
+    if (!dpy) return 0;
+    /* Traditional (pre-ICCCM) title accessor: reads WM_NAME as an 8-bit
+     * STRING and hands back a fresh Xlib-allocated C string. twm's
+     * tmgr.c calls this once per managed client to fill the title bar.
+     * Without it, TWM's `namelen == 0` path paints the title background
+     * and no text -- hence the "solid teal rectangle" symptom. */
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    int rc = XGetWindowProperty(dpy, w, XA_WM_NAME, 0, 65536, False,
+                                XA_STRING, &actual_type, &actual_format,
+                                &nitems, &bytes_after, &data);
+    if (rc != Success || actual_type != XA_STRING || actual_format != 8 ||
+        !data || nitems == 0) {
+        if (data) XFree(data);
+        return 0;
+    }
+    /* XGetWindowProperty already appended a NUL byte past nitems; just
+     * hand the buffer back. Client frees via XFree. */
+    if (name_return) *name_return = (char *)data;
+    else             XFree(data);
+    return 1;
 }
 
 Status XGetWMIconName(Display *dpy, Window w, XTextProperty *text_prop) {

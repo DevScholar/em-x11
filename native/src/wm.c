@@ -144,9 +144,28 @@ void XSetWMName(Display *dpy, Window w, XTextProperty *text_prop) {
 }
 
 Status XGetWMName(Display *dpy, Window w, XTextProperty *text_prop_return) {
-    (void)dpy; (void)w;
     if (text_prop_return) memset(text_prop_return, 0, sizeof(*text_prop_return));
-    return 0;
+    if (!dpy || !text_prop_return) return 0;
+    /* Read WM_NAME as bytes. ICCCM 4.1.2.1 allows STRING or
+     * COMPOUND_TEXT; UTF-8 clients also store _NET_WM_NAME, but twm
+     * only reads WM_NAME so that's all we need. Pass AnyPropertyType
+     * so we don't filter by encoding. */
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    int rc = XGetWindowProperty(dpy, w, XA_WM_NAME, 0, 65536, False,
+                                AnyPropertyType, &actual_type, &actual_format,
+                                &nitems, &bytes_after, &data);
+    if (rc != Success || !data || nitems == 0 || actual_format != 8) {
+        if (data) XFree(data);
+        return 0;
+    }
+    text_prop_return->value    = data;
+    text_prop_return->encoding = actual_type;
+    text_prop_return->format   = actual_format;
+    text_prop_return->nitems   = nitems;
+    return 1;
 }
 
 void XSetWMIconName(Display *dpy, Window w, XTextProperty *text_prop) {

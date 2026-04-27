@@ -518,9 +518,24 @@ export class Host implements EmX11Host {
      * Routes via the window's owner module rather than the calling
      * connection: a WM resizing a managed client's shell is a cross-
      * connection call. attrsOf() reflects the post-configure state, so
-     * we read mapped from there. */
+     * we read mapped from there.
+     *
+     * Subtree Expose: paintWindowSubtree (compositor.ts) wipes this
+     * window AND every mapped descendant back to its background. A TWM
+     * frame has the title bar (title_w), iconify button, and resize
+     * handles as its children; without an Expose to each of them, their
+     * content stays wiped and the frame looks like a solid teal
+     * rectangle. Descendants can belong to a different owner than the
+     * configured window (TWM resizes its own frame but the shell inside
+     * belongs to the client), so pushExposeForWindow routes each via
+     * its own owner module. */
     const attrs = this.compositor.attrsOf(id);
-    if (attrs?.mapped) this.pushExposeForWindow(id, null);
+    if (attrs?.mapped) {
+      this.pushExposeForWindow(id, null);
+      for (const descendant of this.compositor.mappedDescendants(id)) {
+        this.pushExposeForWindow(descendant, null);
+      }
+    }
   }
 
   onWindowMap(connId: number, id: number): void {
@@ -556,8 +571,15 @@ export class Host implements EmX11Host {
      * Module reference isn't installed yet (launchClient awaits the
      * factory which only resolves after main() suspends in XNextEvent's
      * emscripten_sleep). Those Exposes get queued in pendingExposes and
-     * drained from launchClient once `conn.module` lands. */
+     * drained from launchClient once `conn.module` lands.
+     *
+     * Subtree Expose: if this window has already-mapped descendants
+     * (e.g. a reparented shell under a freshly-mapped WM frame), they
+     * also got wiped by paintWindowSubtree and need Expose to redraw. */
     this.pushExposeForWindow(id, null);
+    for (const descendant of this.compositor.mappedDescendants(id)) {
+      this.pushExposeForWindow(descendant, null);
+    }
   }
 
   onWindowUnmap(_connId: number, id: number): void {
@@ -624,6 +646,22 @@ export class Host implements EmX11Host {
 
   onReparentWindow(id: number, parent: number, x: number, y: number): void {
     this.compositor.reparentWindow(id, parent, x, y);
+    /* After reparent the compositor repainted background at the new
+     * position but did not restore pixel content; the reparented window
+     * and its mapped descendants need Expose to redraw. In the TWM case
+     * this is how xeyes learns that its shell has been moved under a
+     * frame and has to repaint its eyes inside the new absolute area --
+     * without it, the canvas only shows the teal frame background and
+     * no client-drawn content. attrsOf tells us whether the moved
+     * window is actually visible (an unmapped reparent doesn't need
+     * Expose; only a mapped one). */
+    const attrs = this.compositor.attrsOf(id);
+    if (attrs?.mapped) {
+      this.pushExposeForWindow(id, null);
+      for (const descendant of this.compositor.mappedDescendants(id)) {
+        this.pushExposeForWindow(descendant, null);
+      }
+    }
   }
 
   /** Look up which connection (if any) selected SubstructureRedirectMask
@@ -965,7 +1003,13 @@ export class Host implements EmX11Host {
   private onMouseMove(e: MouseEvent): void {
     const { x, y } = this.cssPoint(e);
     const win = this.compositor.findWindowAt(x, y);
-    const module = win !== null ? this.moduleForWindow(win) : this.dragModule;
+    /* X11 implicit pointer grab (x11protocol.txt §523): once a button is
+     * pressed, all Motion and ButtonRelease events route to the grabbing
+     * client regardless of where the pointer moves. dragModule holds the
+     * module that saw the ButtonPress, so route to it unconditionally
+     * while a drag is in progress -- a TWM title-bar drag crosses over
+     * xeyes' frame mid-drag, but Motion must still reach TWM, not xeyes. */
+    const module = this.dragModule ?? (win !== null ? this.moduleForWindow(win) : null);
     if (!module) return;
     module.ccall(
       'emx11_push_motion_event',
