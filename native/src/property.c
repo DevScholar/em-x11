@@ -29,8 +29,20 @@ static int format_bytes(int format) {
 int XChangeProperty(Display *display, Window w, Atom property, Atom type,
                     int format, int mode,
                     _Xconst unsigned char *data, int nelements) {
-    (void)display;
     if (format_bytes(format) == 0) return 0;
+    /* INCR back-channel: when the clipboard proxy window is the requestor of
+     * a large selection transfer, Tk writes chunks here. Intercept them to
+     * accumulate and eventually push to navigator.clipboard.writeText(). */
+    if (display &&
+        display->clipboard_proxy_win != None &&
+        w == display->clipboard_proxy_win &&
+        display->incr_active) {
+        if (emx11_incr_handle_chunk(display, property,
+                                    (const unsigned char *)data,
+                                    nelements, format)) {
+            return 1;   /* consumed; do not store in JS property table */
+        }
+    }
     int rc = emx11_js_change_property(w, property, type, format, mode,
                                       data, nelements);
     /* -1 = BadWindow, 0 = BadMatch, 1 = Success. Xlib's XChangeProperty

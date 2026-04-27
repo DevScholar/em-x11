@@ -166,6 +166,18 @@ void emx11_push_selection_notify(Display *dpy, Window requestor,
     emx11_event_queue_push(dpy, &ev);
 }
 
+void emx11_push_property_notify(Display *dpy, Window win, Atom prop, int state) {
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xproperty.type    = PropertyNotify;
+    ev.xproperty.display = dpy;
+    ev.xproperty.window  = win;
+    ev.xproperty.atom    = prop;
+    ev.xproperty.state   = state;
+    ev.xany.window       = win;
+    emx11_event_queue_push(dpy, &ev);
+}
+
 /* ------------------------------------------------------------------------- */
 /*  Back-channel: extract UTF-8 from the new CLIPBOARD owner and push it    */
 /*  to the browser. Called from XSetSelectionOwner(CLIPBOARD, real_win).    */
@@ -199,6 +211,24 @@ static void fire_proxy_convert(Display *dpy, Window owner, Time time) {
 /*  None}, the ICCCM "refuse" response. Tk then surfaces this as an empty   */
 /*  selection, which matches how real X clients treat unsupported targets.  */
 /* ------------------------------------------------------------------------- */
+
+/* Normalize Windows-style CRLF (\r\n) to Unix LF (\n). In UTF-8, \r (0x0D)
+ * and \n (0x0A) are always single bytes regardless of surrounding multi-byte
+ * sequences, so a straight byte scan is safe. Returns the new length; caller
+ * must free *out_bytes. */
+static int strip_crlf(const unsigned char *in, int in_len,
+                      unsigned char **out_bytes) {
+    unsigned char *buf = malloc((size_t)in_len + 1);
+    if (!buf) { *out_bytes = NULL; return 0; }
+    int w = 0;
+    for (int i = 0; i < in_len; i++) {
+        if (in[i] == 0x0D && i + 1 < in_len && in[i+1] == 0x0A)
+            continue;              /* skip \r immediately before \n */
+        buf[w++] = in[i];
+    }
+    *out_bytes = buf;
+    return w;
+}
 
 /* Convert `text_len` UTF-8 bytes starting at `text` into a fresh Latin-1
  * buffer, substituting '?' for any codepoint > 0xFF. Returns the new
@@ -279,9 +309,15 @@ static Bool serve_clipboard_from_browser(Display *dpy, Atom target,
 
     unsigned char *utf8 = NULL;
     if (text_len > 0) {
-        utf8 = malloc((size_t)text_len);
+        unsigned char *raw = malloc((size_t)text_len);
+        if (!raw) return False;
+        emx11_js_clipboard_read_fetch(raw, text_len);
+        /* Normalize CRLF → LF: Windows clipboard sources use \r\n, but Tk
+         * entry/text widgets expect bare \n. strip_crlf always allocates a
+         * fresh buffer so `raw` can be freed unconditionally. */
+        text_len = strip_crlf(raw, text_len, &utf8);
+        free(raw);
         if (!utf8) return False;
-        emx11_js_clipboard_read_fetch(utf8, text_len);
     } else {
         /* Empty clipboard: still write a zero-byte property per ICCCM
          * (nitems=0 is a valid response). Avoids leaking malloc(0). */
@@ -313,6 +349,81 @@ static Bool serve_clipboard_from_browser(Display *dpy, Atom target,
 
     if (text_len > 0) free(utf8);
     return ok;
+}
+
+/* ------------------------------------------------------------------------- */
+/*  INCR back-channel chunk handler (ICCCM §2.7).                           */
+/*                                                                           */
+/*  Called from XChangeProperty when the owner writes a chunk (or the       */
+/*  zero-length terminator) to the proxy window's property during an active  */
+/*  INCR transfer. Accumulates bytes and drives the handshake by pushing    */
+/*  PropertyNotify(Delete) back into the event queue so Tk's INCR owner     */
+/*  state machine continues on its next event-loop turn.                    */
+/* ------------------------------------------------------------------------- */
+
+Bool emx11_incr_handle_chunk(Display *dpy, Atom property,
+                             const unsigned char *data, int nelements,
+                             int format) {
+    if (!dpy->incr_active)              return False;
+    if (property != dpy->incr_property) return False;
+
+    if (nelements == 0) {
+        /* Zero-length chunk: end-of-transfer. Write accumulated UTF-8 to
+         * the browser clipboard and clean up state. */
+        if (dpy->incr_buf && dpy->incr_len > 0) {
+            emx11_js_clipboard_write_utf8(dpy->incr_buf, dpy->incr_len);
+        }
+        free(dpy->incr_buf);
+        dpy->incr_buf    = NULL;
+        dpy->incr_len    = 0;
+        dpy->incr_cap    = 0;
+        dpy->incr_active = 0;
+
+        /* Evict the CLIPBOARD owner so subsequent Ctrl+C re-enters the
+         * back-channel (same logic as the inline path in intercept_send). */
+        int slot = sel_find(dpy, dpy->atom_clipboard);
+        if (slot >= 0) {
+            Window ex_owner = dpy->selections[slot].owner;
+            Time   ex_time  = dpy->selections[slot].time;
+            dpy->selections[slot].sel   = 0;
+            dpy->selections[slot].owner = None;
+            dpy->selections[slot].time  = 0;
+            if (ex_owner != None && ex_owner != dpy->clipboard_proxy_win) {
+                emx11_push_selection_clear(dpy, ex_owner,
+                                           dpy->atom_clipboard, ex_time);
+            }
+        }
+        return True;
+    }
+
+    /* Non-zero chunk: only format==8 carries text bytes. Ignore anything
+     * else (INCR size-hint is fmt=32; the owner writes that only once as
+     * the initial marker, which intercept_send already consumed). */
+    if (format == 8) {
+        int needed = dpy->incr_len + nelements;
+        if (needed > dpy->incr_cap) {
+            int new_cap = needed + needed / 2 + 1024;
+            unsigned char *nb = realloc(dpy->incr_buf, (size_t)new_cap);
+            if (!nb) {
+                /* Allocation failure: abort, discard accumulated data. */
+                free(dpy->incr_buf);
+                dpy->incr_buf    = NULL;
+                dpy->incr_len    = 0;
+                dpy->incr_cap    = 0;
+                dpy->incr_active = 0;
+                return True;    /* consume but throw away */
+            }
+            dpy->incr_buf = nb;
+            dpy->incr_cap = new_cap;
+        }
+        memcpy(dpy->incr_buf + dpy->incr_len, data, (size_t)nelements);
+        dpy->incr_len += nelements;
+    }
+
+    /* Signal the owner: "property deleted, ready for next chunk". */
+    emx11_push_property_notify(dpy, dpy->clipboard_proxy_win,
+                                dpy->incr_property, PropertyDelete);
+    return True;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -444,6 +555,23 @@ Bool emx11_selection_intercept_send(Display *dpy, Window w, const XEvent *ev) {
                                 AnyPropertyType,
                                 &actual_type, &actual_fmt,
                                 &nitems, &bytes_after, &data);
+    if (rc == Success && actual_type == dpy->atom_incr && actual_fmt == 32) {
+        /* INCR marker: owner's data exceeds its single-message threshold.
+         * The INCR property value (a size hint) was already deleted by the
+         * XGetWindowProperty call above (delete=True). Initialise the state
+         * machine and push the first PropertyNotify(Delete) so Tk's INCR
+         * owner handler fires on its next event-loop turn and writes chunk 1. */
+        if (data) free(data);
+        dpy->incr_active   = 1;
+        dpy->incr_property = ev->xselection.property;
+        dpy->incr_buf      = NULL;
+        dpy->incr_len      = 0;
+        dpy->incr_cap      = 0;
+        emx11_push_property_notify(dpy, dpy->clipboard_proxy_win,
+                                    dpy->incr_property, PropertyDelete);
+        return True;
+    }
+
     if (rc == Success && data && nitems > 0 && actual_fmt == 8) {
         emx11_js_clipboard_write_utf8(data, (int)nitems);
 

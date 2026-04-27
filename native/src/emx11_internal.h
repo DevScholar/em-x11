@@ -224,6 +224,26 @@ struct _XDisplay {
     Atom                       atom_text;
     Atom                       atom_incr;
     Atom                       atom_emx11_clipboard_data;
+
+    /* INCR back-channel state (ICCCM §2.7).
+     *
+     * Active while a chunked Tk→browser transfer is in flight.
+     * Set by emx11_selection_intercept_send when it sees an INCR marker
+     * in the proxy's SelectionNotify reply; cleared by emx11_incr_handle_chunk
+     * when the zero-length terminator arrives.
+     *
+     *   incr_active   — nonzero while transfer is in progress
+     *   incr_property — atom of the property on the proxy window used for
+     *                   the transfer (matches ev->xselection.property in
+     *                   the triggering SelectionNotify)
+     *   incr_buf      — malloc'd accumulation buffer; NULL when empty
+     *   incr_len      — bytes accumulated so far
+     *   incr_cap      — allocated capacity of incr_buf */
+    int                        incr_active;
+    Atom                       incr_property;
+    unsigned char             *incr_buf;
+    int                        incr_len;
+    int                        incr_cap;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -522,5 +542,19 @@ void emx11_selection_ensure_atoms(Display *dpy);
  * in which case XSendEvent falls through to its normal path. */
 Bool emx11_selection_intercept_send(Display *dpy, Window w,
                                     const XEvent *ev);
+
+/* Push a PropertyNotify event into the display queue.
+ * state is PropertyNewValue (0) or PropertyDelete (1). */
+void emx11_push_property_notify(Display *dpy, Window win, Atom prop, int state);
+
+/* Called from XChangeProperty when writing to the clipboard proxy window
+ * during an active INCR transfer. Accumulates the chunk (or finalises the
+ * transfer when nelements==0) and pushes the next PropertyNotify(Delete)
+ * to drive the Tk owner's INCR state machine.
+ * Returns True if the write was consumed (do NOT forward to the JS property
+ * store). Returns False if this write is unrelated to the INCR transfer. */
+Bool emx11_incr_handle_chunk(Display *dpy, Atom property,
+                             const unsigned char *data, int nelements,
+                             int format);
 
 #endif /* EMX11_INTERNAL_H */
