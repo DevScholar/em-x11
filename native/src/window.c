@@ -65,8 +65,6 @@ Window XCreateSimpleWindow(Display *display, Window parent,
                            unsigned int width, unsigned int height,
                            unsigned int border_width,
                            unsigned long border, unsigned long background) {
-    fprintf(stderr, "[emx11] XCreateSimpleWindow parent=%lu %dx%d+%d+%d\n",
-            (unsigned long)parent, (int)width, (int)height, x, y);
     EmxWindow *w = emx11_window_alloc(display);
     if (!w) {
         return None;
@@ -99,8 +97,6 @@ Window XCreateWindow(Display *display, Window parent,
                      int depth, unsigned int class_,
                      Visual *visual, unsigned long valuemask,
                      XSetWindowAttributes *attrs) {
-    fprintf(stderr, "[emx11] XCreateWindow parent=%lu %dx%d+%d+%d mask=0x%lx\n",
-            (unsigned long)parent, (int)width, (int)height, x, y, valuemask);
     (void)depth; (void)class_; (void)visual;
 
     unsigned long bg = 0x00000000UL;

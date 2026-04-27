@@ -338,13 +338,25 @@ int XDrawImageString(Display *dpy, Drawable d, GC gc,
 
 char **XListFonts(Display *dpy, _Xconst char *pattern,
                   int maxnames, int *actual_count_return) {
-    (void)dpy; (void)pattern; (void)maxnames;
-    if (actual_count_return) *actual_count_return = 0;
-    return NULL;
+    (void)dpy; (void)maxnames;
+    if (!pattern || !pattern[0]) {
+        if (actual_count_return) *actual_count_return = 0;
+        return NULL;
+    }
+    /* We can load any XLFD via CSS, so echo the pattern back as a
+     * single match. Tk then calls XLoadQueryFont with this name, which
+     * we parse correctly. Returning NULL here makes Tk fall back to
+     * "fixed" (monospace) for all fonts. */
+    char **list = malloc(sizeof(char *));
+    if (!list) { if (actual_count_return) *actual_count_return = 0; return NULL; }
+    list[0] = strdup(pattern);
+    if (!list[0]) { free(list); if (actual_count_return) *actual_count_return = 0; return NULL; }
+    if (actual_count_return) *actual_count_return = 1;
+    return list;
 }
 
 int XFreeFontNames(char **list) {
-    (void)list;
+    if (list) { free(list[0]); free(list); }
     return 1;
 }
 

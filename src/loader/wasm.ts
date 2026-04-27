@@ -44,8 +44,6 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
        * the dev server's SPA fallback. */
       const baseDir = options.glueUrl.slice(0, options.glueUrl.lastIndexOf('/') + 1);
       const resolved = baseDir + path;
-      // eslint-disable-next-line no-console
-      console.log('[wasm.ts] locateFile:', path, '->', resolved);
       return resolved;
     },
     arguments: options.arguments,
