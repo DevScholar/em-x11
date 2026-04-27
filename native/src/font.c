@@ -108,16 +108,14 @@ static void str_tolower(char *s) {
     for (; *s; s++) *s = (char)tolower((unsigned char)*s);
 }
 
-/* Map XLFD family (field 2) to a CSS font-family. Always returns a valid
- * generic family so fillText never renders with the browser default if
- * we can help it. */
+/* Map XLFD family (field 2) to a CSS font-family. */
 static const char *resolve_css_family(const char *name) {
     char family[64];
     if (!xlfd_field(name, 2, family, sizeof(family))) {
         /* Short alias like "fixed" or "6x13" -- both are monospace. */
         return "monospace";
     }
-    if (family[0] == '*' || family[0] == '\0') return "monospace";
+    if (family[0] == '*' || family[0] == '\0') return "sans-serif";
     str_tolower(family);
     if (strstr(family, "helvetica") || strstr(family, "arial") ||
         strstr(family, "sans")) {
@@ -132,7 +130,7 @@ static const char *resolve_css_family(const char *name) {
         strstr(family, "typewriter")) {
         return "monospace";
     }
-    return "monospace";
+    return "sans-serif";
 }
 
 /* Field 4 is SLANT: 'r' (roman), 'i' (italic), 'o' (oblique). */
@@ -289,7 +287,7 @@ int XTextWidth(XFontStruct *fs, _Xconst char *string, int count) {
      * pixel-for-pixel, and means per_char is purely a legacy convenience
      * for clients that poke at XFontStruct directly. */
     EmxFont *f = font_lookup(fs->fid);
-    const char *css = f ? f->css : "13px monospace";
+    const char *css = f ? f->css : "13px sans-serif";
     return emx11_js_measure_string(css, string, count);
 }
 
@@ -319,7 +317,7 @@ static void dispatch_draw_string(Display *dpy, Drawable d, GC gc,
     (void)dpy;
     if (!gc || !string || length <= 0) return;
     const char *css = gc->font != None ? emx11_font_css(gc->font) : NULL;
-    if (!css) css = "13px monospace";
+    if (!css) css = "13px sans-serif";
     emx11_js_draw_string((Window)d, x, y, css, string, length,
                          gc->foreground, gc->background, image_mode);
 }
