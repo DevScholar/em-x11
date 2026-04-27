@@ -118,6 +118,15 @@ export class Host implements EmX11Host {
    *  the subscribing connection. Host consults this for substructure
    *  redirect / notify routing. Empty inner map means "no subscribers". */
   private readonly windowSubscriptions = new Map<number, Map<number, number>>();
+  /** Pending callers of waitForSubstructureRedirect, keyed by the window
+   *  whose redirect holder they're waiting for. Drained by onSelectInput
+   *  when a SubstructureRedirect subscription lands on that window.
+   *  Used by launchTwm to gate the xeyes launch on twm being ready to
+   *  intercept MapRequest -- without this, Emscripten's factory Promise
+   *  can resolve before twm's main() reaches its XSelectInput(root,
+   *  SubstructureRedirectMask) call, letting xeyes map at (0,0) before
+   *  twm ever sees a MapRequest. */
+  private readonly redirectWaiters = new Map<number, ((connId: number) => void)[]>();
   /** override_redirect flag per window (CWOverrideRedirect). True means
    *  "WM stays out" -- Host skips the redirect path for this window. */
   private readonly overrideRedirect = new Map<number, boolean>();
@@ -550,6 +559,10 @@ export class Host implements EmX11Host {
     const parent = this.compositor.parentOf(id);
     const holderConnId = parent !== 0 ? this.redirectHolderFor(parent) : null;
     const overrideRedirect = this.overrideRedirect.get(id) ?? false;
+    console.info(
+      `em-x11: onWindowMap conn=${connId} win=${id} parent=${parent} ` +
+        `holder=${holderConnId} overrideRedirect=${overrideRedirect}`,
+    );
     if (
       holderConnId !== null &&
       holderConnId !== connId &&
@@ -575,7 +588,15 @@ export class Host implements EmX11Host {
      *
      * Subtree Expose: if this window has already-mapped descendants
      * (e.g. a reparented shell under a freshly-mapped WM frame), they
-     * also got wiped by paintWindowSubtree and need Expose to redraw. */
+     * also got wiped by paintWindowSubtree and need Expose to redraw.
+     *
+     * Viewability gate: skip Expose when the window isn't actually
+     * viewable (ancestor chain still contains an unmapped node). X
+     * servers never send Expose to a non-viewable window; doing so
+     * would let the client paint at coordinates the compositor
+     * deliberately skipped, which produces the (0,0) ghost-paint
+     * artefact when Xt maps children before their shell. */
+    if (!this.compositor.isViewable(id)) return;
     this.pushExposeForWindow(id, null);
     for (const descendant of this.compositor.mappedDescendants(id)) {
       this.pushExposeForWindow(descendant, null);
@@ -633,10 +654,53 @@ export class Host implements EmX11Host {
           console.info(
             `em-x11: conn ${connId} now holds SubstructureRedirect on win ${id}`,
           );
+          const waiters = this.redirectWaiters.get(id);
+          if (waiters) {
+            this.redirectWaiters.delete(id);
+            for (const resolve of waiters) resolve(connId);
+          }
         }
       }
       subs.set(connId, mask);
     }
+  }
+
+  /** Resolve when some client holds SubstructureRedirectMask on `winId`.
+   *  If already held, resolves on the next microtask with the current
+   *  holder. Used by launchTwm to block `launchClient(xeyes)` from
+   *  running until the WM has armed its MapRequest intercept -- the
+   *  Emscripten factory Promise is not a strong enough barrier because
+   *  it resolves when main() first yields to JS, which can be before
+   *  XSelectInput(root, SubstructureRedirectMask) completes (and even
+   *  if it isn't in the current build, this barrier is the right
+   *  contract long-term). Rejects after `timeoutMs` so a WM that
+   *  never arms its redirect doesn't deadlock the session. */
+  waitForSubstructureRedirect(winId: number, timeoutMs = 5000): Promise<number> {
+    const existing = this.redirectHolderFor(winId);
+    if (existing !== null) return Promise.resolve(existing);
+    return new Promise((resolve, reject) => {
+      const waiter = (connId: number): void => {
+        clearTimeout(timer);
+        resolve(connId);
+      };
+      const timer = setTimeout(() => {
+        const list = this.redirectWaiters.get(winId);
+        if (list) {
+          const i = list.indexOf(waiter);
+          if (i >= 0) list.splice(i, 1);
+          if (list.length === 0) this.redirectWaiters.delete(winId);
+        }
+        reject(new Error(
+          `em-x11: timed out waiting for SubstructureRedirect on win ${winId}`,
+        ));
+      }, timeoutMs);
+      let list = this.redirectWaiters.get(winId);
+      if (!list) {
+        list = [];
+        this.redirectWaiters.set(winId, list);
+      }
+      list.push(waiter);
+    });
   }
 
   onSetOverrideRedirect(id: number, flag: boolean): void {

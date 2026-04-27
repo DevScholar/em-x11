@@ -250,10 +250,37 @@ export class Compositor {
     if (w.mapped) this.paintWindowSubtree(w);
   }
 
+  /** X11 "viewable" semantics: a window produces pixels only if it and
+   *  every ancestor up through root is mapped (x11protocol.txt §Window
+   *  State). Marked-mapped descendants of an unmapped ancestor are
+   *  "mapped but not viewable" -- still in the tree, but invisible.
+   *  Xt toolkits exploit this: XtRealizeWidget creates and MAPS all
+   *  composite children first, then maps the shell last. The compositor
+   *  has to respect this, otherwise children paint their backgrounds
+   *  at their parent-local coordinates while the parent is still
+   *  unmapped -- which lands as a ghost paint at root (0,0) when the
+   *  parent happens to be the shell with no position set yet. */
+  isViewable(id: number): boolean {
+    let cur = this.windows.get(id);
+    while (cur) {
+      if (!cur.mapped) return false;
+      if (cur.parent === 0) return true;
+      cur = this.windows.get(cur.parent);
+    }
+    return false;
+  }
+
   mapWindow(id: number): void {
     const w = this.windows.get(id);
     if (!w) return;
     w.mapped = true;
+    /* Skip paint when an ancestor is still unmapped: the window is
+     * "mapped but not viewable" in X terms and MUST NOT produce pixels
+     * yet. When the ancestor later maps, paintWindowSubtree recurses
+     * into this now-viewable subtree and paints it then. This prevents
+     * xeyes' Xt child widgets from drawing at root-local (0,0) during
+     * the brief window between child-map and shell-map. */
+    if (!this.isViewable(id)) return;
     /* Sync paint: the C-side XMapWindow synthesizes an Expose to the
      * caller's queue immediately after this call returns. The Expose
      * handler runs synchronously before the next emscripten_sleep yield,

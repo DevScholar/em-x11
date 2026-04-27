@@ -112,7 +112,7 @@ export async function launchTwm(
   options: LaunchTwmOptions = {},
 ): Promise<{ connId: number; module: EmscriptenModule }> {
   const base = options.artifactBase ?? '/build/artifacts/twm';
-  return host.launchClient({
+  const result = await host.launchClient({
     glueUrl: `${base}/twm.js`,
     wasmUrl: `${base}/twm.wasm`,
     arguments: ['-f', TWMRC_PATH],
@@ -129,4 +129,13 @@ export async function launchTwm(
       },
     ],
   });
+  /* Gate the return on twm having armed SubstructureRedirect on root.
+   * Without this gate, the caller's next launchClient (xeyes in
+   * demos/session) can race ahead of twm's XSelectInput call and get
+   * its shell mapped at root-local (0,0) before the MapRequest path
+   * is even active. This was visible as "xeyes briefly paints at
+   * canvas (0,0), then twm reparents and the original (0,0) paint
+   * stays as a residual" in the session demo. */
+  await host.waitForSubstructureRedirect(host.getRootWindow());
+  return result;
 }
