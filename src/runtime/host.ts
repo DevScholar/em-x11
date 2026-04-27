@@ -152,6 +152,10 @@ export class Host implements EmX11Host {
   /** Last window that received a ButtonPress, by connection id. Key
    *  events route here until another ButtonPress moves focus. */
   private focusedWindow: number | null = null;
+  /** Module that owns the current implicit pointer grab (set on ButtonPress,
+   *  cleared on ButtonRelease). Used by onMouseMove to route motion events
+   *  to the grab window even when the pointer is over empty canvas space. */
+  private dragModule: EmscriptenModule | null = null;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -944,7 +948,12 @@ export class Host implements EmX11Host {
     if (win === null) return;
     const module = this.moduleForWindow(win);
     if (!module) return;
-    if (xType === X_ButtonPress) this.focusedWindow = win;
+    if (xType === X_ButtonPress) {
+      this.focusedWindow = win;
+      this.dragModule = module;
+    } else {
+      this.dragModule = null;
+    }
     module.ccall(
       'emx11_push_button_event',
       null,
@@ -956,14 +965,13 @@ export class Host implements EmX11Host {
   private onMouseMove(e: MouseEvent): void {
     const { x, y } = this.cssPoint(e);
     const win = this.compositor.findWindowAt(x, y);
-    if (win === null) return;
-    const module = this.moduleForWindow(win);
+    const module = win !== null ? this.moduleForWindow(win) : this.dragModule;
     if (!module) return;
     module.ccall(
       'emx11_push_motion_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number'],
-      [win, x, y, x, y, modifiersFromEvent(e)],
+      [win ?? 0, x, y, x, y, modifiersFromEvent(e)],
     );
   }
 

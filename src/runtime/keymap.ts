@@ -64,11 +64,20 @@ export function keyEventToKeysym(e: KeyboardEvent): number {
 }
 
 /* X modifier mask bits (from X11/X.h). */
-const ShiftMask = 1 << 0;
-const LockMask = 1 << 1;
+const ShiftMask   = 1 << 0;
+const LockMask    = 1 << 1;
 const ControlMask = 1 << 2;
-const Mod1Mask = 1 << 3; // typically Alt
-const Mod4Mask = 1 << 6; // typically Meta / Super
+const Mod1Mask    = 1 << 3; // typically Alt
+const Mod4Mask    = 1 << 6; // typically Meta / Super
+
+/* X button state mask bits (from X11/X.h).
+ * DOM e.buttons bit order differs from X11: primary=bit0, secondary=bit1,
+ * auxiliary/middle=bit2, back=bit3, forward=bit4. Map to X11 Button1..5Mask. */
+const Button1Mask = 1 << 8;
+const Button2Mask = 1 << 9;
+const Button3Mask = 1 << 10;
+const Button4Mask = 1 << 11;
+const Button5Mask = 1 << 12;
 
 export function modifiersFromEvent(e: MouseEvent | KeyboardEvent): number {
   let state = 0;
@@ -77,5 +86,13 @@ export function modifiersFromEvent(e: MouseEvent | KeyboardEvent): number {
   if (e.altKey) state |= Mod1Mask;
   if (e.metaKey) state |= Mod4Mask;
   if (e.getModifierState('CapsLock')) state |= LockMask;
+  if (e instanceof MouseEvent) {
+    const b = e.buttons;
+    if (b & 1)  state |= Button1Mask;
+    if (b & 4)  state |= Button2Mask;  // middle is bit2 in DOM
+    if (b & 2)  state |= Button3Mask;  // right is bit1 in DOM
+    if (b & 8)  state |= Button4Mask;
+    if (b & 16) state |= Button5Mask;
+  }
   return state;
 }

@@ -23,36 +23,102 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* -- 16-bit text is the same as 8-bit for our Latin-only font path.
- * Xaw's Label only uses the 16-bit calls when the resource manager
- * declares a two-byte font, which we never do; but the linker still
- * needs the symbols. Fold the byte pairs into low-byte-only strings
- * so a defensive call does not crash. */
+/* -- 16-bit text, genuine support.
+ *
+ * Tk's Unix font layer classifies em-x11's XFontStruct as a two-byte
+ * (iso10646-1 / ucs-2be) font, so it issues XDrawString16 / XTextWidth16
+ * with XChar2b arrays in UCS-2 big-endian. We translate those back into
+ * UTF-8 (combining high + low surrogate pairs so astral codepoints like
+ * emoji round-trip correctly) and hand the UTF-8 buffer to the same
+ * browser-side text pipeline used for 8-bit strings. The browser's
+ * canvas.fillText / measureText handle arbitrary Unicode coverage,
+ * which is how em-x11 gets real CJK rendering without shipping glyph
+ * tables. */
 
-static char *xchar2b_to_ascii(_Xconst XChar2b *s, int n, char *stack_buf,
-                              size_t stack_cap) {
-    char *out = (size_t)n + 1 <= stack_cap ? stack_buf : malloc((size_t)n + 1);
-    if (!out) return NULL;
-    for (int i = 0; i < n; i++) {
-        out[i] = (char)s[i].byte2;              /* assume low byte is enough */
+static int xchar2b_to_utf8(const XChar2b *s, int n,
+                           unsigned char *out, int cap) {
+    int w = 0, i = 0;
+    while (i < n) {
+        unsigned int cp = ((unsigned int)s[i].byte1 << 8) | s[i].byte2;
+        i++;
+        /* UTF-16 surrogate combining: high (D800..DBFF) + low (DC00..DFFF)
+         * resolve to a single codepoint >= 0x10000. x11protocol has no
+         * opinion; this is Tcl's ucs-2be behaviour for supplementary
+         * chars (Tcl_UtfToExternal emits the surrogate pair). */
+        if (cp >= 0xD800 && cp <= 0xDBFF && i < n) {
+            unsigned int lo = ((unsigned int)s[i].byte1 << 8) | s[i].byte2;
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                i++;
+            }
+        }
+        if (cp < 0x80) {
+            if (w + 1 > cap) break;
+            out[w++] = (unsigned char)cp;
+        } else if (cp < 0x800) {
+            if (w + 2 > cap) break;
+            out[w++] = (unsigned char)(0xC0 | (cp >> 6));
+            out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            if (w + 3 > cap) break;
+            out[w++] = (unsigned char)(0xE0 | (cp >> 12));
+            out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+            out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
+        } else {
+            if (w + 4 > cap) break;
+            out[w++] = (unsigned char)(0xF0 | (cp >> 18));
+            out[w++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+            out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+            out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
+        }
     }
-    out[n] = '\0';
-    return out;
+    return w;
 }
+
+/* Worst case: every XChar2b expands to a 4-byte UTF-8 sequence (non-BMP
+ * lone surrogates). Real BMP text is 1-3 bytes; +1 for trailing NUL. */
+#define EMX11_UTF8_BUFLEN(n)  ((size_t)(n) * 4 + 1)
 
 int XDrawString16(Display *dpy, Drawable d, GC gc, int x, int y,
                   _Xconst XChar2b *string, int length) {
-    char stack[256], *buf = xchar2b_to_ascii(string, length, stack, sizeof stack);
+    if (!string || length <= 0) return 1;
+    size_t cap = EMX11_UTF8_BUFLEN(length);
+    unsigned char stack[512];
+    unsigned char *buf = cap <= sizeof stack ? stack
+                                             : (unsigned char *)malloc(cap);
     if (!buf) return 0;
-    int r = XDrawString(dpy, d, gc, x, y, buf, length);
+    int used = xchar2b_to_utf8(string, length, buf, (int)cap - 1);
+    buf[used] = 0;
+    int r = XDrawString(dpy, d, gc, x, y, (const char *)buf, used);
+    if (buf != stack) free(buf);
+    return r;
+}
+
+int XDrawImageString16(Display *dpy, Drawable d, GC gc, int x, int y,
+                       _Xconst XChar2b *string, int length) {
+    if (!string || length <= 0) return 1;
+    size_t cap = EMX11_UTF8_BUFLEN(length);
+    unsigned char stack[512];
+    unsigned char *buf = cap <= sizeof stack ? stack
+                                             : (unsigned char *)malloc(cap);
+    if (!buf) return 0;
+    int used = xchar2b_to_utf8(string, length, buf, (int)cap - 1);
+    buf[used] = 0;
+    int r = XDrawImageString(dpy, d, gc, x, y, (const char *)buf, used);
     if (buf != stack) free(buf);
     return r;
 }
 
 int XTextWidth16(XFontStruct *fs, _Xconst XChar2b *string, int count) {
-    char stack[256], *buf = xchar2b_to_ascii(string, count, stack, sizeof stack);
+    if (!string || count <= 0) return 0;
+    size_t cap = EMX11_UTF8_BUFLEN(count);
+    unsigned char stack[512];
+    unsigned char *buf = cap <= sizeof stack ? stack
+                                             : (unsigned char *)malloc(cap);
     if (!buf) return 0;
-    int w = XTextWidth(fs, buf, count);
+    int used = xchar2b_to_utf8(string, count, buf, (int)cap - 1);
+    buf[used] = 0;
+    int w = XTextWidth(fs, (const char *)buf, used);
     if (buf != stack) free(buf);
     return w;
 }
@@ -223,7 +289,16 @@ Bool XQueryPointer(Display *dpy, Window w, Window *root_return,
 }
 
 int XGetFontProperty(XFontStruct *fs, Atom atom, unsigned long *value_return) {
-    (void)fs; (void)atom;
+    if (!fs || !fs->properties || fs->n_properties <= 0) {
+        if (value_return) *value_return = 0;
+        return False;
+    }
+    for (int i = 0; i < fs->n_properties; i++) {
+        if (fs->properties[i].name == atom) {
+            if (value_return) *value_return = fs->properties[i].card32;
+            return True;
+        }
+    }
     if (value_return) *value_return = 0;
     return False;                               /* "property not present" */
 }
@@ -322,31 +397,6 @@ long XMaxRequestSize(Display *dpy) {
 
 int XGrabServer(Display *dpy)   { (void)dpy; return 1; }
 int XUngrabServer(Display *dpy) { (void)dpy; return 1; }
-
-/* -- Selection stubs.
- * Xt's Selection.c drags selection APIs in even when no selection
- * conversion is actually requested. Record the owner so that a
- * later XGetSelectionOwner returns the same value consistently. */
-
-static Window g_selection_owner = None;
-
-int XSetSelectionOwner(Display *dpy, Atom selection, Window owner, Time t) {
-    (void)dpy; (void)selection; (void)t;
-    g_selection_owner = owner;
-    return 1;
-}
-
-Window XGetSelectionOwner(Display *dpy, Atom selection) {
-    (void)dpy; (void)selection;
-    return g_selection_owner;
-}
-
-int XConvertSelection(Display *dpy, Atom selection, Atom target, Atom property,
-                      Window requestor, Time t) {
-    (void)dpy; (void)selection; (void)target; (void)property;
-    (void)requestor; (void)t;
-    return 1;                                   /* pretend we sent it */
-}
 
 /* -- Error handler. Record the hook but never invoke it (we don't
  * generate X protocol errors). */

@@ -193,6 +193,37 @@ struct _XDisplay {
     Window                     focus_window;
     int                        focus_revert_to;
     Time                       focus_last_time;
+
+    /* ICCCM selection state. Selection ownership is server-global in real
+     * X (dix/selection.c); here it's per-Display because each wasm module
+     * is its own in-process "server". Cross-module selection is deferred.
+     *
+     * `selections` holds at most 8 concurrent owners; slot sel==0 means
+     * free. Typical use: PRIMARY, CLIPBOARD, plus a few custom atoms.
+     *
+     * CLIPBOARD has a virtual owner (clipboard_proxy_win) that represents
+     * the browser clipboard; when no real client owns CLIPBOARD,
+     * XGetSelectionOwner(CLIPBOARD) returns this sentinel XID and
+     * XConvertSelection(CLIPBOARD, ...) routes to the browser bridge in
+     * selection.c instead of pushing a SelectionRequest.
+     *
+     * Atoms that don't have predefined ids are interned lazily on first
+     * use (selection_ensure_atoms in selection.c) and cached here to
+     * avoid repeat round-trips through emx11_js_intern_atom. */
+    struct {
+        Atom   sel;
+        Window owner;
+        Time   time;
+    }                          selections[8];
+
+    Window                     clipboard_proxy_win;
+    Atom                       atom_clipboard;
+    Atom                       atom_utf8_string;
+    Atom                       atom_targets;
+    Atom                       atom_timestamp;
+    Atom                       atom_text;
+    Atom                       atom_incr;
+    Atom                       atom_emx11_clipboard_data;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -452,5 +483,44 @@ extern Status emx11_js_parse_color(const char *name,
                                    unsigned short *red_out,
                                    unsigned short *green_out,
                                    unsigned short *blue_out);
+
+/* Browser clipboard bridge (see selection.c). The read path is split in
+ * two because Asyncify can only suspend a single JS-to-C boundary: first
+ * call awaits navigator.clipboard.readText() and stashes the UTF-8 bytes
+ * on the JS side, returning the byte length (or -1 on error); second
+ * call copies up to `capacity` bytes into `dst` and clears the stash.
+ * The write path is fire-and-forget (writeText Promise failures logged
+ * to console, never propagated to C). */
+extern int  emx11_js_clipboard_read_begin(void);
+extern int  emx11_js_clipboard_read_fetch(unsigned char *dst, int capacity);
+extern void emx11_js_clipboard_write_utf8(const unsigned char *data, int len);
+
+/* ------------------------------------------------------------------------- */
+/*  Selection / ICCCM (selection.c).                                         */
+/* ------------------------------------------------------------------------- */
+
+/* Event push helpers used by both selection.c and XSendEvent's proxy
+ * interception path in event.c. */
+void emx11_push_selection_clear  (Display *dpy, Window owner,
+                                  Atom selection, Time time);
+void emx11_push_selection_request(Display *dpy, Window owner,
+                                  Window requestor, Atom selection,
+                                  Atom target, Atom property, Time time);
+void emx11_push_selection_notify (Display *dpy, Window requestor,
+                                  Atom selection, Atom target,
+                                  Atom property, Time time);
+
+/* Lazy-intern the cached CLIPBOARD / UTF8_STRING / TARGETS / ... atoms
+ * on the Display if they haven't been set yet. Safe to call repeatedly;
+ * amortises to zero after first hit. */
+void emx11_selection_ensure_atoms(Display *dpy);
+
+/* Intercept hook used by XSendEvent: when a SelectionNotify is being
+ * sent to the clipboard proxy window, reads the response property and
+ * pushes it to the browser clipboard, returning True to indicate the
+ * event was consumed (do not queue). Returns False for any other target,
+ * in which case XSendEvent falls through to its normal path. */
+Bool emx11_selection_intercept_send(Display *dpy, Window w,
+                                    const XEvent *ev);
 
 #endif /* EMX11_INTERNAL_H */

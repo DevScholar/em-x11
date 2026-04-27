@@ -19,6 +19,7 @@ set(EMX11_SOURCES
     src/event.c
     src/atom.c
     src/property.c
+    src/selection.c
     src/color.c
     src/error.c
     src/font.c

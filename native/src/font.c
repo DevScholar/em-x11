@@ -27,6 +27,7 @@
 
 #include "emx11_internal.h"
 
+#include <X11/Xatom.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,10 @@ typedef struct EmxFont {
     int          pixel_size;
     char         css[128];
     XFontStruct  fs;
-    XCharStruct  per_char[EMX11_PER_CHAR_COUNT];
+    XFontProp    props[1];              /* XA_FONT -> atom of XLFD name */
+    XCharStruct  per_char[EMX11_PER_CHAR_COUNT];   /* retained for XTextWidth
+                                                    * fast paths that key on
+                                                    * the ASCII band */
 } EmxFont;
 
 static EmxFont g_fonts[EMX11_MAX_FONTS];
@@ -184,27 +188,82 @@ const char *emx11_font_css(Font font) {
 
 /* -- XFontStruct construction ----------------------------------------- */
 
-static void fill_font_struct(EmxFont *f) {
+/* -- XLFD synthesis for the FONT property --------------------------------
+ *
+ * We synthesize a canonical XLFD ending in `-iso10646-1` for every font
+ * we hand out, and intern it as an atom exposed through the FONT
+ * property. This is how Tk's tkUnixFont.c/GetFontAttributes learns our
+ * charset: it calls XGetFontProperty(fs, XA_FONT, &val), resolves
+ * val through XGetAtomName, and TkFontParseXLFD pulls the registry-
+ * encoding pair out of the last two dash-fields.
+ *
+ * Why iso10646-1 specifically: Tk aliases that charset to the Tcl
+ * "ucs-2be" encoding and sets familyPtr->isTwoByteFont = 1 (see
+ * AllocFontFamily, tkUnixFont.c:1915). That makes Tk_DrawChars route
+ * non-ASCII codepoints through XDrawString16 as 2-byte UCS-2BE pairs,
+ * which our xaw_stubs.c rewriter expands back into UTF-8 for
+ * canvas.fillText. Without iso10646-1 the font's encoding defaults to
+ * iso8859-1 and every codepoint >= 0x100 gets routed through
+ * ControlUtfProc's `\uXXXX` hex-escape fallback. */
+static const char *xlfd_family_token(const char *css_family) {
+    if (strstr(css_family, "serif") && !strstr(css_family, "sans")) {
+        return "times";
+    }
+    if (strstr(css_family, "mono")) return "courier";
+    return "helvetica";
+}
+
+static const char *xlfd_weight_token(const char *css_font) {
+    if (strstr(css_font, "bold") || strstr(css_font, "900")) return "bold";
+    if (strstr(css_font, "300"))                             return "light";
+    return "medium";
+}
+
+static char xlfd_slant_token(const char *css_font) {
+    if (strstr(css_font, "italic"))  return 'i';
+    if (strstr(css_font, "oblique")) return 'o';
+    return 'r';
+}
+
+static void build_xlfd(char *out, size_t outlen, const char *css_font,
+                       int pixel_size) {
+    const char *family = xlfd_family_token(css_font);
+    const char *weight = xlfd_weight_token(css_font);
+    char slant = xlfd_slant_token(css_font);
+    /* Classic 14-field XLFD with iso10646-1 at registry-encoding. */
+    snprintf(out, outlen,
+             "-emx11-%s-%s-%c-normal--%d-*-*-*-*-*-iso10646-1",
+             family, weight, slant, pixel_size);
+}
+
+static void fill_font_struct(Display *dpy, EmxFont *f) {
     int ascent = 0, descent = 0, max_width = 0;
     int widths[EMX11_PER_CHAR_COUNT] = {0};
     emx11_js_measure_font(f->css, &ascent, &descent, &max_width, widths);
 
     XFontStruct *fs = &f->fs;
     memset(fs, 0, sizeof(*fs));
-    fs->fid               = f->fid;
-    fs->direction         = FontLeftToRight;
-    fs->min_char_or_byte2 = EMX11_PER_CHAR_MIN;
-    fs->max_char_or_byte2 = EMX11_PER_CHAR_MAX;
+    fs->fid = f->fid;
+    fs->direction = FontLeftToRight;
+
+    /* Full-BMP two-byte span. Tk's AllocFontFamily classifies anything
+     * with max_byte1 > 0 or max_char_or_byte2 >= 256 as a two-byte font
+     * (tkUnixFont.c:1915); that toggle is what unlocks CJK. */
     fs->min_byte1         = 0;
-    fs->max_byte1         = 0;
+    fs->max_byte1         = 0xFF;
+    fs->min_char_or_byte2 = 0;
+    fs->max_char_or_byte2 = 0xFF;
     fs->all_chars_exist   = True;
     fs->default_char      = '?';
-    fs->n_properties      = 0;
-    fs->properties        = NULL;
 
-    /* Populate per_char from browser widths. ascent/descent are the
-     * font-level values -- real X fonts vary this per glyph but for a
-     * browser canvas font they're uniform. */
+    /* per_char = NULL tells FontMapLoadPage (tkUnixFont.c:2306) "accept
+     * every row+col the encoding produced", which is exactly what we
+     * want given the browser can render any Unicode codepoint. The
+     * per_char[] we still populate below is unused by Tk through the
+     * 2-byte path, but ASCII-only clients that inspect XFontStruct
+     * directly still see reasonable width data. */
+    fs->per_char = NULL;
+
     int min_w = widths[0] > 0 ? widths[0] : max_width;
     for (int i = 0; i < EMX11_PER_CHAR_COUNT; i++) {
         short w = (short)widths[i];
@@ -216,7 +275,6 @@ static void fill_font_struct(EmxFont *f) {
         f->per_char[i].descent    = (short)descent;
         f->per_char[i].attributes = 0;
     }
-    fs->per_char = f->per_char;
 
     fs->min_bounds.lbearing = 0;
     fs->min_bounds.rbearing = (short)min_w;
@@ -232,6 +290,15 @@ static void fill_font_struct(EmxFont *f) {
 
     fs->ascent  = ascent;
     fs->descent = descent;
+
+    /* FONT property: atom of the synthesized XLFD. Tk reads this via
+     * XGetFontProperty (xaw_stubs.c implementation scans fs->properties). */
+    char xlfd[192];
+    build_xlfd(xlfd, sizeof(xlfd), f->css, f->pixel_size);
+    f->props[0].name  = XA_FONT;
+    f->props[0].card32 = (unsigned long)XInternAtom(dpy, xlfd, False);
+    fs->properties    = f->props;
+    fs->n_properties  = 1;
 }
 
 /* -- Public API ------------------------------------------------------------ */
@@ -244,7 +311,7 @@ XFontStruct *XLoadQueryFont(Display *dpy, const char *name) {
     f->fid        = emx11_next_xid(dpy);
     f->pixel_size = pixel_size;
     build_css_font(f->css, sizeof(f->css), name, pixel_size);
-    fill_font_struct(f);
+    fill_font_struct(dpy, f);
     f->in_use = true;
     return &f->fs;
 }

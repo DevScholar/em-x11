@@ -174,6 +174,15 @@ Status XSendEvent(Display *display, Window w, Bool propagate,
         w = display->focus_window;
     }
 
+    /* Clipboard proxy intercept: when a real CLIPBOARD owner responds to
+     * our back-channel XConvertSelection by sending SelectionNotify to
+     * the proxy, forward the UTF-8 bytes to navigator.clipboard.writeText()
+     * and consume the event (nothing on the X side should ever read from
+     * the proxy's queue). Returns True only if the event was handled. */
+    if (emx11_selection_intercept_send(display, w, event_send)) {
+        return 1;
+    }
+
     XEvent ev = *event_send;                    /* caller may reuse buffer */
     ev.xany.display    = display;
     ev.xany.send_event = True;
