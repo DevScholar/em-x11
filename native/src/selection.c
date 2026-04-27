@@ -36,24 +36,8 @@
 #include "emx11_internal.h"
 
 #include <X11/Xatom.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* Flip to 1 to trace selection activity to the browser console.
- * Hot but not catastrophic — leave off in shipping builds. */
-#ifndef EMX11_SELECTION_TRACE
-#define EMX11_SELECTION_TRACE 1
-#endif
-
-#if EMX11_SELECTION_TRACE
-#  define SELTRACE(...) do { \
-    fprintf(stderr, "[emx11/sel] " __VA_ARGS__); \
-    fputc('\n', stderr); \
-} while (0)
-#else
-#  define SELTRACE(...) ((void)0)
-#endif
 
 /* ------------------------------------------------------------------------- */
 /*  Cached atoms.                                                            */
@@ -98,7 +82,6 @@ void emx11_selection_ensure_atoms(Display *dpy) {
             emx11_js_window_create(dpy->conn_id, w, root,
                                    0, 0, 1, 1, 0);
             dpy->clipboard_proxy_win = w;
-            SELTRACE("proxy window allocated: 0x%lx", (unsigned long)w);
         }
     }
 }
@@ -275,9 +258,6 @@ static Bool serve_clipboard_from_browser(Display *dpy, Atom target,
                                          Window requestor, Atom property,
                                          Time time) {
     emx11_selection_ensure_atoms(dpy);
-    SELTRACE("serve_from_browser target=%lu (utf8=%lu str=%lu targets=%lu)",
-             (unsigned long)target, (unsigned long)dpy->atom_utf8_string,
-             (unsigned long)XA_STRING, (unsigned long)dpy->atom_targets);
 
     if (target == dpy->atom_targets) {
         serve_targets(dpy, requestor, property);
@@ -295,7 +275,6 @@ static Bool serve_clipboard_from_browser(Display *dpy, Atom target,
      *   _fetch copies those bytes into our malloc'd buffer.
      * Asyncify suspends only on _begin; _fetch is synchronous. */
     int text_len = emx11_js_clipboard_read_begin();
-    SELTRACE("clipboard_read_begin -> len=%d", text_len);
     if (text_len < 0) return False;          /* permission denied / error */
 
     unsigned char *utf8 = NULL;
@@ -343,9 +322,6 @@ static Bool serve_clipboard_from_browser(Display *dpy, Atom target,
 int XSetSelectionOwner(Display *dpy, Atom selection, Window owner, Time time) {
     if (!dpy || selection == 0) return 0;
     emx11_selection_ensure_atoms(dpy);
-    SELTRACE("XSetSelectionOwner sel=%lu (clip=%lu) owner=0x%lx",
-             (unsigned long)selection, (unsigned long)dpy->atom_clipboard,
-             (unsigned long)owner);
 
     int slot = sel_find(dpy, selection);
     Window old_owner = (slot >= 0) ? dpy->selections[slot].owner : None;
@@ -410,10 +386,6 @@ int XConvertSelection(Display *dpy, Atom selection, Atom target,
     emx11_selection_ensure_atoms(dpy);
 
     Window owner = XGetSelectionOwner(dpy, selection);
-    SELTRACE("XConvertSelection sel=%lu target=%lu prop=%lu requestor=0x%lx owner=0x%lx",
-             (unsigned long)selection, (unsigned long)target,
-             (unsigned long)property, (unsigned long)requestor,
-             (unsigned long)owner);
 
     /* Proxy owns CLIPBOARD → serve from browser clipboard. */
     if (selection == dpy->atom_clipboard &&
@@ -457,9 +429,6 @@ Bool emx11_selection_intercept_send(Display *dpy, Window w, const XEvent *ev) {
     if (w != dpy->clipboard_proxy_win) return False;
     if (ev->type != SelectionNotify)   return False;
 
-    SELTRACE("intercept_send proxy SelectionNotify property=%lu",
-             (unsigned long)ev->xselection.property);
-
     /* Owner refused the conversion: nothing to push, but we still consume
      * the event since queuing it to the proxy accomplishes nothing. */
     if (ev->xselection.property == None) return True;
@@ -475,7 +444,6 @@ Bool emx11_selection_intercept_send(Display *dpy, Window w, const XEvent *ev) {
                                 AnyPropertyType,
                                 &actual_type, &actual_fmt,
                                 &nitems, &bytes_after, &data);
-    SELTRACE("intercept got rc=%d nitems=%lu fmt=%d", rc, nitems, actual_fmt);
     if (rc == Success && data && nitems > 0 && actual_fmt == 8) {
         emx11_js_clipboard_write_utf8(data, (int)nitems);
 
@@ -500,8 +468,6 @@ Bool emx11_selection_intercept_send(Display *dpy, Window w, const XEvent *ev) {
             dpy->selections[slot].owner = None;
             dpy->selections[slot].time  = 0;
             if (ex_owner != None && ex_owner != dpy->clipboard_proxy_win) {
-                SELTRACE("evicting CLIPBOARD owner 0x%lx via SelectionClear",
-                         (unsigned long)ex_owner);
                 emx11_push_selection_clear(dpy, ex_owner,
                                            dpy->atom_clipboard, ex_time);
             }
