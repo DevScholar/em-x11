@@ -139,6 +139,20 @@ int XMapWindow(Display *display, Window w) {
     if (win) {
         win->mapped = true;
         push_map_notify(display, win, true);
+
+        /* Implicit toplevel focus: without a WM (our world) no one
+         * assigns X focus to newly mapped toplevels, and Tk's
+         * TkSetFocusWin (tkFocus.c:644) silently no-ops when
+         * displayFocusPtr->focusWinPtr is still NULL. That branch only
+         * gets populated after a FocusIn lands on a toplevel wrapper,
+         * so `focus .some.entry` from user clicks would be a no-op:
+         * cursors never blink and keys never route. Auto-focus the
+         * first root-child wrapper to map, mirroring the "no WM,
+         * server auto-focuses override-redirect window" path in real X. */
+        if (win->parent == display->screens[0].root &&
+            display->focus_window == None) {
+            XSetInputFocus(display, w, RevertToParent, CurrentTime);
+        }
     }
     emx11_js_window_map(display->conn_id, w);
     return 1;
