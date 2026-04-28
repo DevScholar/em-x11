@@ -691,24 +691,8 @@ Bool XrmEnumerateDatabase(XrmDatabase db, XrmNameList names,
     return False;
 }
 
-Bool XrmQGetSearchList(XrmDatabase db, XrmNameList names, XrmClassList classes,
-                       XrmSearchList list_return, int list_size) {
-    (void)db; (void)names; (void)classes; (void)list_size;
-    /* Return True to signal "search completed (with empty result)". Xt
-     * retries with an ever-larger buffer when this returns False, so
-     * returning False here infinite-loops into OOM. */
-    if (list_return) list_return[0] = NULL;
-    return True;
-}
-
-Bool XrmQGetSearchResource(XrmSearchList list, XrmName name, XrmClass class_,
-                           XrmRepresentation *type_return,
-                           XrmValue *value_return) {
-    (void)list; (void)name; (void)class_;
-    if (type_return)  *type_return  = NULLQUARK;
-    if (value_return) { value_return->size = 0; value_return->addr = NULL; }
-    return False;
-}
+/* XrmQGetSearchList / XrmQGetSearchResource are now implemented in
+ * native/src/xrm.c (they walk the real database we build there). */
 
 void XrmQPutResource(XrmDatabase *db, XrmBindingList bindings,
                      XrmQuarkList quarks, XrmRepresentation type,
