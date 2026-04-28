@@ -163,12 +163,33 @@ int XClearWindow(Display *display, Window w) {
 int XClearArea(Display *display, Window w,
                int x, int y, unsigned int width, unsigned int height,
                Bool exposures) {
-    (void)exposures;
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
     if (width == 0)  width  = win->width  - (unsigned int)x;
     if (height == 0) height = win->height - (unsigned int)y;
     emx11_js_clear_area(w, x, y, width, height);
+    /* x11protocol.txt §1064 / XClearArea(3): when `exposures` is True,
+     * the server generates Expose events for the cleared region. Xt's
+     * SetValues.c:441 relies on this (XClearArea(..., TRUE)) to get a
+     * redisplay of any widget whose resources changed in-place -- e.g.
+     * XawCommandToggle swapping fg/bg on button press, or XCalc setting
+     * the LCD label string. Without the Expose, the widget's bg is
+     * refreshed to the new colour but its content (label text, border)
+     * is never repainted until some other event (Leave, Map, ...)
+     * happens to trigger its expose proc. */
+    if (exposures) {
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type             = Expose;
+        ev.xexpose.display  = display;
+        ev.xexpose.window   = w;
+        ev.xexpose.x        = x;
+        ev.xexpose.y        = y;
+        ev.xexpose.width    = (int)width;
+        ev.xexpose.height   = (int)height;
+        ev.xexpose.count    = 0;
+        emx11_event_queue_push(display, &ev);
+    }
     return 1;
 }
 

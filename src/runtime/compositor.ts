@@ -118,6 +118,17 @@ export class Compositor {
     this.paintWindowSubtree(w);
   }
 
+  /** Solid-background update (XSetWindowBackground / CWBackPixel). The
+   *  change takes effect on the next XClearArea or Expose-triggered bg
+   *  paint, just like real X -- we don't auto-repaint here because Xt's
+   *  XawCommandToggle path sequences this with a ClearArea that the
+   *  widget relies on for the pixel update to land. */
+  setWindowBackground(id: number, background: number): void {
+    const w = this.windows.get(id);
+    if (!w) return;
+    w.background = background;
+  }
+
   setWindowBackgroundPixmap(id: number, pmId: number): void {
     const w = this.windows.get(id);
     if (!w) return;
@@ -392,10 +403,24 @@ export class Compositor {
     ctx.save();
     this.applyWindowClip(ctx, win);
     ctx.strokeStyle = pixelToCssColor(color);
-    ctx.lineWidth = lineWidth || 1;
+    const lw = lineWidth || 1;
+    ctx.lineWidth = lw;
+    /* Crisp-pixel offset: Canvas stroke centers on the path, so an odd
+     * lineWidth needs a half-pixel path to land on whole pixels, but
+     * an EVEN lineWidth needs an integer path (a half-pixel path with
+     * even width antialiases across 3 columns instead of filling 2).
+     *
+     * Why this matters: Athena Command's Enter/Leave highlight strokes
+     * a 2px ring with normal_GC then inverse_GC at identical coords.
+     * With antialiased edges, the Leave-time bg-color overwrite can't
+     * fully undo the partial-alpha residue (source-over compositing,
+     * no XOR), leaving a persistent gray ring around every hovered
+     * button. Integer path for lw=2 gives fully-opaque pixel rows →
+     * clean overpaint. */
+    const off = lw % 2 === 0 ? 0 : 0.5;
     ctx.beginPath();
-    ctx.moveTo(ax + x1 + 0.5, ay + y1 + 0.5);
-    ctx.lineTo(ax + x2 + 0.5, ay + y2 + 0.5);
+    ctx.moveTo(ax + x1 + off, ay + y1 + off);
+    ctx.lineTo(ax + x2 + off, ay + y2 + off);
     ctx.stroke();
     ctx.restore();
   }

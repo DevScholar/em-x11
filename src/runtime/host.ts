@@ -523,6 +523,10 @@ export class Host implements EmX11Host {
     this.compositor.setWindowBorder(id, borderWidth, borderPixel);
   }
 
+  onWindowSetBg(id: number, background: number): void {
+    this.compositor.setWindowBackground(id, background);
+  }
+
   onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void {
     this.compositor.configureWindow(id, x, y, w, h);
     /* Configuring a mapped window erases its old content (we have no

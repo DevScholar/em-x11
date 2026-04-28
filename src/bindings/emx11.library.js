@@ -60,6 +60,15 @@ addToLibrary({
       globalThis.__EMX11__.onWindowSetBorder(id, borderWidth, borderPixel);
   },
 
+  // Solid-background update (XSetWindowBackground, CWBackPixel). The
+  // native side has already cleared any bound pixmap via window_set_bg_pixmap
+  // if needed; here we update the solid colour so the next clearArea /
+  // Expose paints with it.
+  emx11_js_window_set_bg: function (id, background) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onWindowSetBg(id, background);
+  },
+
   // Geometry-only update for an existing window. Unlike window_create
   // this preserves parent, shape, background_pixmap, and the Host-side
   // subscription table.

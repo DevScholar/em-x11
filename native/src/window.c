@@ -272,7 +272,10 @@ int XChangeWindowAttributes(Display *display, Window w,
                             XSetWindowAttributes *attrs) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win || !attrs) return 0;
-    if (valuemask & CWBackPixel)        win->background_pixel = attrs->background_pixel;
+    if (valuemask & CWBackPixel) {
+        win->background_pixel = attrs->background_pixel;
+        emx11_js_window_set_bg(w, win->background_pixel);
+    }
     if (valuemask & CWBorderPixel) {
         win->border_pixel = attrs->border_pixel;
         emx11_js_window_set_border(w, win->border_width, win->border_pixel);
@@ -308,6 +311,13 @@ int XSetWindowBackground(Display *display, Window w, unsigned long background) {
         win->background_pixmap = 0;
         emx11_js_window_set_bg_pixmap(w, 0);
     }
+    /* Push the new pixel to the Host so the next XClearArea / Expose
+     * actually paints with it. Without this, Xt's XawCommandToggle
+     * (swaps fg/bg on click) updates our native struct but the
+     * compositor keeps the old colour -- the next clearArea fills
+     * with the OLD bg while Label redraws text using the NEW fg
+     * (which equals the old bg), rendering invisible text. */
+    emx11_js_window_set_bg(w, background);
     return 1;
 }
 

@@ -312,6 +312,10 @@ extern void emx11_js_window_create(int conn_id, Window id, Window parent,
 extern void emx11_js_window_set_border(Window id,
                                        unsigned int border_width,
                                        unsigned long border_pixel);
+/* Solid-background update (XSetWindowBackground / XChangeWindowAttributes
+ * CWBackPixel). Repaints the window with the new colour. Distinct from
+ * window_set_bg_pixmap which binds a tile pattern. */
+extern void emx11_js_window_set_bg(Window id, unsigned long background);
 /* Geometry change on an existing window (XMoveWindow / XResizeWindow /
  * XConfigureWindow). Distinct from window_create so Host doesn't have
  * to re-seed parent, shape, or background_pixmap -- we only touch the

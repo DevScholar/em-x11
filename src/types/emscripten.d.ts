@@ -107,6 +107,8 @@ export interface EmX11Host {
     background: number,
   ): void;
   onWindowSetBorder(id: number, borderWidth: number, borderPixel: number): void;
+  onWindowSetBg(id: number, background: number): void;
+  onWindowSetBg(id: number, background: number): void;
   /** Geometry-only update for an existing window (XMoveWindow /
    *  XResizeWindow / XConfigureWindow). Leaves parent, shape, and
    *  background_pixmap alone. */
