@@ -21,7 +21,7 @@
  * (`twm -f ~/.twmrc`).
  */
 
-import type { Host } from './host.js';
+import type { Host } from '../host/index.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';

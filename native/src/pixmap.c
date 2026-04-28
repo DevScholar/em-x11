@@ -3,7 +3,7 @@
  *
  * X Pixmaps are server-side offscreen drawables. In em-x11 each Pixmap
  * is backed by an OffscreenCanvas on the JS side (see src/bindings/
- * emx11.library.js -- emx11_js_pixmap_*). The C side only tracks the
+ * pixmap.js -- emx11_js_pixmap_*). The C side only tracks the
  * (id, width, height, depth) triple so drawing calls and SHAPE can
  * resolve ids without round-tripping through JS.
  *

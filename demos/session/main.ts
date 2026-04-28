@@ -10,11 +10,11 @@
  * twm gets a custom twmrc with RandomPlacement enabled, staged via
  * MEMFS preRun. The vendored twm source isn't git-tracked, so any
  * config tweak that twm needs to behave well in our headless single-
- * thread world has to come from the runtime side. See twmLaunch.ts.
+ * thread world has to come from the runtime side. See twm-launch.ts.
  */
 
-import { Host } from '../../src/runtime/host.js';
-import { launchTwm } from '../../src/runtime/twmLaunch.js';
+import { Host } from '../../src/host/index.js';
+import { launchTwm } from '../../src/runtime/twm-launch.js';
 
 const host = new Host();
 host.install();

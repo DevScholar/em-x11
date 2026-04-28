@@ -2,7 +2,7 @@
  * hello demo harness: install the em-x11 host, then launch the hello wasm.
  */
 
-import { Host } from '../../src/runtime/host.js';
+import { Host } from '../../src/host/index.js';
 
 const host = new Host();
 host.install();

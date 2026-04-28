@@ -279,7 +279,8 @@ const char *emx11_font_css(Font font);
 void emx11_window_free_properties(EmxWindow *win);
 
 /* ------------------------------------------------------------------------- */
-/*  JS bridge. These symbols are defined by src/bindings/emx11.library.js   */
+/*  JS bridge. These symbols are defined by src/bindings/*.js (split by      */
+/*  domain: core, window, property, atom, draw, font, pixmap, clipboard)     */
 /*  and hooked into the link via --js-library. The C side calls into the    */
 /*  browser (canvas draw, DOM mutation) through these.                       */
 /* ------------------------------------------------------------------------- */

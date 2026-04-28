@@ -1,0 +1,14 @@
+{
+  "// note": "Reserved for the future day we want to publish src/ as a typed package. pnpm build uses vite (esbuild) for dist/, NOT this config. To emit declarations: tsc -p tsconfig.build.json (currently no script wires this up).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist/types",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "build", "references", "native", "third-party", "demos"]
+}

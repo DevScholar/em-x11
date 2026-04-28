@@ -19,11 +19,10 @@
     "isolatedModules": true,
     "skipLibCheck": true,
 
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src",
+    // This config is the typecheck-only baseline -- vite (esbuild) emits
+    // dist/, not tsc. Output settings live in tsconfig.build.json for the
+    // day we want to publish .d.ts files alongside the package.
+    "noEmit": true,
 
     "types": ["vite/client", "emscripten", "node"],
 

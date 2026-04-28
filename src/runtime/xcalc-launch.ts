@@ -22,7 +22,7 @@
  * the dev server doesn't have to serve it.
  */
 
-import type { Host } from './host.js';
+import type { Host } from '../host/index.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
 // eslint-disable-next-line import/no-unresolved
 import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';

@@ -67,12 +67,28 @@ target_compile_options(emx11_static
 )
 
 # Hook JS-side library code (addToLibrary) into the emscripten link step.
+# Each file mirrors a chunk of xserver/dix (window.c, property.c, atom.c,
+# gc.c, pixmap.c) plus em-x11-specific bridges (core lifecycle, font/colour,
+# clipboard). emcc accepts repeated --js-library flags and merges every
+# addToLibrary({...}) call before resolving extern references from C.
 # Consumers that link emx11_static inherit this via target_link_options.
-set(EMX11_JS_LIBRARY "${CMAKE_SOURCE_DIR}/src/bindings/emx11.library.js")
-target_link_options(emx11_static
-    INTERFACE
-        "SHELL:--js-library ${EMX11_JS_LIBRARY}"
+set(EMX11_JS_LIBRARY_DIR "${CMAKE_SOURCE_DIR}/src/bindings")
+set(EMX11_JS_LIBRARIES
+    core.js
+    window.js
+    property.js
+    atom.js
+    draw.js
+    font.js
+    pixmap.js
+    clipboard.js
 )
+foreach(_jslib IN LISTS EMX11_JS_LIBRARIES)
+    target_link_options(emx11_static
+        INTERFACE
+            "SHELL:--js-library ${EMX11_JS_LIBRARY_DIR}/${_jslib}"
+    )
+endforeach()
 
 set_target_properties(emx11_static PROPERTIES
     OUTPUT_NAME "emx11"

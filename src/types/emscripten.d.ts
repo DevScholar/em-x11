@@ -10,7 +10,7 @@
  */
 export interface EmscriptenFS {
   writeFile(path: string, data: string | Uint8Array): void;
-  mkdir?(path: string): void;
+  mkdir(path: string): void;
 }
 
 export interface EmscriptenModule {
@@ -42,12 +42,19 @@ export interface EmscriptenModule {
   addFunction?(fn: (...args: unknown[]) => unknown, signature: string): number;
   removeFunction?(fn: number): void;
 
+  /** Factory-time hook that overrides where Emscripten fetches sibling
+   *  assets (.wasm, --preload-file .data blobs). Only meaningful when
+   *  passed to the Module factory; not present on the runtime instance.
+   *  Typed here because `Partial<EmscriptenModule>` is what the factory
+   *  signature accepts as its argument. */
+  locateFile?: (path: string, prefix: string) => string;
+
   /** Process argv (excluding argv[0], which Emscripten sets to ./this.program).
    *  Settable via the factory argument; read by the wasm's main(). */
-  arguments?: string[];
+  arguments?: string[] | undefined;
   /** Hooks fired between FS init and main(). Use for staging files into
    *  MEMFS so the program sees them at startup (e.g. config files). */
-  preRun?: ((mod: EmscriptenModule) => void)[];
+  preRun?: ((mod: EmscriptenModule) => void)[] | undefined;
   /** MEMFS handle. Available inside preRun and afterwards; not on the
    *  factory-arg side. */
   FS?: EmscriptenFS;
@@ -75,8 +82,8 @@ export interface Point {
 
 /**
  * The em-x11 host object, installed on `globalThis` before wasm starts so
- * that C code (via src/bindings/emx11.library.js) can reach TS-side state.
- * Populated by src/runtime/host.ts.
+ * that C code (via src/bindings/*.js) can reach TS-side state.
+ * Populated by src/host/index.ts.
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;
