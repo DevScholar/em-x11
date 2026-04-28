@@ -46,6 +46,7 @@ LIBS=(
     "libXpm  libXpm  3.5.17  https://www.x.org/releases/individual/lib  lib"
     "xeyes   xeyes   1.3.1   https://www.x.org/releases/individual/app  app"
     "xclock  xclock  1.1.1   https://www.x.org/releases/individual/app  app"
+    "xcalc   xcalc   1.1.3   https://www.x.org/releases/individual/app  app"
     "twm     twm     1.0.13.1 https://www.x.org/releases/individual/app  app"
 )
 

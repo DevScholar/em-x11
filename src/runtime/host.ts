@@ -559,10 +559,6 @@ export class Host implements EmX11Host {
     const parent = this.compositor.parentOf(id);
     const holderConnId = parent !== 0 ? this.redirectHolderFor(parent) : null;
     const overrideRedirect = this.overrideRedirect.get(id) ?? false;
-    console.info(
-      `em-x11: onWindowMap conn=${connId} win=${id} parent=${parent} ` +
-        `holder=${holderConnId} overrideRedirect=${overrideRedirect}`,
-    );
     if (
       holderConnId !== null &&
       holderConnId !== connId &&

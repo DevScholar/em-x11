@@ -130,6 +130,30 @@ int XFillRectangles(Display *dpy, Drawable d, GC gc,
     return 1;
 }
 
+/* Xmu's DrRndRect.c (XmuDrawRoundedRectangle / XmuFillRoundedRectangle)
+ * stamps arcs for every corner in a single XDrawArcs / XFillArcs call.
+ * Xaw's Command/Toggle widgets then call DrRndRect for every button in a
+ * Form, which is how xcalc pulls it in. Delegate to the scalar form. */
+int XDrawArcs(Display *dpy, Drawable d, GC gc, XArc *arcs, int narcs) {
+    if (!arcs) return 0;
+    for (int i = 0; i < narcs; i++) {
+        XDrawArc(dpy, d, gc, arcs[i].x, arcs[i].y,
+                 arcs[i].width, arcs[i].height,
+                 arcs[i].angle1, arcs[i].angle2);
+    }
+    return 1;
+}
+
+int XFillArcs(Display *dpy, Drawable d, GC gc, XArc *arcs, int narcs) {
+    if (!arcs) return 0;
+    for (int i = 0; i < narcs; i++) {
+        XFillArc(dpy, d, gc, arcs[i].x, arcs[i].y,
+                 arcs[i].width, arcs[i].height,
+                 arcs[i].angle1, arcs[i].angle2);
+    }
+    return 1;
+}
+
 /* -- Grabs -- we have no real input grab; all events go to the focus
  *    window already, so reporting GrabSuccess is truthful.
  *    (XGrabPointer already lives in xaw_stubs.c; only XGrabKeyboard is new.) */
