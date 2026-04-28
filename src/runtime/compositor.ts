@@ -402,26 +402,40 @@ export class Compositor {
     const { ax, ay } = this.absOrigin(win);
     ctx.save();
     this.applyWindowClip(ctx, win);
-    ctx.strokeStyle = pixelToCssColor(color);
     const lw = lineWidth || 1;
-    ctx.lineWidth = lw;
-    /* Crisp-pixel offset: Canvas stroke centers on the path, so an odd
-     * lineWidth needs a half-pixel path to land on whole pixels, but
-     * an EVEN lineWidth needs an integer path (a half-pixel path with
-     * even width antialiases across 3 columns instead of filling 2).
-     *
-     * Why this matters: Athena Command's Enter/Leave highlight strokes
-     * a 2px ring with normal_GC then inverse_GC at identical coords.
-     * With antialiased edges, the Leave-time bg-color overwrite can't
-     * fully undo the partial-alpha residue (source-over compositing,
-     * no XOR), leaving a persistent gray ring around every hovered
-     * button. Integer path for lw=2 gives fully-opaque pixel rows →
-     * clean overpaint. */
-    const off = lw % 2 === 0 ? 0 : 0.5;
-    ctx.beginPath();
-    ctx.moveTo(ax + x1 + off, ay + y1 + off);
-    ctx.lineTo(ax + x2 + off, ay + y2 + off);
-    ctx.stroke();
+    /* X11 lines are Bresenham (no AA). Canvas stroke always antialiases,
+     * which leaks partial-alpha into neighbouring columns/rows. With
+     * source-over compositing the Leave-time bg overwrite can't fully
+     * undo prior partial-alpha pixels, so each Enter/Leave or set/unset
+     * cycle on Athena Command/Toggle accumulates an L-shaped residue
+     * around the highlight rectangle. For axis-aligned segments (the
+     * vast majority -- XDrawRectangle decomposes into 4 of them) we
+     * sidestep AA entirely with fillRect. Diagonal lines still go
+     * through stroke; they're rare in Xt/Xaw widgets. */
+    if (x1 === x2 || y1 === y2) {
+      ctx.fillStyle = pixelToCssColor(color);
+      let rx: number, ry: number, rw: number, rh: number;
+      if (y1 === y2) {
+        rx = Math.min(x1, x2);
+        rw = Math.abs(x2 - x1) + 1;
+        ry = y1 - ((lw - 1) >> 1);
+        rh = lw;
+      } else {
+        ry = Math.min(y1, y2);
+        rh = Math.abs(y2 - y1) + 1;
+        rx = x1 - ((lw - 1) >> 1);
+        rw = lw;
+      }
+      ctx.fillRect(ax + rx, ay + ry, rw, rh);
+    } else {
+      ctx.strokeStyle = pixelToCssColor(color);
+      ctx.lineWidth = lw;
+      const off = lw % 2 === 0 ? 0 : 0.5;
+      ctx.beginPath();
+      ctx.moveTo(ax + x1 + off, ay + y1 + off);
+      ctx.lineTo(ax + x2 + off, ay + y2 + off);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -537,12 +551,19 @@ export class Compositor {
       const descent =
         metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
       ctx.fillStyle = pixelToCssColor(bgColor);
-      ctx.fillRect(
-        ax + x,
-        ay + y - ascent,
-        metrics.width,
-        ascent + descent,
-      );
+      /* Round outward to integer pixel grid. measureText/font metrics are
+       * floats, and fillRect with fractional bounds applies sub-pixel AA
+       * at the edges -- partial-alpha pixels that source-over compositing
+       * cannot fully overwrite on the next paint. XawCommand's Set/Unset
+       * cycle (LCD click-invert) repaints text-bg in alternating colours;
+       * mismatched AA fringes accumulate as L-shaped residue at the
+       * rectangle's corners. Snapping to integer + ceil-on-extents makes
+       * each cycle's bg cover the previous cycle's full footprint. */
+      const bx = Math.floor(ax + x);
+      const by = Math.floor(ay + y - ascent);
+      const bx2 = Math.ceil(ax + x + metrics.width);
+      const by2 = Math.ceil(ay + y + descent);
+      ctx.fillRect(bx, by, bx2 - bx, by2 - by);
     }
     ctx.fillStyle = pixelToCssColor(fgColor);
     ctx.fillText(text, ax + x, ay + y);

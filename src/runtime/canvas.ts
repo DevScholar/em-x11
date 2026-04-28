@@ -6,8 +6,16 @@
  * and center it in the viewport. Browser window resize does NOT reflow
  * the canvas -- the X screen is a virtual display of constant dimensions.
  *
- * Backing-store dimensions are scaled by devicePixelRatio so lines stay
- * sharp on HiDPI displays. CSS dimensions remain the logical size.
+ * 1:1 backing store (no DPR scaling). X11 has no concept of logical-vs-
+ * device pixels: an X coordinate IS a device pixel. Scaling the canvas by
+ * window.devicePixelRatio puts every X integer coord on a fractional
+ * device-pixel boundary when DPR is non-integer (Windows 125%/150% are
+ * common), and Canvas 2D antialiases fillRect/fillText at those edges.
+ * Source-over compositing can't undo partial-alpha pixels, so any widget
+ * that repaints in alternating colours (Athena Toggle's Set/Unset cycle
+ * on XCalc's LCD) accumulates an L-shaped ghost at rectangle corners. A
+ * 1:1 backing store snaps every X paint to whole device pixels, matching
+ * the semantics real X11 servers expose to clients.
  */
 
 export interface RootCanvasOptions {
@@ -21,17 +29,15 @@ export class RootCanvas {
   readonly ctx: CanvasRenderingContext2D;
   readonly cssWidth: number;
   readonly cssHeight: number;
-  private readonly dpr: number;
 
   constructor(options: RootCanvasOptions = {}) {
     const parent = options.parent ?? document.body;
     this.cssWidth = options.width ?? 1024;
     this.cssHeight = options.height ?? 768;
-    this.dpr = window.devicePixelRatio || 1;
 
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(this.cssWidth * this.dpr);
-    canvas.height = Math.round(this.cssHeight * this.dpr);
+    canvas.width = this.cssWidth;
+    canvas.height = this.cssHeight;
     canvas.style.width = `${this.cssWidth}px`;
     canvas.style.height = `${this.cssHeight}px`;
     canvas.style.display = 'block';
@@ -45,7 +51,6 @@ export class RootCanvas {
     if (!ctx) {
       throw new Error('em-x11: 2D canvas context unavailable');
     }
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     this.element = canvas;
     this.ctx = ctx;
