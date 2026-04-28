@@ -430,10 +430,9 @@ export class Compositor {
     } else {
       ctx.strokeStyle = pixelToCssColor(color);
       ctx.lineWidth = lw;
-      const off = lw % 2 === 0 ? 0 : 0.5;
       ctx.beginPath();
-      ctx.moveTo(ax + x1 + off, ay + y1 + off);
-      ctx.lineTo(ax + x2 + off, ay + y2 + off);
+      ctx.moveTo(ax + x1, ay + y1);
+      ctx.lineTo(ax + x2, ay + y2);
       ctx.stroke();
     }
     ctx.restore();

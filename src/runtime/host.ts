@@ -1162,17 +1162,42 @@ export class Host implements EmX11Host {
     lineWidth: number,
   ): void {
     pm.ctx.save();
-    if (pm.depth === 1 && color === 0) {
-      pm.ctx.globalCompositeOperation = 'destination-out';
-      pm.ctx.strokeStyle = '#000';
+    const lw = lineWidth || 1;
+    /* Axis-aligned via fillRect (sharp, no AA); diagonals fall back to
+     * stroke. Mirrors Compositor.drawLine -- see notes there. */
+    if (x1 === x2 || y1 === y2) {
+      if (pm.depth === 1 && color === 0) {
+        pm.ctx.globalCompositeOperation = 'destination-out';
+        pm.ctx.fillStyle = '#000';
+      } else {
+        pm.ctx.fillStyle = pixelToCssColor(color);
+      }
+      let rx: number, ry: number, rw: number, rh: number;
+      if (y1 === y2) {
+        rx = Math.min(x1, x2);
+        rw = Math.abs(x2 - x1) + 1;
+        ry = y1 - ((lw - 1) >> 1);
+        rh = lw;
+      } else {
+        ry = Math.min(y1, y2);
+        rh = Math.abs(y2 - y1) + 1;
+        rx = x1 - ((lw - 1) >> 1);
+        rw = lw;
+      }
+      pm.ctx.fillRect(rx, ry, rw, rh);
     } else {
-      pm.ctx.strokeStyle = pixelToCssColor(color);
+      if (pm.depth === 1 && color === 0) {
+        pm.ctx.globalCompositeOperation = 'destination-out';
+        pm.ctx.strokeStyle = '#000';
+      } else {
+        pm.ctx.strokeStyle = pixelToCssColor(color);
+      }
+      pm.ctx.lineWidth = lw;
+      pm.ctx.beginPath();
+      pm.ctx.moveTo(x1, y1);
+      pm.ctx.lineTo(x2, y2);
+      pm.ctx.stroke();
     }
-    pm.ctx.lineWidth = lineWidth || 1;
-    pm.ctx.beginPath();
-    pm.ctx.moveTo(x1 + 0.5, y1 + 0.5);
-    pm.ctx.lineTo(x2 + 0.5, y2 + 0.5);
-    pm.ctx.stroke();
     pm.ctx.restore();
   }
 
