@@ -208,7 +208,7 @@ export class Host implements EmX11Host {
   private installSharedRoot(): void {
     const w = this.canvas.cssWidth;
     const h = this.canvas.cssHeight;
-    this.compositor.addWindow(HOST_ROOT_ID, 0, 0, 0, w, h, 0xFFFFFF);
+    this.compositor.addWindow(HOST_ROOT_ID, 0, 0, 0, w, h, 0, 0, 0xFFFFFF);
     this.compositor.mapWindow(HOST_ROOT_ID);
     this.windowToConn.set(HOST_ROOT_ID, 0);            // conn_id=0 = Host
 
@@ -313,10 +313,7 @@ export class Host implements EmX11Host {
       x: geom.x, y: geom.y, width: geom.width, height: geom.height,
       mapped: geom.mapped,
       overrideRedirect: this.overrideRedirect.get(id) ?? false,
-      /* Host doesn't currently track border_width; twm ignores it for
-       * frame sizing (it reads tmp_win->old_bw from XGetGeometry) so 0
-       * is adequate here. Revisit if another WM needs it. */
-      borderWidth: 0,
+      borderWidth: geom.borderWidth,
     };
   }
 
@@ -510,6 +507,8 @@ export class Host implements EmX11Host {
     y: number,
     width: number,
     height: number,
+    borderWidth: number,
+    borderPixel: number,
     background: number,
   ): void {
     const conn = this.connections.get(connId);
@@ -517,7 +516,11 @@ export class Host implements EmX11Host {
       conn.ownedWindows.add(id);
       this.windowToConn.set(id, connId);
     }
-    this.compositor.addWindow(id, parent, x, y, width, height, background);
+    this.compositor.addWindow(id, parent, x, y, width, height, borderWidth, borderPixel, background);
+  }
+
+  onWindowSetBorder(id: number, borderWidth: number, borderPixel: number): void {
+    this.compositor.setWindowBorder(id, borderWidth, borderPixel);
   }
 
   onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void {

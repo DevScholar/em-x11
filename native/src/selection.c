@@ -80,7 +80,7 @@ void emx11_selection_ensure_atoms(Display *dpy) {
         if (root != None) {
             Window w = emx11_next_xid(dpy);
             emx11_js_window_create(dpy->conn_id, w, root,
-                                   0, 0, 1, 1, 0);
+                                   0, 0, 1, 1, 0, 0, 0);
             dpy->clipboard_proxy_win = w;
         }
     }

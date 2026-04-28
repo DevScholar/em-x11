@@ -35,6 +35,12 @@ interface ManagedWindow {
   y: number;
   width: number;
   height: number;
+  /** X11 server-drawn border. Lives OUTSIDE (x,y,width,height): the
+   *  border ring occupies [x-bw, y-bw, w+2bw, h+2bw] in parent coords.
+   *  Children's local (x,y) are still relative to the content rect's
+   *  top-left (X semantics). bw=0 means no border. */
+  borderWidth: number;
+  borderPixel: number;
   background: number;
   /** When non-null, the window background is tiled with this pixmap's
    *  OffscreenCanvas instead of painted with `background`. Tile origin
@@ -67,6 +73,8 @@ export class Compositor {
     y: number,
     width: number,
     height: number,
+    borderWidth: number,
+    borderPixel: number,
     background: number,
   ): void {
     /* Create only stores state -- the window isn't visible until
@@ -78,11 +86,36 @@ export class Compositor {
       y,
       width,
       height,
+      borderWidth,
+      borderPixel,
       background,
       backgroundPixmap: null,
       mapped: false,
       shape: null,
     });
+  }
+
+  /** Border-only update. Width or pixel can change independently of
+   *  geometry (XSetWindowBorder vs XSetWindowBorderWidth). Repaints the
+   *  enclosing area when mapped so the old ring is cleared and the new
+   *  one drawn. Width changes also affect the old/new ring extent, so
+   *  we erase the larger of the two. */
+  setWindowBorder(id: number, borderWidth: number, borderPixel: number): void {
+    const w = this.windows.get(id);
+    if (!w) return;
+    const oldBw = w.borderWidth;
+    w.borderWidth = borderWidth;
+    w.borderPixel = borderPixel;
+    if (!w.mapped) return;
+    const { ax, ay } = this.absOrigin(w);
+    const maxBw = Math.max(oldBw, borderWidth);
+    this.repaintAbsoluteRect(
+      ax - maxBw,
+      ay - maxBw,
+      w.width + 2 * maxBw,
+      w.height + 2 * maxBw,
+    );
+    this.paintWindowSubtree(w);
   }
 
   setWindowBackgroundPixmap(id: number, pmId: number): void {
@@ -112,7 +145,8 @@ export class Compositor {
     let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
     if (win.mapped) {
       const { ax, ay } = this.absOrigin(win);
-      oldRect = { ax, ay, w: win.width, h: win.height };
+      const bw = win.borderWidth;
+      oldRect = { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
     }
     win.x = x;
     win.y = y;
@@ -149,7 +183,8 @@ export class Compositor {
     let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
     if (win.mapped) {
       const { ax, ay } = this.absOrigin(win);
-      oldRect = { ax, ay, w: win.width, h: win.height };
+      const bw = win.borderWidth;
+      oldRect = { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
     }
     win.parent = parent;
     win.x = x;
@@ -200,12 +235,13 @@ export class Compositor {
    *  refactor of the per-client shadow tables. */
   attrsOf(id: number): {
     x: number; y: number; width: number; height: number;
-    mapped: boolean; parent: number;
+    mapped: boolean; parent: number; borderWidth: number;
   } | null {
     const w = this.windows.get(id);
     if (!w) return null;
     return { x: w.x, y: w.y, width: w.width, height: w.height,
-             mapped: w.mapped, parent: w.parent };
+             mapped: w.mapped, parent: w.parent,
+             borderWidth: w.borderWidth };
   }
 
   /** Resolve a window's origin to canvas-absolute coordinates by
@@ -294,16 +330,14 @@ export class Compositor {
     if (!w) return;
     if (!w.mapped) return;
     const { ax, ay } = this.absOrigin(w);
-    const oldW = w.width;
-    const oldH = w.height;
+    const bw = w.borderWidth;
+    const oldX = ax - bw;
+    const oldY = ay - bw;
+    const oldW = w.width + 2 * bw;
+    const oldH = w.height + 2 * bw;
     w.mapped = false;
-    /* Repaint the freed area from root downwards. The just-unmapped
-     * window is skipped (mapped=false), so the parent + still-mapped
-     * siblings get to fill in. Note: any sibling whose drawing
-     * intersected this rect loses it (we paint sibling backgrounds,
-     * not their app content) -- a backing-store rewrite would fix
-     * that. Current demos don't have overlapping siblings. */
-    this.repaintAbsoluteRect(ax, ay, oldW, oldH);
+    /* Repaint the freed area (content + border) from root downwards. */
+    this.repaintAbsoluteRect(oldX, oldY, oldW, oldH);
   }
 
   destroyWindow(id: number): void {
@@ -312,7 +346,8 @@ export class Compositor {
     let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
     if (w.mapped) {
       const { ax, ay } = this.absOrigin(w);
-      oldRect = { ax, ay, w: w.width, h: w.height };
+      const bw = w.borderWidth;
+      oldRect = { ax: ax - bw, ay: ay - bw, w: w.width + 2 * bw, h: w.height + 2 * bw };
     }
     this.windows.delete(id);
     if (oldRect) {
@@ -631,6 +666,11 @@ export class Compositor {
   private paintWindowSubtree(w: ManagedWindow): void {
     if (w.mapped) {
       const ctx = this.canvas.ctx;
+      /* Border first, in parent's coord system: paints outside the
+       * window's content rect. Drawing it before the bg means content-
+       * area painting (and any later child paints) cleanly overlays
+       * the corners where border meets content. */
+      this.paintWindowBorder(ctx, w);
       ctx.save();
       this.applyWindowClip(ctx, w);
       this.paintBackgroundRect(ctx, w, 0, 0, w.width, w.height);
@@ -638,6 +678,61 @@ export class Compositor {
     }
     for (const child of this.windows.values()) {
       if (child.parent === w.id) this.paintWindowSubtree(child);
+    }
+  }
+
+  /** Paint the X11 server-drawn border ring around a window. The ring
+   *  occupies the area between the window's outer rect (content +
+   *  borderWidth on each side) and its content rect, in parent
+   *  coordinates. Clipped only by ancestors -- the window's own clip
+   *  excludes the border by definition.
+   *
+   *  Why bw=0 short-circuits: the four-strip math still works, but
+   *  fillRect with zero-sized rects is wasted work for the (very
+   *  common) borderless override-redirect / shaped-shell case. */
+  private paintWindowBorder(ctx: CanvasRenderingContext2D, w: ManagedWindow): void {
+    const bw = w.borderWidth;
+    if (bw <= 0) return;
+    const { ax, ay } = this.absOrigin(w);
+    ctx.save();
+    /* Clip to ancestors only. The window itself is not in the chain
+     * because the border is, by X11 semantics, outside its content
+     * rect -- applying the window's own clip would erase the ring. */
+    this.applyAncestorClip(ctx, w);
+    ctx.fillStyle = pixelToCssColor(w.borderPixel);
+    /* Top, bottom, left, right strips. Corners belong to top/bottom. */
+    ctx.fillRect(ax - bw, ay - bw, w.width + 2 * bw, bw);
+    ctx.fillRect(ax - bw, ay + w.height, w.width + 2 * bw, bw);
+    ctx.fillRect(ax - bw, ay, bw, w.height);
+    ctx.fillRect(ax + w.width, ay, bw, w.height);
+    ctx.restore();
+  }
+
+  /** Like applyWindowClip but skips the window's own bounding rect.
+   *  Used for painting the border ring, which lives outside the
+   *  window's content rect but must still be clipped to every ancestor
+   *  so it doesn't bleed past the parent's bounds. */
+  private applyAncestorClip(ctx: CanvasRenderingContext2D, win: ManagedWindow): void {
+    const chain: ManagedWindow[] = [];
+    let parentId = win.parent;
+    for (let i = 0; parentId !== 0 && i < 32; i++) {
+      const p = this.windows.get(parentId);
+      if (!p) break;
+      chain.push(p);
+      parentId = p.parent;
+    }
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const w = chain[i]!;
+      const { ax, ay } = this.absOrigin(w);
+      ctx.beginPath();
+      if (w.shape) {
+        for (const r of w.shape) {
+          ctx.rect(ax + r.x, ay + r.y, r.w, r.h);
+        }
+      } else {
+        ctx.rect(ax, ay, w.width, w.height);
+      }
+      ctx.clip();
     }
   }
 
@@ -673,6 +768,11 @@ export class Compositor {
     ctx.clip();
     const visit = (win: ManagedWindow): void => {
       if (win.mapped && this.intersectsAbsRect(win, rax, ray, rw, rh)) {
+        /* Border first (parent-coord, ancestor-clipped), bg second
+         * (window-clipped). Mirrors paintWindowSubtree ordering so a
+         * sibling that overlaps the dirty rect re-emerges with its
+         * full ring + content area. */
+        this.paintWindowBorder(ctx, win);
         ctx.save();
         this.applyWindowClip(ctx, win);
         this.paintBackgroundRect(ctx, win, 0, 0, win.width, win.height);
@@ -689,8 +789,10 @@ export class Compositor {
   }
 
   /** Axis-aligned rect overlap test, comparing the window's absolute
-   *  bounds with the given rect. Used by repaintAbsoluteRect to skip
-   *  windows that don't intersect the dirty area. */
+   *  bounds (content + border ring) with the given rect. Used by
+   *  repaintAbsoluteRect to skip windows that don't intersect the
+   *  dirty area. Includes the border so a window whose only
+   *  intersection is in its ring still gets its border re-emitted. */
   private intersectsAbsRect(
     win: ManagedWindow,
     rax: number,
@@ -699,11 +801,12 @@ export class Compositor {
     rh: number,
   ): boolean {
     const { ax, ay } = this.absOrigin(win);
+    const bw = win.borderWidth;
     return (
-      ax < rax + rw &&
-      ax + win.width > rax &&
-      ay < ray + rh &&
-      ay + win.height > ray
+      ax - bw < rax + rw &&
+      ax + win.width + bw > rax &&
+      ay - bw < ray + rh &&
+      ay + win.height + bw > ray
     );
   }
 

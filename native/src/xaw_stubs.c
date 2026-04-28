@@ -247,11 +247,16 @@ int XWriteBitmapFile(Display *dpy, _Xconst char *filename, Pixmap bitmap,
     return BitmapNoMemory;
 }
 
-/* -- Window border / cursor setters are widget-visual features we
- * do not model (no borders or cursor art in-canvas). Accept and ignore. */
+/* -- Window border setters wire through to Host so the compositor can
+ * repaint the border ring. XSetWindowBorderPixmap is still ignored
+ * (no pixmap-tiled borders modelled). */
 
 int XSetWindowBorder(Display *dpy, Window w, unsigned long border) {
-    (void)dpy; (void)w; (void)border; return 1;
+    EmxWindow *win = emx11_window_find(dpy, w);
+    if (!win) return 0;
+    win->border_pixel = border;
+    emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+    return 1;
 }
 int XSetWindowBorderPixmap(Display *dpy, Window w, Pixmap pixmap) {
     (void)dpy; (void)w; (void)pixmap; return 1;
@@ -787,6 +792,7 @@ int XSetWindowBorderWidth(Display *dpy, Window w, unsigned int width) {
     EmxWindow *win = emx11_window_find(dpy, w);
     if (!win) return 0;
     win->border_width = width;
+    emx11_js_window_set_border(w, win->border_width, win->border_pixel);
     return 1;
 }
 

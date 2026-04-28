@@ -48,9 +48,16 @@ addToLibrary({
     return globalThis.__EMX11__.getRootWindow() >>> 0;
   },
 
-  emx11_js_window_create: function (connId, id, parent, x, y, w, h, background) {
+  emx11_js_window_create: function (connId, id, parent, x, y, w, h, borderWidth, borderPixel, background) {
     globalThis.__EMX11__ &&
-      globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, background);
+      globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, borderWidth, borderPixel, background);
+  },
+
+  // Border-only update: width and/or pixel color. Geometry unchanged;
+  // Host repaints the border ring.
+  emx11_js_window_set_border: function (id, borderWidth, borderPixel) {
+    globalThis.__EMX11__ &&
+      globalThis.__EMX11__.onWindowSetBorder(id, borderWidth, borderPixel);
   },
 
   // Geometry-only update for an existing window. Unlike window_create

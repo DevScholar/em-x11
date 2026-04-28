@@ -82,7 +82,8 @@ Window XCreateSimpleWindow(Display *display, Window parent,
     w->mapped           = false;
 
     emx11_js_window_create(display->conn_id, w->id, parent,
-                           x, y, width, height, background);
+                           x, y, width, height,
+                           border_width, border, background);
     return w->id;
 }
 
@@ -249,6 +250,9 @@ int XConfigureWindow(Display *display, Window w,
     if (valuemask & CWBorderWidth) win->border_width = (unsigned int)values->border_width;
     /* CWStackMode / CWSibling: z-order management not yet implemented. */
     notify_js_reconfigure(display, win);
+    if (valuemask & CWBorderWidth) {
+        emx11_js_window_set_border(win->id, win->border_width, win->border_pixel);
+    }
     return 1;
 }
 
@@ -269,7 +273,10 @@ int XChangeWindowAttributes(Display *display, Window w,
     EmxWindow *win = emx11_window_find(display, w);
     if (!win || !attrs) return 0;
     if (valuemask & CWBackPixel)        win->background_pixel = attrs->background_pixel;
-    if (valuemask & CWBorderPixel)      win->border_pixel     = attrs->border_pixel;
+    if (valuemask & CWBorderPixel) {
+        win->border_pixel = attrs->border_pixel;
+        emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+    }
     if (valuemask & CWEventMask) {
         win->event_mask = attrs->event_mask;
         emx11_js_select_input(display->conn_id, w, attrs->event_mask);

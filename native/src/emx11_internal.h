@@ -302,7 +302,16 @@ extern Window emx11_js_get_root_window(void);
 extern void emx11_js_window_create(int conn_id, Window id, Window parent,
                                    int x, int y,
                                    unsigned int w, unsigned int h,
+                                   unsigned int border_width,
+                                   unsigned long border_pixel,
                                    unsigned long background);
+/* Border-only update (XSetWindowBorder / XSetWindowBorderWidth /
+ * XChangeWindowAttributes CWBorderPixel / XConfigureWindow CWBorderWidth).
+ * Geometry stays unchanged; Host repaints the border ring around the
+ * window's content rect. */
+extern void emx11_js_window_set_border(Window id,
+                                       unsigned int border_width,
+                                       unsigned long border_pixel);
 /* Geometry change on an existing window (XMoveWindow / XResizeWindow /
  * XConfigureWindow). Distinct from window_create so Host doesn't have
  * to re-seed parent, shape, or background_pixmap -- we only touch the
