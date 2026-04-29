@@ -10,11 +10,12 @@ canvas — there is **no** X protocol byte stream and no server process.
 
 ![Xeyes Screenshot](screenshots/xeyes.png)
 
-> Status: **libXt + libXaw linked and running.** The in-tree demos
-> cover raw Xlib (`hello` — filled rectangles), libXt + Core child
-> widgets with event dispatch (`xt-hello`), and libXaw Label on top
-> of Xt/Xmu/Xpm (`xaw-hello`). Broader Xlib coverage still has large
-> stub patches — see the roadmap below.
+> Status: **Tk bring-up in progress (v3).** xeyes, xclock, and xcalc
+> run. The Tk port (wacl-tk) links against em-x11 and renders basic
+> windows; focus, XCopyArea, and the browser-friendly notifier are
+> the active work items. TWM loads and holds SubstructureRedirect but
+> managed-client decoration is still broken — see the demos table.
+> Broader Xlib coverage still has large stub patches — see the roadmap.
 
 ## Why
 
@@ -45,8 +46,8 @@ code dequeues via `XNextEvent`.
 │        ▲                                                    │
 │        │ 2D draw calls                                      │
 │   ┌────┴────────────────────────────────────┐               │
-│   │  TypeScript runtime (src/runtime/)      │               │
-│   │    compositor · hit-test · event bridge │               │
+│   │  TypeScript runtime (src/host/ + src/runtime/)  │        │
+│   │    host mgrs · compositor · hit-test · events  │        │
 │   └────┬────────────────────────────────────┘               │
 │        │ globalThis.__EMX11__                               │
 │   ┌────┴────────────────────────────────────┐               │
@@ -76,7 +77,9 @@ em-x11/
 │   ├── include/X11/    # Public Xlib headers (upstream xorgproto + libX11)
 │   └── src/            # em-x11 implementation + internal headers
 ├── src/                # TypeScript runtime (compositor, events, loader)
-│   ├── runtime/
+│   ├── host/           # Per-domain manager classes (window, gc, atom, events …)
+│   │   └── render/     # Canvas draw, hit-test, paint, window-tree
+│   ├── runtime/        # Top-level runtime init + launch helpers
 │   ├── bindings/       # --js-library glue (emscripten side)
 │   ├── loader/
 │   └── types/
@@ -174,45 +177,49 @@ client.
 | ----------- | ---------------------------------------------------------------------------------------- | ------------- |
 | `hello`     | Raw Xlib: filled rectangles, no toolkit.                                                 | works         |
 | `xt-hello`  | libXt shell with a Core child widget; basic event dispatch.                              | works         |
-| `xaw-hello` | libXaw `Label` on top of Xt/Xmu/Xpm.                                                     | works         |
 | `xeyes`     | Classic eyes-track-mouse demo; exercises SHAPE + arc drawing + Xt timers.                | works         |
+| `xcalc`     | Calculator using libXaw; exercises Xt/Xaw widget trees and input handling.               | works         |
 | `twm`       | The Tab Window Manager. Boots, holds SubstructureRedirect on root, reads our staged twmrc. | **buggy** ⚠️ |
 | `session`   | twm + xeyes launched together; exercises the redirect / cross-connection paths.            | **buggy** ⚠️ |
 
 ### Why twm is marked buggy
 
-twm boots and registers itself as the WM, but **managed-client framing
-doesn't render correctly**. Known gaps that aren't trivially fixable
-without a deeper compositor + DIX-aligned WM rewrite:
+twm boots and registers itself as the WM, but **managed-client decoration
+doesn't render correctly**. Several issues were fixed during the first
+bring-up pass (drag outline, subtree Expose delivery, `XFetchName`,
+reparent repaint, viewability tracking, (0,0) ghost-paint). The remaining
+blocker is that title-bar / border decoration is still drawn incorrectly
+after reparenting.
 
-- **No GXxor.** twm's `MoveOutline` uses XOR raster ops to draw the
-  drag outline; we don't implement them.
+Known remaining gaps:
+
+- **No GXxor.** twm's `MoveOutline` uses XOR raster ops for the drag
+  outline; we don't implement them.
 - **No cross-connection event delivery.** DIX's `DeliverEventsToWindow`
   walks the parent chain across clients; we don't, so children of a
-  reparented shell never receive Expose / pointer events from the WM
-  side of the connection.
+  reparented shell may miss Expose / pointer events from the WM side.
 - **No DestroyWindow recursion** (DIX `CrushTree`).
 - **No ConfigureRequest / CirculateRequest redirect.**
 - **Custom atom IDs diverge across wasm modules.** Each C module owns
-  its own atom counter. Predefined atoms (`XA_WM_NAME` = 39, etc.)
-  agree trivially, but custom atoms like `WM_PROTOCOLS` /
-  `WM_DELETE_WINDOW` don't, so polite-close handshakes silently miss.
+  its own atom counter, so custom atoms like `WM_PROTOCOLS` /
+  `WM_DELETE_WINDOW` don't match across the twm and client connections,
+  causing polite-close handshakes to silently miss.
 
 The redirect plumbing (`windowSubscriptions`, `redirectHolderFor`,
-`dispatchMapRequest` in [src/runtime/host.ts](src/runtime/host.ts))
-is in place — it's the surrounding semantics that aren't. WM work is
-paused; the demo stays as a smoke test that twm at least loads,
-holds the redirect, and parses a twmrc. See the WM-direction memory
-for resume notes.
+`dispatchMapRequest` in [src/host/window.ts](src/host/window.ts) and
+[src/host/events.ts](src/host/events.ts)) is in place — it's the
+surrounding rendering semantics that aren't. WM work is parked; the demo
+stays as a smoke test that twm at least loads, holds the redirect, and
+parses a twmrc.
 
 ## Roadmap
 
 | Stage | Goal                                                                                                     |
 | ----- | -------------------------------------------------------------------------------------------------------- |
 | v0    | **Skeleton.** `hello` demo paints rectangles. Build pipeline end-to-end. *done*                          |
-| v1    | Run **xeyes** and **xclock** unmodified (libXt + libXaw + libXmu + libXpm built, Xext covered by stubs). libXt and libXaw link and render a Label; xeyes/xclock bring-up in progress. ← *you are here* |
-| v2    | Port an X window manager (**xwm**). Implies SubstructureRedirect, Reparent, ICCCM/EWMH.                  |
-| v3    | **Tcl/Tk** on top. Xft/XRender hijacked to canvas `fillText` to avoid the FreeType dependency chain.     |
+| v1    | Run **xeyes** and **xcalc** unmodified (libXt + libXaw + libXmu + libXpm built, Xext covered by stubs). *done* |
+| v2    | Port an X window manager (**twm**). Implies SubstructureRedirect, Reparent, ICCCM/EWMH. *partial — twm boots but decoration broken* |
+| v3    | **Tcl/Tk** on top. Xft/XRender hijacked to canvas `fillText` to avoid the FreeType dependency chain. ← *you are here* |
 | v4    | **Pyodide + tkinter.** em-x11 + Tcl + Tk exposed as Pyodide SIDE_MODULE shared libraries.                |
 
 Each stage lists its in-scope Xlib APIs in its own issue. Treat passing
@@ -226,9 +233,11 @@ never touched (selections, XIM, Pixmap semantics, XRender).
   for the exact tarball versions and the refresh procedure.
 - Large swathes of Xlib are link-time stubs. `native/src/xt_stubs.c` and
   `native/src/xaw_stubs.c` document which symbols are fake-but-linkable
-  vs. really implemented. Pixmap/XCopyArea/XCopyPlane in particular are
-  no-ops; anything that tries to blit an offscreen surface will silently
-  do nothing.
+  vs. really implemented. `XCopyArea` / `XCopyPlane` are currently no-ops
+  (active work item for Tk bring-up); anything that tries to blit an
+  offscreen surface will silently do nothing until that lands.
+- `XrmGetResource` and the Xt fast-path (`XrmQGetSearchList` /
+  `XrmQGetResource`) are implemented in `native/src/xrm.c`.
 - `XNextEvent` relies on Asyncify (`emscripten_sleep`), which inflates
   wasm size somewhat. Apps that prefer a tight main loop can use
   `XPending` + `emscripten_set_main_loop` as the `hello` demo does.
