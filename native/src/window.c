@@ -19,8 +19,33 @@
  * For single-client demos (tk-hello) the local queue is where the
  * notify has to land. When a WM is involved the cross-connection case
  * still needs solving via Host.onWindowMap / onWindowConfigure (already
- * in place for Expose); we leave those paths alone here. */
+ * in place for Expose); we leave those paths alone here.
+ *
+ * Mask gating (xserver dix/events.c::DeliverEvents): the real server
+ * only queues Structure/SubstructureNotify when SOMEONE subscribed.
+ * Without this gate, twm sees MapNotify+UnmapNotify on every internal
+ * window it touches (e.g. hilite_w which is created → mapped via
+ * XMapSubwindows → unmapped immediately in add_window.c:1347). twm's
+ * HandleUnmapNotify then locates Tmp_win via TwmContext (hilite_w is
+ * registered there via add_window.c:953) and -- because HandleMapNotify
+ * just set `Tmp_win->mapped=TRUE` -- interprets the unmap as the
+ * client withdrawing, calls HandleDestroyNotify, destroys its own
+ * frame. Real twm doesn't trip this because it never selected
+ * StructureNotifyMask on hilite_w (nor SubstructureNotifyMask on
+ * hilite_w's parent title_w), so the events were never delivered. */
+static bool wants_structure(Display *dpy, Window w) {
+    EmxWindow *win = emx11_window_find(dpy, w);
+    if (!win) return false;
+    if (win->event_mask & StructureNotifyMask) return true;
+    if (win->parent != None) {
+        EmxWindow *p = emx11_window_find(dpy, win->parent);
+        if (p && (p->event_mask & SubstructureNotifyMask)) return true;
+    }
+    return false;
+}
+
 static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
+    if (!wants_structure(dpy, win->id)) return;
     XEvent ev = {0};
     if (mapped) {
         ev.type = MapNotify;
@@ -135,11 +160,25 @@ int XMapWindow(Display *display, Window w) {
      * client's queue so its Tk / Xt layer can latch `TK_MAPPED` and
      * advance the realize state machine. In the single-client demo
      * case (tk-hello) the caller and owner are the same connection,
-     * so a local push is exactly right. */
+     * so a local push is exactly right.
+     *
+     * State-change gate (xserver dix/window.c::MapWindow): the real
+     * server early-returns when pWin->mapped is already true, generating
+     * NO MapNotify. Without this gate, twm sees a spurious MapNotify
+     * for windows it never expected to see one for, and conversely the
+     * symmetric XUnmapWindow path generates a spurious UnmapNotify
+     * which twm interprets via HandleUnmapNotify as the client wanting
+     * WithdrawnState -- triggering HandleDestroyNotify which destroys
+     * the WM frame. Real twm relies on this no-op-on-already-mapped
+     * behaviour around HandleMapNotify line 1387's XUnmapWindow on
+     * hilite_w (never mapped -> no event) and the iconmgr setup paths. */
     EmxWindow *win = emx11_window_find(display, w);
     if (win) {
+        bool was_mapped = win->mapped;
         win->mapped = true;
-        push_map_notify(display, win, true);
+        if (!was_mapped) {
+            push_map_notify(display, win, true);
+        }
 
         /* Implicit toplevel focus: without a WM (our world) no one
          * assigns X focus to newly mapped toplevels, and Tk's
@@ -150,7 +189,8 @@ int XMapWindow(Display *display, Window w) {
          * cursors never blink and keys never route. Auto-focus the
          * first root-child wrapper to map, mirroring the "no WM,
          * server auto-focuses override-redirect window" path in real X. */
-        if (win->parent == display->screens[0].root &&
+        if (!was_mapped &&
+            win->parent == display->screens[0].root &&
             display->focus_window == None) {
             XSetInputFocus(display, w, RevertToParent, CurrentTime);
         }
@@ -160,10 +200,16 @@ int XMapWindow(Display *display, Window w) {
 }
 
 int XUnmapWindow(Display *display, Window w) {
+    /* State-change gate: see XMapWindow. Real X early-returns on already-
+     * unmapped windows; we have to do the same or twm's destructor path
+     * fires on phantom UnmapNotifies for never-mapped windows. */
     EmxWindow *win = emx11_window_find(display, w);
     if (win) {
+        bool was_mapped = win->mapped;
         win->mapped = false;
-        push_map_notify(display, win, false);
+        if (was_mapped) {
+            push_map_notify(display, win, false);
+        }
     }
     emx11_js_window_unmap(display->conn_id, w);
     return 1;

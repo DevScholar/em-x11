@@ -105,6 +105,48 @@ export class InputBridge {
     if (win === null) return;
     const module = this.moduleForWindow(win);
     if (!module) return;
+    /* Diagnostic probe (2026-04-29): twm session demo shows non-draggable
+     * titlebars and non-clickable xcalc widgets even though both clients
+     * are reparented and visible. Hypothesis: ButtonPress is delivered to
+     * the wrong target, or to the right target but the wrong owner conn.
+     * Per-click trace prints: hit window, owning conn, and the parent
+     * chain up to root with each ancestor's owner conn. Set
+     * `globalThis.__EMX11_TRACE_INPUT__ = false` (or remove the block) to
+     * silence once the routing rule is fixed. Compare against
+     * xserver/dix/events.c::DeliverEventsToWindow walk order. */
+    if (xType === X_ButtonPress && (globalThis as { __EMX11_TRACE_INPUT__?: boolean })
+        .__EMX11_TRACE_INPUT__ !== false) {
+      const chain: { id: number; conn: number | undefined }[] = [];
+      let cur = win;
+      for (let i = 0; cur !== 0 && i < 32; i++) {
+        chain.push({ id: cur, conn: this.host.connection.connOf(cur) });
+        const p = this.host.renderer.parentOf(cur);
+        if (p === cur) break;
+        cur = p;
+      }
+      console.log(
+        `[emx11/input] ButtonPress @(${x},${y}) hit=${win} owner=${this.host.connection.connOf(win)}`,
+        'chain=', chain.map((n) => `${n.id}(c${n.conn ?? '?'})`).join(' → '),
+      );
+      /* First-press tree dump: print every window in renderer state with
+       * its parent / geometry / mapped / owner conn. Lets us see whether
+       * twm actually built a frame for the second client and whether
+       * reparent threaded the parent links correctly. Guarded so we only
+       * dump once per page load -- the dump is large and adds noise. */
+      const flag = globalThis as { __EMX11_DUMPED_TREE__?: boolean };
+      if (!flag.__EMX11_DUMPED_TREE__) {
+        flag.__EMX11_DUMPED_TREE__ = true;
+        console.log('[emx11/input] tree dump (first ButtonPress):');
+        for (const w of this.host.renderer.windows.values()) {
+          const conn = this.host.connection.connOf(w.id);
+          console.log(
+            `  win=${w.id} parent=${w.parent} pos=(${w.x},${w.y}) ` +
+              `size=${w.width}x${w.height} mapped=${w.mapped} ` +
+              `viewable=${this.host.renderer.isViewable(w.id)} owner=c${conn ?? '?'}`,
+          );
+        }
+      }
+    }
     if (xType === X_ButtonPress) {
       this.focusedWindow = win;
       this.dragModule = module;

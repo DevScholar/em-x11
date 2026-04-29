@@ -94,6 +94,19 @@ export class WindowManager {
     this.host.renderer.addWindow(
       id, parent, x, y, width, height, borderWidth, borderPixel, background,
     );
+    /* Lifecycle probe (2026-04-29): twm session demo dumps show frames
+     * (2097162, 2097170, 2097177) referenced as parents but missing from
+     * the renderer map. Need to know whether they were created at all,
+     * and whether something later destroyed them. Log every create/destroy
+     * with conn + parent so we can correlate against the SubstructureRedirect
+     * log entries. Set `__EMX11_TRACE_LIFECYCLE__ = false` to silence. */
+    if ((globalThis as { __EMX11_TRACE_LIFECYCLE__?: boolean })
+          .__EMX11_TRACE_LIFECYCLE__ !== false) {
+      console.log(
+        `[emx11/lifecycle] CREATE id=${id} parent=${parent} conn=${connId} ` +
+          `pos=(${x},${y}) size=${width}x${height}`,
+      );
+    }
   }
 
   onSetBorder(id: number, borderWidth: number, borderPixel: number): void {
@@ -194,6 +207,21 @@ export class WindowManager {
   }
 
   onDestroy(id: number): void {
+    if ((globalThis as { __EMX11_TRACE_LIFECYCLE__?: boolean })
+          .__EMX11_TRACE_LIFECYCLE__ !== false) {
+      const conn = this.host.connection.connOf(id);
+      /* V8 truncates Error.stack at 10 frames by default. Raise locally
+       * so we see who in twm.wasm actually called XDestroyWindow. */
+      const ErrCtor = Error as unknown as { stackTraceLimit: number };
+      const prev = ErrCtor.stackTraceLimit;
+      ErrCtor.stackTraceLimit = 64;
+      const stack = new Error('destroy stack').stack ?? '';
+      ErrCtor.stackTraceLimit = prev;
+      console.log(
+        `[emx11/lifecycle] DESTROY id=${id} owner=c${conn ?? '?'}\n` +
+          stack.split('\n').slice(1).join('\n'),
+      );
+    }
     this.host.connection.dropOwnership(id);
     this.host.events.forgetWindow(id);
     this.overrideRedirect.delete(id);
