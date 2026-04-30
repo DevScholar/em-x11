@@ -23,7 +23,7 @@ bash scripts/fetch-third-party.sh
 # Build
 
 ```bash
-pnpm build:native
+pnpm build
 ```
 
 # Run
