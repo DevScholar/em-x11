@@ -22,6 +22,11 @@ export interface RootCanvasOptions {
   parent?: HTMLElement;
   width?: number;
   height?: number;
+  /** Use this existing <canvas> instead of creating one. Width/height
+   *  default to its current attribute size. Mirrors Pyodide's
+   *  pyodide.canvas.setCanvas2D(canvas) opt-in: the host page owns
+   *  layout, em-x11 just paints into the surface it's handed. */
+  element?: HTMLCanvasElement;
 }
 
 export class RootCanvas {
@@ -31,21 +36,29 @@ export class RootCanvas {
   readonly cssHeight: number;
 
   constructor(options: RootCanvasOptions = {}) {
-    const parent = options.parent ?? document.body;
-    this.cssWidth = options.width ?? 1024;
-    this.cssHeight = options.height ?? 768;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = this.cssWidth;
-    canvas.height = this.cssHeight;
-    canvas.style.width = `${this.cssWidth}px`;
-    canvas.style.height = `${this.cssHeight}px`;
-    canvas.style.display = 'block';
-    canvas.style.margin = '0 auto';
-    canvas.style.touchAction = 'none';
-    canvas.style.boxShadow = '0 4px 24px rgba(0, 0, 0, 0.5)';
-    canvas.tabIndex = 0;
-    parent.appendChild(canvas);
+    let canvas: HTMLCanvasElement;
+    if (options.element) {
+      canvas = options.element;
+      this.cssWidth = options.width ?? (canvas.width || 1024);
+      this.cssHeight = options.height ?? (canvas.height || 768);
+      canvas.width = this.cssWidth;
+      canvas.height = this.cssHeight;
+    } else {
+      const parent = options.parent ?? document.body;
+      this.cssWidth = options.width ?? 1024;
+      this.cssHeight = options.height ?? 768;
+      canvas = document.createElement('canvas');
+      canvas.width = this.cssWidth;
+      canvas.height = this.cssHeight;
+      canvas.style.width = `${this.cssWidth}px`;
+      canvas.style.height = `${this.cssHeight}px`;
+      canvas.style.display = 'block';
+      canvas.style.margin = '0 auto';
+      canvas.style.touchAction = 'none';
+      canvas.style.boxShadow = '0 4px 24px rgba(0, 0, 0, 0.5)';
+      canvas.tabIndex = 0;
+      parent.appendChild(canvas);
+    }
 
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) {
