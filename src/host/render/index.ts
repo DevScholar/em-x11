@@ -86,6 +86,14 @@ export class Renderer implements RendererState {
   geometryOf(id: number): { width: number; height: number } | null {
     return tree.geometryOf(this, id);
   }
+  absBoundingRect(id: number): { ax: number; ay: number; w: number; h: number } | null {
+    return tree.absBoundingRect(this, id);
+  }
+  mappedWindowsIntersecting(
+    rax: number, ray: number, rw: number, rh: number, excludeId: number,
+  ): number[] {
+    return tree.mappedWindowsIntersecting(this, rax, ray, rw, rh, excludeId);
+  }
   attrsOf(id: number): {
     x: number; y: number; width: number; height: number;
     mapped: boolean; parent: number; borderWidth: number;

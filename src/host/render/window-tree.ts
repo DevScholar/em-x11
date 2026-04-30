@@ -77,6 +77,9 @@ export function setWindowBorder(
   w.borderWidth = borderWidth;
   w.borderPixel = borderPixel;
   if (!w.mapped) return;
+  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+    console.log('[paint] setWindowBorder', id, 'widthChanged=', widthChanged);
+  }
   if (!widthChanged) {
     /* Color-only change: ring is in the same place, just different
      * pixel. Repaint just the ring. paintWindowBorder is ancestor-
@@ -161,6 +164,9 @@ export function configureWindow(
    * labels) without sending Expose -- same shape as the setWindowBorder
    * over-wipe fix. */
   if (sameGeom) return;
+  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+    console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
+  }
   if (oldRect) {
     /* Erase old position. mapped is still true at this point but the
      * window now sits at the NEW position, so painting from root will
@@ -244,6 +250,57 @@ export function geometryOf(
   return w ? { width: w.width, height: w.height } : null;
 }
 
+/** Absolute bounding box (content + border) of a window, or null if
+ *  unknown. Used by Host-side Expose-on-overpaint logic to capture
+ *  the area that's about to get repainted before the renderer mutates
+ *  the tree. */
+export function absBoundingRect(
+  r: RendererState,
+  id: number,
+): { ax: number; ay: number; w: number; h: number } | null {
+  const w = r.windows.get(id);
+  if (!w) return null;
+  const { ax, ay } = absOrigin(r, w);
+  const bw = w.borderWidth;
+  return { ax: ax - bw, ay: ay - bw, w: w.width + 2 * bw, h: w.height + 2 * bw };
+}
+
+/** Enumerate every mapped window (and its mapped descendants) that
+ *  intersects the given absolute rectangle, excluding `excludeId`
+ *  itself. Used when the renderer is about to repaint backgrounds
+ *  inside a dirty rect (unmap, destroy, configure-old-rect): every
+ *  affected mapped window has its content wiped and needs a fresh
+ *  Expose to redraw. xserver/dix/window.c does this implicitly via
+ *  per-window backing pixmaps + DamageReport; we don't have those,
+ *  so the Host has to synthesize Expose explicitly via this list. */
+export function mappedWindowsIntersecting(
+  r: RendererState,
+  rax: number,
+  ray: number,
+  rw: number,
+  rh: number,
+  excludeId: number,
+): number[] {
+  const out: number[] = [];
+  for (const win of r.windows.values()) {
+    if (win.id === excludeId) continue;
+    if (!win.mapped) continue;
+    const { ax, ay } = absOrigin(r, win);
+    const bw = win.borderWidth;
+    const wax = ax - bw;
+    const way = ay - bw;
+    const ww = win.width + 2 * bw;
+    const wh = win.height + 2 * bw;
+    if (
+      wax < rax + rw && wax + ww > rax &&
+      way < ray + rh && way + wh > ray
+    ) {
+      out.push(win.id);
+    }
+  }
+  return out;
+}
+
 /** Full authoritative attribute snapshot for cross-connection
  *  XGetWindowAttributes. Local shadows drift (a WM never mirrors
  *  another client's window), so when a client queries a window it
@@ -318,6 +375,9 @@ export function mapWindow(r: RendererState, id: number): void {
   const w = r.windows.get(id);
   if (!w) return;
   w.mapped = true;
+  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+    console.log('[paint] mapWindow', id, 'parent=', w.parent);
+  }
   /* Skip paint when an ancestor is still unmapped: the window is
    * "mapped but not viewable" in X terms and MUST NOT produce pixels
    * yet. When the ancestor later maps, paintWindowSubtree recurses
@@ -337,6 +397,9 @@ export function unmapWindow(r: RendererState, id: number): void {
   const w = r.windows.get(id);
   if (!w) return;
   if (!w.mapped) return;
+  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+    console.log('[paint] unmapWindow', id, 'parent=', w.parent);
+  }
   const { ax, ay } = absOrigin(r, w);
   const bw = w.borderWidth;
   const oldX = ax - bw;

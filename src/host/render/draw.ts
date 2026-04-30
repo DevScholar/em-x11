@@ -26,6 +26,9 @@ export function clearArea(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
+  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+    console.log('[paint] clearArea', id, '(', x, y, w, h, ') parent=', win.parent);
+  }
   const ctx = r.canvas.ctx;
   ctx.save();
   applyWindowClip(r, ctx, win);

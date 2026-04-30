@@ -189,16 +189,47 @@ export class WindowManager {
 
   onUnmap(_connId: number, id: number): void {
     /* Unmap isn't redirected in X -- only Map / Configure / Circulate
-     * go through SubstructureRedirect. Unmap is always immediate. */
+     * go through SubstructureRedirect. Unmap is always immediate.
+     *
+     * Expose synthesis on overpaint: when our renderer wipes the rect
+     * the unmapped window vacated, every mapped window that intersects
+     * gets its bg repainted (wiping any application drawings inside the
+     * intersection). Real X uses per-window backing store + DamageReport
+     * to drive Expose to those siblings; we emit the Exposes explicitly
+     * here. Without this, twm's icon-manager-driven deiconify (which
+     * unmaps the iconified placeholder window) leaves xcalc / xeyes
+     * widget pixels wiped under that placeholder's old footprint, and
+     * the visible buttons all go blank until re-hovered. */
+    const oldRect = this.host.renderer.absBoundingRect(id);
     this.host.renderer.unmapWindow(id);
+    if (oldRect) {
+      const affected = this.host.renderer.mappedWindowsIntersecting(
+        oldRect.ax, oldRect.ay, oldRect.w, oldRect.h, id,
+      );
+      for (const wId of affected) {
+        this.host.events.pushExposeForWindow(wId, null);
+      }
+    }
   }
 
   onDestroy(id: number): void {
+    /* Same Expose-on-overpaint dance as onUnmap: capture the old rect
+     * before destroyWindow mutates the tree, then re-expose any
+     * intersecting mapped sibling whose pixels were wiped. */
+    const oldRect = this.host.renderer.absBoundingRect(id);
     this.host.connection.dropOwnership(id);
     this.host.events.forgetWindow(id);
     this.overrideRedirect.delete(id);
     this.host.property.deleteAllForWindow(id);   /* dix/property.c::DeleteAllWindowProperties */
     this.host.renderer.destroyWindow(id);
+    if (oldRect) {
+      const affected = this.host.renderer.mappedWindowsIntersecting(
+        oldRect.ax, oldRect.ay, oldRect.w, oldRect.h, id,
+      );
+      for (const wId of affected) {
+        this.host.events.pushExposeForWindow(wId, null);
+      }
+    }
   }
 
   onSetOverrideRedirect(id: number, flag: boolean): void {
