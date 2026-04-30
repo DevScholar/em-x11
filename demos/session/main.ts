@@ -22,6 +22,7 @@
 
 import { Host } from '../../src/host/index.js';
 import { launchTwm } from '../../src/runtime/twm-launch.js';
+import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
 
 const host = new Host();
 host.install();
@@ -33,7 +34,5 @@ await host.launchClient({
   wasmUrl: '/build/artifacts/xeyes/xeyes.wasm',
 });
 
-await host.launchClient({
-  glueUrl: '/build/artifacts/xcalc/xcalc.js',
-  wasmUrl: '/build/artifacts/xcalc/xcalc.wasm',
-});
+await launchXcalc(host);
+

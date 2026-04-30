@@ -37,6 +37,10 @@ struct _XGC {
     int            line_width;
     int            line_style;
     int            fill_style;
+    int            function;        /* GXcopy and friends; non-copy modes
+                                       have no Canvas 2D analogue, so any
+                                       non-GXcopy draw is short-circuited
+                                       in the drawing primitives. */
     Font           font;            /* currently bound font, or None */
 };
 

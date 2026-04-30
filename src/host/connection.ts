@@ -15,7 +15,6 @@ import type { Host } from './index.js';
 import { loadWasm, type LoadOptions } from '../loader/wasm.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
 import { XID_PER_CONN, XID_MASK } from './constants.js';
-import { getAppDefaultsFor, makeStagingPreRun } from '../runtime/app-defaults.js';
 
 export interface Connection {
   connId: number;
@@ -70,22 +69,11 @@ export class ConnectionManager {
     if (this.pendingLaunch) {
       throw new Error('em-x11: launchClient is not reentrant; await the previous launch first');
     }
-    /* Auto-inject app-defaults preRun for any registered Xt client.
-     * See src/runtime/app-defaults.ts for why this is project-default
-     * rather than a per-launcher concern: every Xt program needs its
-     * /usr/lib/X11/app-defaults/<Class> file or its widget tree
-     * collapses, so demos shouldn't have to remember to stage it.
-     * Caller-supplied preRun hooks run AFTER the staging hook, so an
-     * override (e.g. patching XCalc on the fly) still works. */
-    const stagedFiles = getAppDefaultsFor(opts.glueUrl);
-    const effectiveOpts: LoadOptions = stagedFiles
-      ? { ...opts, preRun: [makeStagingPreRun(stagedFiles), ...(opts.preRun ?? [])] }
-      : opts;
     const pending: PendingLaunch = { connId: 0 };
     this.pendingLaunch = pending;
     let module: EmscriptenModule;
     try {
-      module = await loadWasm(effectiveOpts);
+      module = await loadWasm(opts);
     } finally {
       this.pendingLaunch = null;
     }

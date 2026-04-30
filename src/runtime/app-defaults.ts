@@ -1,51 +1,33 @@
 /**
- * Project-default app-defaults staging.
+ * App-defaults staging utilities.
  *
- * Xt clients (xcalc, future xclock/xfontsel/xlogo, etc.) read their
- * widget geometry/colour resources from /usr/lib/X11/app-defaults/<Class>
- * — see third-party/libXt/include/X11/IntrinsicI.h's compile-time
- * XFILESEARCHPATHDEFAULT. Without that file, our Xrm finds nothing,
- * widgets fall back to their hard-coded defaults, and Form-based UIs
- * collapse on top of themselves at (0,0).
+ * Xt clients (xcalc, xclock, xfontsel, etc.) read their widget geometry/colour
+ * resources from /usr/lib/X11/app-defaults/<Class> — see libXt's compile-time
+ * XFILESEARCHPATHDEFAULT. Without that file, Xrm finds nothing, widgets fall
+ * back to their hard-coded defaults, and Form-based UIs collapse at (0,0).
  *
- * Rather than have every demo (or every launcher) repeat the MEMFS
- * staging dance, we keep a registry keyed by the artifact glue URL.
- * `Host.launchClient` consults the registry on every launch and auto-
- * injects a preRun hook that mkdirs /usr/lib/X11/app-defaults and
- * writes each registered file. New Xt programs need a single
- * registerAppDefaults call to participate.
+ * Each launcher is responsible for staging its own app-defaults into MEMFS
+ * before main() runs. Use makeStagingPreRun to build the preRun hook and pass
+ * it to host.launchClient:
  *
- * Why key by glueUrl rather than program name: the glueUrl is what
- * launchClient already gets, no extra plumbing through the API. The
- * registry stores the trailing basename of the URL (e.g. `xcalc.js`)
- * so callers can use any artifactBase without breaking the lookup.
+ *   import myDefaults from '../app-defaults/MyApp?raw';
+ *   host.launchClient({
+ *     ...,
+ *     preRun: [makeStagingPreRun([
+ *       { path: '/usr/lib/X11/app-defaults/MyApp', contents: myDefaults },
+ *     ])],
+ *   });
  *
- * The ?raw imports below let Vite inline these text assets at build
- * time — the wasm doesn't have to ship them and the dev server
- * doesn't have to serve them.
+ * The ?raw import lets Vite inline the text asset at build time — the wasm
+ * doesn't ship it and the dev server doesn't need to serve it separately.
  */
 
 import type { EmscriptenModule } from '../types/emscripten.js';
-// eslint-disable-next-line import/no-unresolved
-import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
 
 /** A file to stage into MEMFS before main() runs. */
 export interface MemfsFile {
   path: string;
   contents: string;
-}
-
-/** Registry keyed by glueUrl basename (e.g. `xcalc.js`). */
-const REGISTRY: Map<string, MemfsFile[]> = new Map();
-
-export function registerAppDefaults(glueBasename: string, files: MemfsFile[]): void {
-  REGISTRY.set(glueBasename, files);
-}
-
-export function getAppDefaultsFor(glueUrl: string): MemfsFile[] | undefined {
-  const slash = glueUrl.lastIndexOf('/');
-  const basename = slash >= 0 ? glueUrl.slice(slash + 1) : glueUrl;
-  return REGISTRY.get(basename);
 }
 
 /** preRun hook factory: mkdir -p the app-defaults dir, write each file. */
@@ -85,12 +67,3 @@ export function makeStagingPreRun(files: MemfsFile[]): (mod: EmscriptenModule) =
   };
 }
 
-/* -- Built-in registrations ------------------------------------------------
- *
- * Adding a new Xt program: import its app-defaults via `?raw` and call
- * registerAppDefaults at module load. The session/single-app demos will
- * pick it up automatically as soon as they `launchClient` the artifact. */
-
-registerAppDefaults('xcalc.js', [
-  { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
-]);

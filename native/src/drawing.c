@@ -3,10 +3,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Short-circuit gate for non-GXcopy GCs.
+ *
+ * Real X supports 16 logical functions for drawing (GXcopy, GXxor,
+ * GXinvert, ...). Canvas 2D has only Copy. The non-Copy modes are used
+ * by classic toolkits for "reversible" drawing -- twm's MoveOutline
+ * draws a rubber-band outline on the root window with GXxor so the
+ * exact same draw call erases it on the next pass. If we treat that as
+ * a normal solid draw, the lines are *painted* on top of whatever
+ * windows lie under them on the canvas -- xcalc's button widgets, for
+ * example -- and the "undraw" pass paints them again on top, leaving
+ * permanent damage with no Expose to repair it.
+ *
+ * We can't emulate GXxor faithfully without a per-window backing
+ * pixmap (real X servers diff against the prior pixel). For now we
+ * skip non-Copy draws entirely: the user loses rubber-band feedback
+ * during a twm move, but managed clients keep their content. */
+static inline bool gc_draw_disabled(GC gc) {
+    return gc && gc->function != GXcopy;
+}
+
 int XFillRectangle(Display *display, Drawable d, GC gc,
                    int x, int y, unsigned int width, unsigned int height) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     emx11_js_fill_rect((Window)d, x, y, width, height, gc->foreground);
     return 1;
 }
@@ -14,7 +34,7 @@ int XFillRectangle(Display *display, Drawable d, GC gc,
 int XDrawRectangle(Display *display, Drawable d, GC gc,
                    int x, int y, unsigned int width, unsigned int height) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     int x2 = x + (int)width;
     int y2 = y + (int)height;
     emx11_js_draw_line((Window)d, x,  y,  x2, y,  gc->foreground, gc->line_width);
@@ -27,7 +47,7 @@ int XDrawRectangle(Display *display, Drawable d, GC gc,
 int XDrawLine(Display *display, Drawable d, GC gc,
               int x1, int y1, int x2, int y2) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     emx11_js_draw_line((Window)d, x1, y1, x2, y2, gc->foreground, gc->line_width);
     return 1;
 }
@@ -35,7 +55,7 @@ int XDrawLine(Display *display, Drawable d, GC gc,
 int XDrawLines(Display *display, Drawable d, GC gc,
                XPoint *points, int npoints, int mode) {
     (void)display;
-    if (!gc || !points || npoints <= 0) return 0;
+    if (!gc || gc_draw_disabled(gc) || !points || npoints <= 0) return 0;
     int cx = points[0].x;
     int cy = points[0].y;
     for (int i = 1; i < npoints; i++) {
@@ -58,7 +78,7 @@ int XDrawLines(Display *display, Drawable d, GC gc,
 int XDrawSegments(Display *display, Drawable d, GC gc,
                   XSegment *segments, int nsegments) {
     (void)display;
-    if (!gc || !segments) return 0;
+    if (!gc || gc_draw_disabled(gc) || !segments) return 0;
     for (int i = 0; i < nsegments; i++) {
         emx11_js_draw_line((Window)d,
                            segments[i].x1, segments[i].y1,
@@ -70,7 +90,7 @@ int XDrawSegments(Display *display, Drawable d, GC gc,
 
 int XDrawPoint(Display *display, Drawable d, GC gc, int x, int y) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     /* A single point is a 1x1 fill in Xlib semantics. */
     emx11_js_fill_rect((Window)d, x, y, 1, 1, gc->foreground);
     return 1;
@@ -107,7 +127,7 @@ static int *flatten_points(XPoint *points, int npoints, int mode,
 int XDrawPoints(Display *display, Drawable d, GC gc,
                 XPoint *points, int npoints, int mode) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     int count = 0;
     int *flat = flatten_points(points, npoints, mode, &count);
     if (!flat) return 0;
@@ -121,7 +141,7 @@ int XDrawArc(Display *display, Drawable d, GC gc,
              int x, int y, unsigned int width, unsigned int height,
              int angle1, int angle2) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     emx11_js_draw_arc((Window)d, x, y, width, height,
                       angle1, angle2, gc->foreground, gc->line_width);
     return 1;
@@ -131,7 +151,7 @@ int XFillArc(Display *display, Drawable d, GC gc,
              int x, int y, unsigned int width, unsigned int height,
              int angle1, int angle2) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     emx11_js_fill_arc((Window)d, x, y, width, height,
                       angle1, angle2, gc->foreground);
     return 1;
@@ -140,7 +160,7 @@ int XFillArc(Display *display, Drawable d, GC gc,
 int XFillPolygon(Display *display, Drawable d, GC gc,
                  XPoint *points, int npoints, int shape, int mode) {
     (void)display;
-    if (!gc) return 0;
+    if (!gc || gc_draw_disabled(gc)) return 0;
     int count = 0;
     int *flat = flatten_points(points, npoints, mode, &count);
     if (!flat) return 0;

@@ -5,7 +5,7 @@
 
 static void apply_values(GC gc, unsigned long valuemask, XGCValues *values) {
     if (!gc || !values) return;
-    if (valuemask & GCFunction)    { /* ignored -- canvas has one mode */ }
+    if (valuemask & GCFunction)     gc->function = values->function;
     if (valuemask & GCPlaneMask)   { /* ignored */ }
     if (valuemask & GCForeground)   gc->foreground = values->foreground;
     if (valuemask & GCBackground)   gc->background = values->background;
@@ -29,6 +29,7 @@ GC XCreateGC(Display *display, Drawable d,
     gc->line_width = 0;
     gc->line_style = LineSolid;
     gc->fill_style = FillSolid;
+    gc->function   = GXcopy;
     gc->font       = None;
 
     apply_values(gc, valuemask, values);
@@ -50,6 +51,7 @@ int XCopyGC(Display *display, GC src, unsigned long valuemask, GC dst) {
     v.line_width = src->line_width;
     v.line_style = src->line_style;
     v.fill_style = src->fill_style;
+    v.function   = src->function;
     v.font       = src->font;
     apply_values(dst, valuemask, &v);
     return 1;
@@ -64,6 +66,7 @@ int XGetGCValues(Display *display, GC gc,
     if (valuemask & GCLineWidth)  values_return->line_width = gc->line_width;
     if (valuemask & GCLineStyle)  values_return->line_style = gc->line_style;
     if (valuemask & GCFillStyle)  values_return->fill_style = gc->fill_style;
+    if (valuemask & GCFunction)   values_return->function   = gc->function;
     if (valuemask & GCFont)       values_return->font       = gc->font;
     return 1;
 }
@@ -106,8 +109,13 @@ int XSetFillStyle(Display *display, GC gc, int fill_style) {
 }
 
 int XSetFunction(Display *display, GC gc, int function) {
-    (void)display; (void)gc; (void)function;
-    /* Canvas 2D has no logical-op concept; GXcopy is the only supported mode. */
+    (void)display;
+    if (!gc) return 0;
+    /* Canvas 2D has no logical-op concept beyond GXcopy. We track the
+     * value so drawing primitives can short-circuit non-copy modes
+     * (XOR rubber-band etc.) rather than overdraw destructively. See
+     * drawing.c::gc_draw_disabled. */
+    gc->function = function;
     return 1;
 }
 

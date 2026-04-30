@@ -9,7 +9,7 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
-import { paintWindowSubtree, repaintAbsoluteRect } from './paint.js';
+import { paintWindowBorder, paintWindowSubtree, repaintAbsoluteRect } from './paint.js';
 
 export function addWindow(
   r: RendererState,
@@ -42,10 +42,28 @@ export function addWindow(
 }
 
 /** Border-only update. Width or pixel can change independently of
- *  geometry (XSetWindowBorder vs XSetWindowBorderWidth). Repaints the
- *  enclosing area when mapped so the old ring is cleared and the new
- *  one drawn. Width changes also affect the old/new ring extent, so
- *  we erase the larger of the two. */
+ *  geometry (XSetWindowBorder vs XSetWindowBorderWidth).
+ *
+ *  Real X (xserver dix/window.c::ChangeWindowAttributes for CWBorderPixel,
+ *  ChangeBorderWidth for CWBorderWidth) repaints only the *border ring*
+ *  in the pixel-only case -- the interior is untouched. We used to wipe
+ *  the entire subtree via paintWindowSubtree, which under twm's
+ *  focus-follows-pointer cost xcalc all its button labels: every focus
+ *  change calls XSetWindowBorder(frame, color), our wipe cleared the
+ *  whole frame area (including descendants' content), but no Expose
+ *  was synthesized to descendants -- so the buttons stayed blank until
+ *  some other event (EnterNotify -> Xaw highlight()) re-triggered each
+ *  button's redraw individually. Real X protocol forbids touching
+ *  pixels outside the ring on a pixel-only change.
+ *
+ *  Pixel-only path: redraw the ring; nothing else.
+ *
+ *  Width-changed path: same outer-strip nuke as before for now.
+ *  This is a rare case (twm focus doesn't trigger it; only manual
+ *  XSetWindowBorderWidth and XConfigureWindow CWBorderWidth do), and
+ *  proper handling needs Expose synthesis on overlapped descendants
+ *  -- not the simple ring repaint -- which is left for the broader
+ *  Expose-on-overpaint pass. */
 export function setWindowBorder(
   r: RendererState,
   id: number,
@@ -55,9 +73,21 @@ export function setWindowBorder(
   const w = r.windows.get(id);
   if (!w) return;
   const oldBw = w.borderWidth;
+  const widthChanged = oldBw !== borderWidth;
   w.borderWidth = borderWidth;
   w.borderPixel = borderPixel;
   if (!w.mapped) return;
+  if (!widthChanged) {
+    /* Color-only change: ring is in the same place, just different
+     * pixel. Repaint just the ring. paintWindowBorder is ancestor-
+     * clipped so it can't bleed past the parent. */
+    paintWindowBorder(r, r.canvas.ctx, w);
+    return;
+  }
+  /* Width changed: fall through to the old wipe-and-repaint. The
+   * subtree will lose its drawn content; descendants need an Expose
+   * burst from the caller (WindowManager) to redraw. Not currently
+   * exercised by twm focus-follow path. */
   const { ax, ay } = absOrigin(r, w);
   const maxBw = Math.max(oldBw, borderWidth);
   repaintAbsoluteRect(
@@ -118,10 +148,19 @@ export function configureWindow(
     const bw = win.borderWidth;
     oldRect = { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
   }
+  const sameGeom =
+    win.x === x && win.y === y && win.width === w && win.height === h;
   win.x = x;
   win.y = y;
   win.width = w;
   win.height = h;
+  /* No-op configure (twm sends XMoveWindow / XConfigureWindow with the
+   * current geometry on click-without-drag once the move loop exits
+   * with a synthetic SetupWindow call). Without this guard our wipe
+   * runs on a no-op move and erases descendant content (Xaw button
+   * labels) without sending Expose -- same shape as the setWindowBorder
+   * over-wipe fix. */
+  if (sameGeom) return;
   if (oldRect) {
     /* Erase old position. mapped is still true at this point but the
      * window now sits at the NEW position, so painting from root will

@@ -5,19 +5,19 @@
  * gets fetched at setup time and is NOT git-tracked. Anything em-x11
  * specific has to live on the runtime side.
  *
- * The one tweak xcalc needs is /usr/lib/X11/app-defaults/XCalc — without
- * it XtGetResources finds nothing, widgets realize with their compile-
- * time defaults (0x0 Forms, stacked Commands), and the calculator is
- * unreadable. That staging is now project-default: src/runtime/app-
- * defaults.ts registers XCalc against `xcalc.js`, and Host's
- * launchClient auto-injects the preRun hook for any registered
- * artifact. So this launcher is just a thin URL-defaulting wrapper —
- * you can also call host.launchClient directly with the same glueUrl
- * (as the session demo does) and Xrm will still be set up.
+ * xcalc requires /usr/lib/X11/app-defaults/XCalc staged into MEMFS
+ * before main() runs — without it XtGetResources finds nothing, widgets
+ * realize with their compile-time defaults (0x0 Forms, stacked Commands),
+ * and the calculator is unreadable. This launcher stages that file
+ * explicitly via a preRun hook; callers using host.launchClient directly
+ * must do the same staging themselves.
  */
 
+// eslint-disable-next-line import/no-unresolved
+import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
 import type { Host } from '../host/index.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
+import { makeStagingPreRun } from './app-defaults.js';
 
 export interface LaunchXcalcOptions {
   /** Build artifact directory containing xcalc.js / xcalc.wasm. */
@@ -32,5 +32,10 @@ export async function launchXcalc(
   return host.launchClient({
     glueUrl: `${base}/xcalc.js`,
     wasmUrl: `${base}/xcalc.wasm`,
+    preRun: [
+      makeStagingPreRun([
+        { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
+      ]),
+    ],
   });
 }
