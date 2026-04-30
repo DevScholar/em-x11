@@ -370,7 +370,22 @@ static void window_abs_origin(Display *dpy, EmxWindow *w,
         ax += cur->x;
         ay += cur->y;
         if (cur->parent == None || cur->parent == cur->id) break;
-        cur = emx11_window_find(dpy, cur->parent);
+        EmxWindow *parent = emx11_window_find(dpy, cur->parent);
+        if (!parent) {
+            /* Parent is owned by a different connection (e.g. xcalc
+             * shell reparented under a twm-owned frame). Our local table
+             * doesn't have it, so the cumulative origin needs to come
+             * from Host's authoritative tree. Without this fallback the
+             * walk terminates with cur->parent's offset missing, every
+             * input event lands at canvas-absolute - frame.position
+             * inside the conn's coordinate system, and Xaw widgets
+             * highlight the wrong button on hover. */
+            int buf[3] = {0};
+            emx11_js_get_window_abs_origin(cur->parent, buf);
+            if (buf[0]) { ax += buf[1]; ay += buf[2]; }
+            break;
+        }
+        cur = parent;
     }
     if (ax_out)    *ax_out    = ax;
     if (ay_out)    *ay_out    = ay;
@@ -663,5 +678,58 @@ void emx11_push_map_request(Window parent, Window window) {
     ev.xmaprequest.display = dpy;
     ev.xmaprequest.parent  = parent;
     ev.xmaprequest.window  = window;
+    emx11_event_queue_push(dpy, &ev);
+}
+
+/* Cross-connection ReparentNotify delivery. Called by the Host on the
+ * window's *owner* module after a (typically WM-issued) XReparentWindow
+ * succeeds. Two jobs in one entry point:
+ *
+ *   1. Update the local EmxWindow shadow unconditionally. The owner did
+ *      not issue the reparent (twm did, on its own display), so its
+ *      shadow still has the pre-reparent parent/x/y. Without this fix,
+ *      window_abs_origin walks the stale chain to root and reports the
+ *      pre-reparent absolute coords; ButtonPress/Motion get translated
+ *      with the wrong offset, hover/click hit the wrong widget, and
+ *      Tk/Xt's redraw paths (which read x,y from local shadow) draw at
+ *      the wrong place too. See project_emx11_mask_gating.md for the
+ *      adjacent crash this enables, and the session notes for why the
+ *      shadow fix has to be unconditional rather than mask-gated.
+ *
+ *   2. Synthesise the ReparentNotify XEvent and push it -- but only if
+ *      the owner actually selected StructureNotifyMask on the window
+ *      (or SubstructureNotifyMask on the new parent). Matches dix's
+ *      DeliverEvents gating; Xt's Shell widget selects StructureNotify
+ *      on its shell, so it does receive this. */
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_reparent_notify(Window window, Window parent, int x, int y) {
+    Display *dpy = emx11_get_display();
+    EmxWindow *win = emx11_window_find(dpy, window);
+    if (win) {
+        win->parent = parent;
+        win->x      = x;
+        win->y      = y;
+    }
+
+    /* Mask gate: same shape as window.c::wants_structure -- StructureNotify
+     * on the window itself OR SubstructureNotify on the new parent. */
+    bool wants = false;
+    if (win && (win->event_mask & StructureNotifyMask)) wants = true;
+    if (!wants && parent != None) {
+        EmxWindow *p = emx11_window_find(dpy, parent);
+        if (p && (p->event_mask & SubstructureNotifyMask)) wants = true;
+    }
+    if (!wants) return;
+
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xreparent.type        = ReparentNotify;
+    ev.xreparent.display     = dpy;
+    ev.xreparent.event       = window;
+    ev.xreparent.window      = window;
+    ev.xreparent.parent      = parent;
+    ev.xreparent.x           = x;
+    ev.xreparent.y           = y;
+    ev.xreparent.override_redirect = win ? win->override_redirect : False;
     emx11_event_queue_push(dpy, &ev);
 }

@@ -95,4 +95,27 @@ addToLibrary({
     HEAP32[base + 6] = a.overrideRedirect ? 1 : 0;
     HEAP32[base + 7] = a.borderWidth | 0;
   },
+
+  // Cross-connection absolute-origin lookup. C-side window_abs_origin
+  // uses this when its local parent chain ends in a None (because the
+  // ancestor is owned by another connection -- e.g. a twm frame under
+  // which xcalc was reparented). Returns 3 ints:
+  //   [0] found (0/1)  [1] ax  [2] ay
+  // ax/ay are the cumulative root-relative origin from the Host's
+  // authoritative tree. See Host.getWindowAbsOrigin for the why.
+  emx11_js_get_window_abs_origin: function (id, outPtr) {
+    var base = outPtr >> 2;
+    if (!globalThis.__EMX11__) {
+      HEAP32[base] = 0;
+      return;
+    }
+    var o = globalThis.__EMX11__.getWindowAbsOrigin(id >>> 0);
+    if (!o) {
+      HEAP32[base] = 0;
+      return;
+    }
+    HEAP32[base + 0] = 1;
+    HEAP32[base + 1] = o.ax | 0;
+    HEAP32[base + 2] = o.ay | 0;
+  },
 });

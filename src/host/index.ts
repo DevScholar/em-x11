@@ -126,6 +126,40 @@ export class Host implements EmX11Host {
     return this.window.getAttrs(id);
   }
 
+  /** Authoritative cumulative absolute origin for a window, computed
+   *  from Host's full tree. C-side per-display tables only see windows
+   *  that connection created, so a reparented client (e.g. xcalc shell
+   *  under a twm-owned frame) walks its parent chain into a None and
+   *  treats its shell's recorded local position as absolute -- which
+   *  loses the frame's offset and lands every Motion/ButtonPress event
+   *  at coords offset by `frame.position`. The resulting symptom: hover
+   *  highlights the wrong widget, Xt's button text disappears (the
+   *  *wrong* widget gets ClearArea+Expose), xeyes' SHAPE clears the
+   *  eye sockets to background pixel.
+   *
+   *  Returning {ax, ay} from the renderer's full tree closes the gap.
+   *  C-side window_abs_origin uses this as a fallback when the parent
+   *  isn't in its own table. */
+  getWindowAbsOrigin(id: number): { ax: number; ay: number } | null {
+    const attrs = this.renderer.attrsOf(id);
+    if (!attrs) return null;
+    const win = this.renderer.windows.get(id);
+    if (!win) return null;
+    /* renderer.absOrigin imported via window-tree; use the same fn the
+     * paint path uses so input and pixels stay in lockstep. */
+    let ax = win.x;
+    let ay = win.y;
+    let pid = win.parent;
+    for (let i = 0; pid !== 0 && i < 32; i++) {
+      const p = this.renderer.windows.get(pid);
+      if (!p) break;
+      ax += p.x;
+      ay += p.y;
+      pid = p.parent;
+    }
+    return { ax, ay };
+  }
+
   /* -- EmX11Host: window structure -------------------------------------- */
 
   onWindowCreate(

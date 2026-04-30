@@ -94,19 +94,6 @@ export class WindowManager {
     this.host.renderer.addWindow(
       id, parent, x, y, width, height, borderWidth, borderPixel, background,
     );
-    /* Lifecycle probe (2026-04-29): twm session demo dumps show frames
-     * (2097162, 2097170, 2097177) referenced as parents but missing from
-     * the renderer map. Need to know whether they were created at all,
-     * and whether something later destroyed them. Log every create/destroy
-     * with conn + parent so we can correlate against the SubstructureRedirect
-     * log entries. Set `__EMX11_TRACE_LIFECYCLE__ = false` to silence. */
-    if ((globalThis as { __EMX11_TRACE_LIFECYCLE__?: boolean })
-          .__EMX11_TRACE_LIFECYCLE__ !== false) {
-      console.log(
-        `[emx11/lifecycle] CREATE id=${id} parent=${parent} conn=${connId} ` +
-          `pos=(${x},${y}) size=${width}x${height}`,
-      );
-    }
   }
 
   onSetBorder(id: number, borderWidth: number, borderPixel: number): void {
@@ -207,21 +194,6 @@ export class WindowManager {
   }
 
   onDestroy(id: number): void {
-    if ((globalThis as { __EMX11_TRACE_LIFECYCLE__?: boolean })
-          .__EMX11_TRACE_LIFECYCLE__ !== false) {
-      const conn = this.host.connection.connOf(id);
-      /* V8 truncates Error.stack at 10 frames by default. Raise locally
-       * so we see who in twm.wasm actually called XDestroyWindow. */
-      const ErrCtor = Error as unknown as { stackTraceLimit: number };
-      const prev = ErrCtor.stackTraceLimit;
-      ErrCtor.stackTraceLimit = 64;
-      const stack = new Error('destroy stack').stack ?? '';
-      ErrCtor.stackTraceLimit = prev;
-      console.log(
-        `[emx11/lifecycle] DESTROY id=${id} owner=c${conn ?? '?'}\n` +
-          stack.split('\n').slice(1).join('\n'),
-      );
-    }
     this.host.connection.dropOwnership(id);
     this.host.events.forgetWindow(id);
     this.overrideRedirect.delete(id);
@@ -236,6 +208,30 @@ export class WindowManager {
 
   onReparent(id: number, parent: number, x: number, y: number): void {
     this.host.renderer.reparentWindow(id, parent, x, y);
+    /* Notify the window's *owner* connection that its shadow is now stale.
+     * In the TWM case the reparent is issued by twm's display, but xcalc
+     * (the owner) still has its shell recorded as parent=root in its own
+     * EmxWindow table. Without correcting that, the C-side window_abs_origin
+     * walk lands at the pre-reparent absolute coords, ButtonPress/Motion
+     * get translated with the wrong offset, hover/click hit the wrong
+     * widget, and Xt's Shell widget never sees a ReparentNotify it would
+     * otherwise consume. emx11_push_reparent_notify (event.c) updates
+     * the local shadow unconditionally and pushes a ReparentNotify XEvent
+     * gated on the StructureNotify/SubstructureNotify masks, mirroring
+     * dix/events.c::DeliverEvents. See project_emx11_mask_gating.md for
+     * the adjacent gate that landed alongside this. */
+    const ownerConnId = this.host.connection.connOf(id);
+    if (ownerConnId !== undefined && ownerConnId !== 0) {
+      const owner = this.host.connection.get(ownerConnId);
+      if (owner?.module) {
+        owner.module.ccall(
+          'emx11_push_reparent_notify',
+          null,
+          ['number', 'number', 'number', 'number'],
+          [id, parent, x, y],
+        );
+      }
+    }
     /* After reparent the renderer repainted background at the new
      * position but did not restore pixel content; the reparented window
      * and its mapped descendants need Expose to redraw. In the TWM case

@@ -429,6 +429,13 @@ extern void emx11_js_pointer_xy(int *x_out, int *y_out);
  * return 0 from XGetWindowAttributes. */
 extern void emx11_js_get_window_attrs(Window id, int *out);
 
+/* Cross-connection abs-origin lookup. Returns 3 ints:
+ *   [0] found (0/1)  [1] ax  [2] ay
+ * Used by event.c::window_abs_origin when the parent chain in the
+ * caller's local table dead-ends at a window owned by another
+ * connection (e.g. xcalc walking up into a twm frame). */
+extern void emx11_js_get_window_abs_origin(Window id, int *out);
+
 /* -- Property bridges (Host-owned storage, dix/property.c layout).
  * Properties are keyed by (XID, atom) server-side so any client can
  * read back what any client wrote. The four entry points mirror the

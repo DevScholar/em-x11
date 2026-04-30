@@ -32,7 +32,7 @@ target_link_options(xcalc PRIVATE
     # app-defaults, xcalc's button layout collapses to widget defaults and
     # the UI is unreadable.
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','FS']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_expose_event','_emx11_push_map_request']"
+    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_expose_event','_emx11_push_map_request','_emx11_push_reparent_notify']"
     "SHELL:-Wl,--error-limit=0"
 )
 
