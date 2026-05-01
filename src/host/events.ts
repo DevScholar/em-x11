@@ -12,7 +12,7 @@
  */
 
 import type { Host } from './index.js';
-import type { EmscriptenModule } from '../types/emscripten.js';
+import type { ModuleCcallSurface } from './connection.js';
 import { SubstructureRedirectMask } from './constants.js';
 
 export class EventDispatcher {
@@ -136,10 +136,10 @@ export class EventDispatcher {
    *  Pass `forceModule` from launchClient itself to bypass the owner
    *  lookup -- at drain time we already have the freshly-bound module
    *  in hand and the conn record reflects it. */
-  pushExposeForWindow(id: number, forceModule: EmscriptenModule | null): void {
+  pushExposeForWindow(id: number, forceModule: ModuleCcallSurface | null): void {
     const geom = this.host.renderer.geometryOf(id);
     if (!geom) return;
-    let module: EmscriptenModule | null = forceModule;
+    let module: ModuleCcallSurface | null = forceModule;
     if (!module) {
       const ownerConnId = this.host.connection.connOf(id);
       if (ownerConnId === undefined) return;

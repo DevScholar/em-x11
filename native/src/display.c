@@ -94,6 +94,10 @@ static void emx11_init_screen(Display *dpy) {
 }
 
 Display *XOpenDisplay(const char *display_name) {
+    /* Force the bridges.c TU into the link so its EM_JS bodies survive
+     * archive-pull semantics. See bridges.c for the rationale. */
+    extern void emx11_bridges_link_anchor(void);
+    emx11_bridges_link_anchor();
     (void)display_name;
     if (g_display_open) {
         return &g_display;

@@ -8,6 +8,7 @@
 #                    EMX11_BUILD_SIDE_MODULE option (default OFF for now).
 
 option(EMX11_BUILD_SIDE_MODULE "Also build em-x11 as an Emscripten SIDE_MODULE" OFF)
+option(EMX11_HIDE_INTERNAL_SYMBOLS "Apply -fvisibility=hidden to emx11_static (smaller demo wasm). Turn OFF when consumers will relink into a side module that needs to export Xlib." ON)
 
 set(EMX11_PUBLIC_HEADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -30,6 +31,8 @@ set(EMX11_SOURCES
     src/xaw_stubs.c
     src/tk_shims.c
     src/keysym_table.c
+    src/bridges.c
+    src/notifier.c
     src/ext/shape.c
 )
 
@@ -63,32 +66,15 @@ target_include_directories(emx11_static
 
 target_compile_options(emx11_static
     PRIVATE ${EMX11_WARN_FLAGS}
-            -fvisibility=hidden
 )
+if(EMX11_HIDE_INTERNAL_SYMBOLS)
+    target_compile_options(emx11_static PRIVATE -fvisibility=hidden)
+endif()
 
-# Hook JS-side library code (addToLibrary) into the emscripten link step.
-# Each file mirrors a chunk of xserver/dix (window.c, property.c, atom.c,
-# gc.c, pixmap.c) plus em-x11-specific bridges (core lifecycle, font/colour,
-# clipboard). emcc accepts repeated --js-library flags and merges every
-# addToLibrary({...}) call before resolving extern references from C.
-# Consumers that link emx11_static inherit this via target_link_options.
-set(EMX11_JS_LIBRARY_DIR "${CMAKE_SOURCE_DIR}/src/bindings")
-set(EMX11_JS_LIBRARIES
-    core.js
-    window.js
-    property.js
-    atom.js
-    draw.js
-    font.js
-    pixmap.js
-    clipboard.js
-)
-foreach(_jslib IN LISTS EMX11_JS_LIBRARIES)
-    target_link_options(emx11_static
-        INTERFACE
-            "SHELL:--js-library ${EMX11_JS_LIBRARY_DIR}/${_jslib}"
-    )
-endforeach()
+# JS-side bridges live in src/bridges.c via EM_JS, so they're embedded
+# in libemx11 itself (works under both static link and SIDE_MODULE dlopen).
+# Older --js-library files under src/bindings/ are kept as documentation
+# only; the build no longer references them.
 
 set_target_properties(emx11_static PROPERTIES
     OUTPUT_NAME "emx11"
@@ -104,21 +90,22 @@ if(EMX11_BUILD_SIDE_MODULE)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
+    # Side module is consumed by libtk.so / _tkinter.so via dynamic linking,
+    # so Xlib symbols MUST be exported. Default visibility (not hidden) plus
+    # EXPORT_ALL=1 lets the auto-export pass at link time pick them up.
     target_compile_options(emx11_side
         PRIVATE ${EMX11_WARN_FLAGS}
-                -fvisibility=hidden
                 -fPIC
     )
 
     target_link_options(emx11_side
         PRIVATE
             "SHELL:-s SIDE_MODULE=1"
-            "SHELL:-s EXPORT_ALL=0"
     )
 
     set_target_properties(emx11_side PROPERTIES
         OUTPUT_NAME "emx11"
-        SUFFIX ".wasm"
+        SUFFIX ".so"
         PREFIX "lib"
     )
 endif()

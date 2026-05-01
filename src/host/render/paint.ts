@@ -8,7 +8,7 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import { absOrigin } from './window-tree.js';
-import { pixelToCssColor } from '../../runtime/canvas.js';
+import { pixelToCssColor, type RootCanvasContext } from '../../runtime/canvas.js';
 
 /** Push a clip region matching the window's visible area onto `ctx`.
  *  Caller must have done ctx.save() and must ctx.restore() after.
@@ -26,7 +26,7 @@ import { pixelToCssColor } from '../../runtime/canvas.js';
  *  in reparented sub-trees stay consistent with the paint path. */
 export function applyWindowClip(
   r: RendererState,
-  ctx: CanvasRenderingContext2D,
+  ctx: RootCanvasContext,
   win: ManagedWindow,
 ): void {
   const chain: ManagedWindow[] = [win];
@@ -59,7 +59,7 @@ export function applyWindowClip(
  *  so it doesn't bleed past the parent's bounds. */
 export function applyAncestorClip(
   r: RendererState,
-  ctx: CanvasRenderingContext2D,
+  ctx: RootCanvasContext,
   win: ManagedWindow,
 ): void {
   const chain: ManagedWindow[] = [];
@@ -120,7 +120,7 @@ export function paintWindowSubtree(r: RendererState, w: ManagedWindow): void {
  *  common) borderless override-redirect / shaped-shell case. */
 export function paintWindowBorder(
   r: RendererState,
-  ctx: CanvasRenderingContext2D,
+  ctx: RootCanvasContext,
   w: ManagedWindow,
 ): void {
   const bw = w.borderWidth;
@@ -147,7 +147,7 @@ export function paintWindowBorder(
  *  ctx.save/restore and clipping. */
 export function paintBackgroundRect(
   r: RendererState,
-  ctx: CanvasRenderingContext2D,
+  ctx: RootCanvasContext,
   win: ManagedWindow,
   x: number,
   y: number,

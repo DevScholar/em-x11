@@ -16,6 +16,21 @@ import { loadWasm, type LoadOptions } from '../loader/wasm.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
 import { XID_PER_CONN, XID_MASK } from './constants.js';
 
+/** The slice of an Emscripten Module the host actually invokes through.
+ *  EmscriptenModule satisfies this; the Pyodide path supplies a shim
+ *  that resolves names through LDSO.loadedLibsByName since side-module
+ *  exports don't live on the main `_module`. Signature mirrors the
+ *  local EmscriptenModule.ccall so the static archive (wacl-tk) path
+ *  stays a drop-in. */
+export interface ModuleCcallSurface {
+  ccall(
+    name: string,
+    returnType: string | null,
+    argTypes: string[],
+    args: unknown[],
+  ): unknown;
+}
+
 export interface Connection {
   connId: number;
   xidBase: number;
@@ -23,10 +38,31 @@ export interface Connection {
   /** Registered after launchClient loads the wasm. Null for a
    *  "headless" connection (test harness or legacy demos that open
    *  their own wasm without going through launchClient). */
-  module: EmscriptenModule | null;
+  module: ModuleCcallSurface | null;
   /** XIDs created by this connection; kept so we can clean them up
    *  when the client disconnects. */
   ownedWindows: Set<number>;
+}
+
+/** Build a ModuleCcallSurface from a Pyodide-loaded side module's
+ *  exports (typically `pyodide._module.LDSO.loadedLibsByName[soPath].exports`).
+ *  The host's ccalls are all numbers-in / void-or-number-out, so we
+ *  just call the export with the args and return the value; no string
+ *  marshalling needed. */
+export function makeSideModuleSurface(
+  exports: Record<string, (...args: unknown[]) => unknown>,
+): ModuleCcallSurface {
+  return {
+    ccall(name, _ret, _argTypes, args) {
+      const fn = exports[name];
+      if (typeof fn !== 'function') {
+        throw new Error(
+          `em-x11: side-module export '${name}' not found (have ${Object.keys(exports).filter((k) => k.startsWith('emx11')).join(', ')})`,
+        );
+      }
+      return fn(...args);
+    },
+  };
 }
 
 /* Handoff slot used by launchClient so Host.openDisplay (called from
@@ -49,6 +85,12 @@ export class ConnectionManager {
   private readonly pendingExposes = new Map<number, Set<number>>();
   private nextConnId = 0;
   private pendingLaunch: PendingLaunch | null = null;
+  /** Surface auto-bound to every future open() conn. Set by bindModule
+   *  when called without an explicit connId — covers the Pyodide case
+   *  where one wasm Module hosts multiple Tcl interps and each
+   *  tkinter.Tk() opens its own display. Without this, only the first
+   *  display gets routed and later widgets paint into the void. */
+  private defaultModule: ModuleCcallSurface | null = null;
 
   constructor(private readonly host: Host) {}
 
@@ -108,7 +150,7 @@ export class ConnectionManager {
       connId,
       xidBase,
       xidMask,
-      module: null,
+      module: this.defaultModule,
       ownedWindows: new Set(),
     });
     if (this.pendingLaunch) this.pendingLaunch.connId = connId;
@@ -190,5 +232,58 @@ export class ConnectionManager {
       this.pendingExposes.set(ownerConnId, pending);
     }
     pending.add(winId);
+  }
+
+  /** Pyodide / dlopen path: bind an already-loaded EmscriptenModule to
+   *  a connection. Unlike launchClient, the Host did not load this wasm;
+   *  Pyodide did, and we just hand its Module over. Caller is expected
+   *  to invoke this AFTER libemx11.so is dlopen'd but BEFORE any code
+   *  that calls XOpenDisplay (e.g. _tkinter.create with wantTk=1).
+   *
+   *  If `connId` is omitted we bind the most-recently-opened connection
+   *  (single-client common case). Drains any deferred Exposes the same
+   *  way launchClient does, so widgets that mapped before the Module
+   *  was bound still receive their first paint. */
+  bindModule(module: ModuleCcallSurface, connId?: number): number {
+    let id = connId;
+    if (id === undefined) {
+      if (this.nextConnId === 0) {
+        throw new Error('em-x11: bindModule called before any XOpenDisplay');
+      }
+      id = this.nextConnId;
+      // No explicit connId → caller is the "single-Module hosts many
+      // displays" case (Pyodide / dlopen). Set default so future opens
+      // pick up this surface automatically.
+      this.defaultModule = module;
+    }
+    const conn = this.connections.get(id);
+    if (!conn) {
+      throw new Error(`em-x11: bindModule: no connection with id ${id}`);
+    }
+    conn.module = module;
+    const deferred = this.pendingExposes.get(id);
+    if (deferred) {
+      for (const winId of deferred) {
+        this.host.events.pushExposeForWindow(winId, module);
+      }
+      this.pendingExposes.delete(id);
+    }
+    return id;
+  }
+
+  /** Pyodide pre-bind: stash the Module as the default for any future
+   *  XOpenDisplay, BEFORE any connection exists. Use this when a single
+   *  wasm Module will host the very first XOpenDisplay (e.g. when going
+   *  straight to `tkinter.Tk()` rather than calling `_tkinter.create`
+   *  manually first). After the first open, future connections from
+   *  the same Module also inherit defaultModule. Idempotent.
+   *
+   *  Without this, you'd need an XOpenDisplay-first-then-bindModule
+   *  dance that requires an already-opened display, which forces a
+   *  redundant `_tkinter.create` step and produces TWO Tk roots --
+   *  one of which (typically tkinter.Tk's 200x200 default) ends up
+   *  obscuring the other. */
+  setDefaultModule(module: ModuleCcallSurface): void {
+    this.defaultModule = module;
   }
 }
