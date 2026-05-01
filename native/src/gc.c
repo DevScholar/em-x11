@@ -77,6 +77,10 @@ int XFreeGC(Display *display, GC gc) {
     return 1;
 }
 
+GContext XGContextFromGC(GC gc) {
+    return gc ? gc->gid : 0;
+}
+
 int XSetForeground(Display *display, GC gc, unsigned long foreground) {
     (void)display;
     if (!gc) return 0;
