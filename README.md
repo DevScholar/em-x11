@@ -28,7 +28,9 @@ pnpm build
 
 # Run
 
-Use this command to run: `pnpm dev`
+```bash
+pnpm dev
+```
 
 # Documentation
 
