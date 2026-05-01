@@ -1,4 +1,5 @@
 #include "emx11_internal.h"
+#include "emx11_meta_layout.h"
 
 #include <X11/Xatom.h>
 #include <stdio.h>
@@ -224,7 +225,6 @@ int XDestroyWindow(Display *display, Window w) {
     free(win->shape_bounding);
     win->shape_bounding = NULL;
     win->shape_bounding_count = 0;
-    emx11_window_free_properties(win);
 
     win->in_use = false;
     emx11_js_window_destroy(w);
@@ -410,15 +410,15 @@ Status XGetWindowAttributes(Display *display, Window w,
      * XID (WM case -- twm querying xeyes's shell to size its frame).
      * dix/window.c treats window state as server-authoritative by XID,
      * so we reach through to the Host for the canonical record. */
-    int a[8];
+    int a[EMX11_WIN_ATTRS_SIZE];
     emx11_js_get_window_attrs(w, a);
-    if (!a[0]) return 0;
+    if (!a[EMX11_WIN_ATTRS_PRESENT]) return 0;
     memset(attrs_return, 0, sizeof(*attrs_return));
-    attrs_return->x                = a[1];
-    attrs_return->y                = a[2];
-    attrs_return->width            = a[3];
-    attrs_return->height           = a[4];
-    attrs_return->border_width     = a[7];
+    attrs_return->x                = a[EMX11_WIN_ATTRS_X];
+    attrs_return->y                = a[EMX11_WIN_ATTRS_Y];
+    attrs_return->width            = a[EMX11_WIN_ATTRS_WIDTH];
+    attrs_return->height           = a[EMX11_WIN_ATTRS_HEIGHT];
+    attrs_return->border_width     = a[EMX11_WIN_ATTRS_BORDER_WIDTH];
     attrs_return->depth            = display->screens[0].root_depth;
     attrs_return->visual           = display->screens[0].root_visual;
     attrs_return->root             = display->screens[0].root;
@@ -429,7 +429,7 @@ Status XGetWindowAttributes(Display *display, Window w,
     attrs_return->save_under       = False;
     attrs_return->colormap         = display->screens[0].cmap;
     attrs_return->map_installed    = True;
-    attrs_return->map_state        = a[5] ? IsViewable : IsUnmapped;
+    attrs_return->map_state        = a[EMX11_WIN_ATTRS_MAPPED] ? IsViewable : IsUnmapped;
     attrs_return->all_event_masks  = 0;
     attrs_return->your_event_mask  = 0;
     attrs_return->do_not_propagate_mask = 0;
@@ -457,15 +457,15 @@ Status XGetGeometry(Display *display, Drawable d,
 
     /* Cross-connection fallback: same story as XGetWindowAttributes --
      * twm.c:845 queries a managed client's shell geometry. */
-    int a[8];
+    int a[EMX11_WIN_ATTRS_SIZE];
     emx11_js_get_window_attrs((Window)d, a);
-    if (!a[0]) return 0;
+    if (!a[EMX11_WIN_ATTRS_PRESENT]) return 0;
     if (root_return)         *root_return         = display->screens[0].root;
-    if (x_return)            *x_return            = a[1];
-    if (y_return)            *y_return            = a[2];
-    if (width_return)        *width_return        = (unsigned int)a[3];
-    if (height_return)       *height_return       = (unsigned int)a[4];
-    if (border_width_return) *border_width_return = (unsigned int)a[7];
+    if (x_return)            *x_return            = a[EMX11_WIN_ATTRS_X];
+    if (y_return)            *y_return            = a[EMX11_WIN_ATTRS_Y];
+    if (width_return)        *width_return        = (unsigned int)a[EMX11_WIN_ATTRS_WIDTH];
+    if (height_return)       *height_return       = (unsigned int)a[EMX11_WIN_ATTRS_HEIGHT];
+    if (border_width_return) *border_width_return = (unsigned int)a[EMX11_WIN_ATTRS_BORDER_WIDTH];
     if (depth_return)        *depth_return        = (unsigned int)display->screens[0].root_depth;
     return 1;
 }

@@ -13,6 +13,7 @@
  */
 
 #include "emx11_internal.h"
+#include "emx11_meta_layout.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -65,26 +66,26 @@ int XGetWindowProperty(Display *display, Window w, Atom property,
     if (bytes_after_return)   *bytes_after_return   = 0;
     if (prop_return)          *prop_return          = NULL;
 
-    int meta[8] = {0};
+    int meta[EMX11_PROP_META_SIZE] = {0};
     emx11_js_get_property_meta(w, property, req_type,
                                long_offset, long_length, meta);
-    if (!meta[6]) return BadWindow;
+    if (!meta[EMX11_PROP_META_PRESENT]) return BadWindow;
 
-    if (actual_type_return)   *actual_type_return   = (Atom)meta[1];
-    if (actual_format_return) *actual_format_return = meta[2];
-    if (nitems_return)        *nitems_return        = (unsigned long)meta[3];
-    if (bytes_after_return)   *bytes_after_return   = (unsigned long)meta[4];
+    if (actual_type_return)   *actual_type_return   = (Atom)meta[EMX11_PROP_META_TYPE];
+    if (actual_format_return) *actual_format_return = meta[EMX11_PROP_META_FORMAT];
+    if (nitems_return)        *nitems_return        = (unsigned long)meta[EMX11_PROP_META_NITEMS];
+    if (bytes_after_return)   *bytes_after_return   = (unsigned long)meta[EMX11_PROP_META_BYTES_AFTER];
 
     /* No data to return (atom missing, or type mismatch): just ack the
      * meta. dix/property.c ProcGetProperty in the type-mismatch case
      * still reports actualType/format; our meta path already did that. */
-    if (!meta[0] || meta[5] == 0) {
+    if (!meta[EMX11_PROP_META_FOUND] || meta[EMX11_PROP_META_DATA_LEN] == 0) {
         return Success;
     }
 
     /* Xlib convention: allocate one extra byte and NUL-terminate so
      * callers printing the result as a C string don't walk off the end. */
-    size_t data_bytes = (size_t)meta[5];
+    size_t data_bytes = (size_t)meta[EMX11_PROP_META_DATA_LEN];
     unsigned char *buf = malloc(data_bytes + 1);
     if (!buf) return BadAlloc;
     emx11_js_get_property_data(w, property, req_type, long_offset,
@@ -112,12 +113,4 @@ Atom *XListProperties(Display *display, Window w, int *num_prop_return) {
     int got = emx11_js_list_properties_fetch(w, list, n);
     if (num_prop_return) *num_prop_return = got;
     return list;
-}
-
-/* Previously freed the per-window property linked list hanging off
- * EmxWindow.properties. Storage has moved to the Host (which wipes
- * entries in onWindowDestroy), so this is now a no-op. Kept as a
- * stable symbol because window.c still calls it from XDestroyWindow. */
-void emx11_window_free_properties(EmxWindow *win) {
-    (void)win;
 }

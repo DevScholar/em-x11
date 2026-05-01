@@ -18,6 +18,9 @@ set(EMX11_SOURCES
     src/gc.c
     src/drawing.c
     src/event.c
+    src/event_queue.c
+    src/event_send.c
+    src/event_keysym.c
     src/atom.c
     src/property.c
     src/selection.c
@@ -73,8 +76,6 @@ endif()
 
 # JS-side bridges live in src/bridges.c via EM_JS, so they're embedded
 # in libemx11 itself (works under both static link and SIDE_MODULE dlopen).
-# Older --js-library files under src/bindings/ are kept as documentation
-# only; the build no longer references them.
 
 set_target_properties(emx11_static PROPERTIES
     OUTPUT_NAME "emx11"

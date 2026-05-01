@@ -33,3 +33,10 @@ export const XID_MASK = XID_PER_CONN - 1;                // 0x001FFFFF
  * it -- the Host keeps the authoritative renderer record. */
 export const HOST_ROOT_ID = 0x00000001;
 export const HOST_WEAVE_PIXMAP_ID = 0x00000002;
+
+/* Maximum depth we walk up the parent chain when resolving a window's
+ * absolute origin or building a clip stack. X has no formal depth limit,
+ * but a real session never nests deeper than a handful of levels (root
+ * -> WM frame -> shell -> composite -> leaf). The cap is purely a guard
+ * against accidentally cyclic parent links. */
+export const MAX_PARENT_WALK = 32;

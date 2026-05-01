@@ -59,10 +59,10 @@ export class GcManager {
   /* -- C-side bridge entry points --------------------------------------- */
 
   onInit(_screenWidth: number, _screenHeight: number): void {
-    /* C expects us to adopt its idea of screen size, but the browser is the
-     * authority. We ignore the hint and the C side will be corrected the
-     * next time it queries through XDisplayWidth/Height once we wire that
-     * back through. TODO: plumb the correction call. */
+    /* C tells us its compile-time default screen size, but the browser
+     * canvas is the authority. We discard the hint; the C side reads the
+     * real dimensions back through XDisplayWidth/Height when it needs
+     * them, which routes via emx11_js_get_window_attrs(root). */
   }
 
   onClearArea(id: number, x: number, y: number, w: number, h: number): void {

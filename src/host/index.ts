@@ -1,7 +1,7 @@
 /**
  * Host facade: the single object every wasm client (and every demo
  * harness) talks to. Implements the EmX11Host interface used by the
- * --js-library bridges in src/bindings/*.js, plus the launchClient
+ * EM_JS bridges in native/src/bridges.c, plus the launchClient
  * coordination that dev demos use to start each wasm.
  *
  * Internally Host is a thin coordinator over a set of manager classes,
@@ -22,13 +22,14 @@
  * what each method's authoritative source-of-truth is.
  *
  * Host installs itself on globalThis.__EMX11__ via install(). That must
- * happen BEFORE any wasm module starts: bindings/*.js read the global
- * synchronously from C calls.
+ * happen BEFORE any wasm module starts: the EM_JS bridges read the
+ * global synchronously from C calls.
  */
 
 import { RootCanvas } from '../runtime/canvas.js';
 import type { RootCanvasOptions } from '../runtime/canvas.js';
 import { Renderer } from './render/index.js';
+import { absOrigin } from './render/window-tree.js';
 import { AtomManager } from './atom.js';
 import { PropertyManager } from './property.js';
 import { EventDispatcher } from './events.js';
@@ -141,23 +142,10 @@ export class Host implements EmX11Host {
    *  C-side window_abs_origin uses this as a fallback when the parent
    *  isn't in its own table. */
   getWindowAbsOrigin(id: number): { ax: number; ay: number } | null {
-    const attrs = this.renderer.attrsOf(id);
-    if (!attrs) return null;
     const win = this.renderer.windows.get(id);
     if (!win) return null;
-    /* renderer.absOrigin imported via window-tree; use the same fn the
-     * paint path uses so input and pixels stay in lockstep. */
-    let ax = win.x;
-    let ay = win.y;
-    let pid = win.parent;
-    for (let i = 0; pid !== 0 && i < 32; i++) {
-      const p = this.renderer.windows.get(pid);
-      if (!p) break;
-      ax += p.x;
-      ay += p.y;
-      pid = p.parent;
-    }
-    return { ax, ay };
+    /* Same fn the paint path uses, so input and pixels stay in lockstep. */
+    return absOrigin(this.renderer, win);
   }
 
   /* -- EmX11Host: window structure -------------------------------------- */

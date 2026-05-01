@@ -2,8 +2,8 @@
  * Pixmap lifecycle.
  *
  * X Pixmaps are server-side offscreen drawables. In em-x11 each Pixmap
- * is backed by an OffscreenCanvas on the JS side (see src/bindings/
- * pixmap.js -- emx11_js_pixmap_*). The C side only tracks the
+ * is backed by an OffscreenCanvas on the JS side (the emx11_js_pixmap_*
+ * EM_JS bridges in native/src/bridges.c). The C side only tracks the
  * (id, width, height, depth) triple so drawing calls and SHAPE can
  * resolve ids without round-tripping through JS.
  *

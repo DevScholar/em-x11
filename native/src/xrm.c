@@ -42,6 +42,7 @@
 
 #include <X11/Xresource.h>
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -499,26 +500,22 @@ Bool XrmQGetResource(XrmDatabase db, XrmNameList quark_name,
  * then issues many XrmQGetSearchResource(list, leaf_name, leaf_class)
  * calls — one per resource on the widget. Real X11 builds an array of
  * hash buckets pre-positioned along the widget's hierarchy; we don't have
- * a hash, so instead we stash the (db, name_path, class_path) tuple at
- * list[0] (with a magic word for sanity) and reconstruct a full quark
- * query in XrmQGetSearchResource by appending the leaf to the cached
- * path, then delegate to XrmQGetResource.
- *
- * Memory: each XrmQGetSearchList call mallocs a small ctx; the SearchList
- * is stack-allocated by the caller (Xt) and never explicitly freed, so
- * the ctxs leak by widget count (~50 for xcalc, ~bytes each). Acceptable
- * for current demos; revisit if a long-lived program creates and destroys
- * widgets in a loop. */
+ * a hash, so we pack (db, name_path, class_path) directly into the
+ * caller-provided list slots and reconstruct a full quark query in
+ * XrmQGetSearchResource. No malloc, no leak — the storage lives on the
+ * caller's stack and dies with the widget initialisation frame. */
 
-#define EMX_SEARCH_MAGIC 0xE3501157u
+#define EMX_SEARCH_MAGIC ((XrmHashTable)(uintptr_t)0xE3501157u)
 
-typedef struct EmxSearchCtx {
-    unsigned int magic;
-    XrmDatabase  db;
-    int          n;          /* path length */
-    /* names[0..n-1] then classes[0..n-1] live in the trailing flex area. */
-    XrmQuark     paths[1];
-} EmxSearchCtx;
+/* Slot layout in list_return:
+ *   [0]              magic
+ *   [1]              db pointer
+ *   [2]              path length n (cast through uintptr_t)
+ *   [3 .. 3+n-1]     name quarks
+ *   [3+n .. 3+2n-1]  class quarks
+ *   [3+2n]           NULL terminator
+ * Needs 4 + 2n slots; with Xt's typical list_size of 100 that's room for
+ * 48 components, far beyond any real widget hierarchy. */
 
 Bool XrmQGetSearchList(XrmDatabase db, XrmNameList names, XrmClassList classes,
                        XrmSearchList list_return, int list_size) {
@@ -527,19 +524,16 @@ Bool XrmQGetSearchList(XrmDatabase db, XrmNameList names, XrmClassList classes,
     int n = 0;
     if (names) while (names[n] != NULLQUARK) n++;
 
-    size_t bytes = sizeof(EmxSearchCtx) + (size_t)(2 * n) * sizeof(XrmQuark);
-    EmxSearchCtx *ctx = (EmxSearchCtx *)malloc(bytes);
-    if (!ctx) return False;
+    if (4 + 2 * n > list_size) return False;
 
-    ctx->magic = EMX_SEARCH_MAGIC;
-    ctx->db = db;
-    ctx->n = n;
+    list_return[0] = EMX_SEARCH_MAGIC;
+    list_return[1] = (XrmHashTable)db;
+    list_return[2] = (XrmHashTable)(uintptr_t)n;
     for (int i = 0; i < n; i++) {
-        ctx->paths[i] = names[i];
-        ctx->paths[n + i] = (classes ? classes[i] : NULLQUARK);
+        list_return[3 + i]     = (XrmHashTable)(uintptr_t)(unsigned)names[i];
+        list_return[3 + n + i] = (XrmHashTable)(uintptr_t)(unsigned)(classes ? classes[i] : NULLQUARK);
     }
-    list_return[0] = (XrmHashTable)ctx;
-    list_return[1] = NULL;
+    list_return[3 + 2 * n] = NULL;
     return True;
 }
 
@@ -548,25 +542,25 @@ Bool XrmQGetSearchResource(XrmSearchList list, XrmName name, XrmClass class_,
                            XrmValue *value_return) {
     if (type_return)  *type_return = NULLQUARK;
     if (value_return) { value_return->size = 0; value_return->addr = NULL; }
-    if (!list || !list[0]) return False;
+    if (!list || list[0] != EMX_SEARCH_MAGIC) return False;
 
-    EmxSearchCtx *ctx = (EmxSearchCtx *)list[0];
-    if (ctx->magic != EMX_SEARCH_MAGIC) return False;
+    XrmDatabase db = (XrmDatabase)list[1];
+    int n = (int)(uintptr_t)list[2];
 
     /* Build full query: cached path + leaf. Bound at 64 components — Xt
      * itself rarely nests deeper than a dozen. */
     XrmQuark fname[64], fclass[64];
-    if (ctx->n + 2 > 64) return False;
-    for (int i = 0; i < ctx->n; i++) {
-        fname[i]  = ctx->paths[i];
-        fclass[i] = ctx->paths[ctx->n + i];
+    if (n + 2 > 64) return False;
+    for (int i = 0; i < n; i++) {
+        fname[i]  = (XrmQuark)(uintptr_t)list[3 + i];
+        fclass[i] = (XrmQuark)(uintptr_t)list[3 + n + i];
     }
-    fname[ctx->n]      = name;
-    fclass[ctx->n]     = class_;
-    fname[ctx->n + 1]  = NULLQUARK;
-    fclass[ctx->n + 1] = NULLQUARK;
+    fname[n]      = name;
+    fclass[n]     = class_;
+    fname[n + 1]  = NULLQUARK;
+    fclass[n + 1] = NULLQUARK;
 
-    return XrmQGetResource(ctx->db, fname, fclass, type_return, value_return);
+    return XrmQGetResource(db, fname, fclass, type_return, value_return);
 }
 
 Bool XrmGetResource(XrmDatabase db, _Xconst char *str_name,

@@ -82,8 +82,8 @@ export interface Point {
 
 /**
  * The em-x11 host object, installed on `globalThis` before wasm starts so
- * that C code (via src/bindings/*.js) can reach TS-side state.
- * Populated by src/host/index.ts.
+ * that C code (via EM_JS bridges in native/src/bridges.c) can reach
+ * TS-side state. Populated by src/host/index.ts.
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;

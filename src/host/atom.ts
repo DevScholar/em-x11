@@ -32,8 +32,8 @@ export class AtomManager {
   }
 
   /** XGetAtomName for Host-allocated atoms (id >= 69). Returns null for
-   *  unknown ids; caller (bindings/atom.js) surfaces that as a NULL
-   *  return from XGetAtomName, which Xlib docs define as BadAtom. */
+   *  unknown ids; the EM_JS bridge surfaces that as a NULL return from
+   *  XGetAtomName, which Xlib docs define as BadAtom. */
   nameOf(atom: number): string | null {
     return this.atomsById.get(atom) ?? null;
   }

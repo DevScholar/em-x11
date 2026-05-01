@@ -279,14 +279,11 @@ KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym);
  * if the font hasn't been loaded (caller falls back to a default). */
 const char *emx11_font_css(Font font);
 
-/* Release the linked list of XChangeProperty payloads on destroy. */
-void emx11_window_free_properties(EmxWindow *win);
-
 /* ------------------------------------------------------------------------- */
-/*  JS bridge. These symbols are defined by src/bindings/*.js (split by      */
-/*  domain: core, window, property, atom, draw, font, pixmap, clipboard)     */
-/*  and hooked into the link via --js-library. The C side calls into the    */
-/*  browser (canvas draw, DOM mutation) through these.                       */
+/*  JS bridge. These symbols are defined as EM_JS in src/bridges.c, so they  */
+/*  are embedded in libemx11 and resolve under both static link and          */
+/*  SIDE_MODULE dlopen. The C side calls into the browser (canvas draw,      */
+/*  DOM mutation) through them.                                              */
 /* ------------------------------------------------------------------------- */
 
 extern void emx11_js_init(int screen_width, int screen_height);

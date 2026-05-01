@@ -1,13 +1,11 @@
 /*
  * em-x11 host bridges, embedded as EM_JS so libemx11 is self-contained.
  *
- * Previously these lived in src/bindings/<dot>js consumed by emcc's
- * --js-library at the consumer's main-module link step. That worked for
- * static-link consumers (wacl-tk) but broke under Pyodide side-module
- * dlopen, where Pyodide's wasmImports closure isn't reachable from
- * outside JS. EM_JS embeds the JS body into a wasm custom section that
- * Emscripten's dlopen reads back, so the JS imports are wired up at
- * instantiate time regardless of how the .so is loaded.
+ * EM_JS embeds the JS body into a wasm custom section that Emscripten's
+ * dlopen reads back, so the JS imports are wired up at instantiate time
+ * regardless of how the .so is loaded -- works under both static link
+ * (wacl-tk) and SIDE_MODULE dlopen (Pyodide), where the latter can't
+ * reach the consumer's --js-library closure.
  *
  * Each bridge calls into globalThis.__EMX11__ (installed by the TS host)
  * and falls through to a harmless default when no host is present, so
@@ -16,12 +14,26 @@
 
 #include <emscripten.h>
 
+/* Note: emx11_meta_layout.h defines named indices for the multi-int
+ * outputs of get_window_attrs / get_window_abs_origin / get_property_meta.
+ * The C consumers (window.c, event.c, property.c) use the names; the
+ * EM_JS bodies below cannot, because EM_JS stringifies its body verbatim
+ * without running CPP expansion. Keep the literal indices in EM_JS bodies
+ * in lockstep with the names in emx11_meta_layout.h. */
+
 /* Link anchor: this TU only contains EM_JS data symbols (__em_js__*),
  * which the archive linker treats as not satisfying any undefined ref
  * and therefore drops the whole .o, taking the EM_JS bodies with it.
  * display.c calls this function so the archive pulls bridges.c.o in,
  * making the JS imports visible to emcc's post-link pass. */
 void emx11_bridges_link_anchor(void) {}
+
+/* Note: EM_JS bodies are extracted as JS source BEFORE the C preprocessor
+ * runs, so #defines do not expand inside them. The font/colour bridges
+ * each repeat a 5-line lazy-init for the shared 2D ctx (cached on
+ * globalThis so all three bridges share the underlying canvas at runtime;
+ * the source duplication is unavoidable given the EM_JS extraction). */
+
 
 /* --- core ---------------------------------------------------------------- */
 
@@ -67,14 +79,18 @@ EM_JS(void, emx11_js_pointer_xy, (int xPtr, int yPtr), {
 });
 
 EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
+    /* Layout (mirrors emx11_meta_layout.h EMX11_WIN_ATTRS_*):
+     *   0 PRESENT, 1 X, 2 Y, 3 WIDTH, 4 HEIGHT, 5 MAPPED,
+     *   6 OVERRIDE_RED, 7 BORDER_WIDTH. EM_JS bodies are stringified
+     *   without CPP expansion, so indices stay literal here. */
     var base = outPtr >> 2;
     if (!globalThis.__EMX11__) {
-        HEAP32[base] = 0;
+        HEAP32[base + 0] = 0;
         return;
     }
     var a = globalThis.__EMX11__.getWindowAttrs(id >>> 0);
     if (!a) {
-        HEAP32[base] = 0;
+        HEAP32[base + 0] = 0;
         return;
     }
     HEAP32[base + 0] = 1;
@@ -88,14 +104,15 @@ EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
 });
 
 EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
+    /* Layout (mirrors EMX11_ABS_ORIGIN_*): 0 PRESENT, 1 AX, 2 AY. */
     var base = outPtr >> 2;
     if (!globalThis.__EMX11__) {
-        HEAP32[base] = 0;
+        HEAP32[base + 0] = 0;
         return;
     }
     var o = globalThis.__EMX11__.getWindowAbsOrigin(id >>> 0);
     if (!o) {
-        HEAP32[base] = 0;
+        HEAP32[base + 0] = 0;
         return;
     }
     HEAP32[base + 0] = 1;
@@ -206,19 +223,12 @@ EM_JS(void, emx11_js_draw_string, (unsigned int id, int x, int y, int fontPtr, i
 });
 
 EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, int maxWidthPtr, int widthsPtr), {
-    var g = globalThis;
-    if (!g.__emx11_measureCtx__) {
-        var c =
-            typeof OffscreenCanvas !== "undefined"
-                ? new OffscreenCanvas(1, 1)
-                : typeof document !== "undefined"
-                    ? document.createElement("canvas")
-                    : null;
-        g.__emx11_measureCtx__ = c
-            ? c.getContext("2d", { willReadFrequently: true })
-            : null;
+    if (globalThis.__emx11_measureCtx__ === undefined) {
+        var c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1)
+              : typeof document !== "undefined" ? document.createElement("canvas") : null;
+        globalThis.__emx11_measureCtx__ = c ? c.getContext("2d", { willReadFrequently: true }) : null;
     }
-    var ctx = g.__emx11_measureCtx__;
+    var ctx = globalThis.__emx11_measureCtx__;
     var fallbackWidth = 8;
     var fallbackAscent = 10;
     var fallbackDescent = 3;
@@ -260,19 +270,12 @@ EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, 
 
 EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
     if (length <= 0 || textPtr === 0) return 0;
-    var g = globalThis;
-    if (!g.__emx11_measureCtx__) {
-        var c =
-            typeof OffscreenCanvas !== "undefined"
-                ? new OffscreenCanvas(1, 1)
-                : typeof document !== "undefined"
-                    ? document.createElement("canvas")
-                    : null;
-        g.__emx11_measureCtx__ = c
-            ? c.getContext("2d", { willReadFrequently: true })
-            : null;
+    if (globalThis.__emx11_measureCtx__ === undefined) {
+        var c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1)
+              : typeof document !== "undefined" ? document.createElement("canvas") : null;
+        globalThis.__emx11_measureCtx__ = c ? c.getContext("2d", { willReadFrequently: true }) : null;
     }
-    var ctx = g.__emx11_measureCtx__;
+    var ctx = globalThis.__emx11_measureCtx__;
     if (!ctx) return length * 8;
     ctx.font = fontPtr !== 0 ? UTF8ToString(fontPtr) : "13px monospace";
     var text = UTF8ToString(textPtr, length);
@@ -286,19 +289,12 @@ EM_JS(int, emx11_js_parse_color, (int namePtr, int rPtr, int gPtr, int bPtr), {
         !CSS.supports("color", name)) {
         return 0;
     }
-    var g = globalThis;
-    if (!g.__emx11_measureCtx__) {
-        var c =
-            typeof OffscreenCanvas !== "undefined"
-                ? new OffscreenCanvas(1, 1)
-                : typeof document !== "undefined"
-                    ? document.createElement("canvas")
-                    : null;
-        g.__emx11_measureCtx__ = c
-            ? c.getContext("2d", { willReadFrequently: true })
-            : null;
+    if (globalThis.__emx11_measureCtx__ === undefined) {
+        var c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1)
+              : typeof document !== "undefined" ? document.createElement("canvas") : null;
+        globalThis.__emx11_measureCtx__ = c ? c.getContext("2d", { willReadFrequently: true }) : null;
     }
-    var ctx = g.__emx11_measureCtx__;
+    var ctx = globalThis.__emx11_measureCtx__;
     if (!ctx) return 0;
     ctx.fillStyle = "#010203";
     var sentinel = ctx.fillStyle;
@@ -371,6 +367,9 @@ EM_JS(int, emx11_js_change_property, (unsigned int w, unsigned int atom, unsigne
 });
 
 EM_JS(void, emx11_js_get_property_meta, (unsigned int w, unsigned int atom, unsigned int reqType, int longOffset, int longLength, int metaPtr), {
+    /* Layout (mirrors EMX11_PROP_META_*, total 8 ints):
+     *   0 FOUND, 1 TYPE, 2 FORMAT, 3 NITEMS, 4 BYTES_AFTER,
+     *   5 DATA_LEN, 6 PRESENT, 7 reserved. */
     var base = metaPtr >> 2;
     for (var i = 0; i < 8; i++) HEAP32[base + i] = 0;
     if (!globalThis.__EMX11__) return;

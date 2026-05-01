@@ -9,6 +9,7 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
+import { MAX_PARENT_WALK } from '../constants.js';
 import { paintWindowBorder, paintWindowSubtree, repaintAbsoluteRect } from './paint.js';
 
 export function addWindow(
@@ -326,12 +327,12 @@ export function attrsOf(
  *  summing local (x, y) up the parent chain. ManagedWindow.{x,y} is
  *  local-to-parent (matching X semantics); the renderer needs
  *  absolute to actually paint. Root is at (0, 0) so the chain
- *  terminates cleanly. Guarded to 32 levels against cycles. */
+ *  terminates cleanly. Guarded against cyclic parent links. */
 export function absOrigin(r: RendererState, win: ManagedWindow): { ax: number; ay: number } {
   let ax = win.x;
   let ay = win.y;
   let pid = win.parent;
-  for (let i = 0; pid !== 0 && i < 32; i++) {
+  for (let i = 0; pid !== 0 && i < MAX_PARENT_WALK; i++) {
     const p = r.windows.get(pid);
     if (!p) break;
     ax += p.x;

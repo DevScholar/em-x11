@@ -8,6 +8,7 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import { absOrigin } from './window-tree.js';
+import { MAX_PARENT_WALK } from '../constants.js';
 import { pixelToCssColor, type RootCanvasContext } from '../../runtime/canvas.js';
 
 /** Push a clip region matching the window's visible area onto `ctx`.
@@ -31,7 +32,7 @@ export function applyWindowClip(
 ): void {
   const chain: ManagedWindow[] = [win];
   let parentId = win.parent;
-  for (let i = 0; parentId !== 0 && i < 32; i++) {
+  for (let i = 0; parentId !== 0 && i < MAX_PARENT_WALK; i++) {
     const p = r.windows.get(parentId);
     if (!p) break;
     chain.push(p);
@@ -64,7 +65,7 @@ export function applyAncestorClip(
 ): void {
   const chain: ManagedWindow[] = [];
   let parentId = win.parent;
-  for (let i = 0; parentId !== 0 && i < 32; i++) {
+  for (let i = 0; parentId !== 0 && i < MAX_PARENT_WALK; i++) {
     const p = r.windows.get(parentId);
     if (!p) break;
     chain.push(p);
