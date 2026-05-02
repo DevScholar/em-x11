@@ -153,15 +153,16 @@ export class Host implements EmX11Host {
   onWindowCreate(
     connId: number, id: number, parent: number,
     x: number, y: number, width: number, height: number,
-    borderWidth: number, borderPixel: number, background: number,
+    borderWidth: number, borderPixel: number,
+    bgType: number, bgValue: number,
   ): void {
-    this.window.onCreate(connId, id, parent, x, y, width, height, borderWidth, borderPixel, background);
+    this.window.onCreate(connId, id, parent, x, y, width, height, borderWidth, borderPixel, bgType, bgValue);
   }
   onWindowSetBorder(id: number, borderWidth: number, borderPixel: number): void {
     this.window.onSetBorder(id, borderWidth, borderPixel);
   }
-  onWindowSetBg(id: number, background: number): void {
-    this.window.onSetBg(id, background);
+  onWindowSetBg(id: number, bgType: number, bgValue: number): void {
+    this.window.onSetBg(id, bgType, bgValue);
   }
   onWindowSetBgPixmap(id: number, pmId: number): void {
     this.window.onSetBgPixmap(id, pmId);

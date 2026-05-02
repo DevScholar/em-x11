@@ -111,11 +111,19 @@ export interface EmX11Host {
     height: number,
     borderWidth: number,
     borderPixel: number,
-    background: number,
+    /** Background state, mirroring xserver's backgroundState
+     *  (xserver/dix/window.c around line 1185):
+     *    0 = None             (no auto-paint)
+     *    1 = BackgroundPixel  (bgValue is a pixel)
+     *    2 = BackgroundPixmap (bgValue is a Pixmap XID)
+     *  ParentRelative is not yet plumbed; XCreateWindow collapses it
+     *  to None at the C bridge. */
+    bgType: number,
+    bgValue: number,
   ): void;
   onWindowSetBorder(id: number, borderWidth: number, borderPixel: number): void;
-  onWindowSetBg(id: number, background: number): void;
-  onWindowSetBg(id: number, background: number): void;
+  /** Update the window's background state. bgType matches onWindowCreate. */
+  onWindowSetBg(id: number, bgType: number, bgValue: number): void;
   /** Geometry-only update for an existing window (XMoveWindow /
    *  XResizeWindow / XConfigureWindow). Leaves parent, shape, and
    *  background_pixmap alone. */

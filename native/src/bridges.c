@@ -443,9 +443,9 @@ EM_JS(int, emx11_js_list_properties_fetch, (unsigned int w, int dstPtr, int capa
 
 /* --- window -------------------------------------------------------------- */
 
-EM_JS(void, emx11_js_window_create, (int connId, unsigned int id, unsigned int parent, int x, int y, int w, int h, int borderWidth, unsigned int borderPixel, unsigned int background), {
+EM_JS(void, emx11_js_window_create, (int connId, unsigned int id, unsigned int parent, int x, int y, int w, int h, int borderWidth, unsigned int borderPixel, int bgType, unsigned int bgValue), {
     globalThis.__EMX11__ &&
-        globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, borderWidth, borderPixel, background);
+        globalThis.__EMX11__.onWindowCreate(connId, id, parent, x, y, w, h, borderWidth, borderPixel, bgType, bgValue);
 });
 
 EM_JS(void, emx11_js_window_set_border, (unsigned int id, int borderWidth, unsigned int borderPixel), {
@@ -453,9 +453,9 @@ EM_JS(void, emx11_js_window_set_border, (unsigned int id, int borderWidth, unsig
         globalThis.__EMX11__.onWindowSetBorder(id, borderWidth, borderPixel);
 });
 
-EM_JS(void, emx11_js_window_set_bg, (unsigned int id, unsigned int background), {
+EM_JS(void, emx11_js_window_set_bg, (unsigned int id, int bgType, unsigned int bgValue), {
     globalThis.__EMX11__ &&
-        globalThis.__EMX11__.onWindowSetBg(id, background);
+        globalThis.__EMX11__.onWindowSetBg(id, bgType, bgValue);
 });
 
 EM_JS(void, emx11_js_window_configure, (unsigned int id, int x, int y, int w, int h), {

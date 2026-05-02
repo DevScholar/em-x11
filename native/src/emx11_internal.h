@@ -301,12 +301,21 @@ extern void emx11_js_close_display(int conn_id);
  * XOpenDisplay asks for its XID instead of minting a local root. */
 extern Window emx11_js_get_root_window(void);
 
+/* bg_type encodes the four xserver backgroundState values
+ * (xserver/dix/window.c around line 1185):
+ *   0 = None             (no auto-paint; previous pixels stay)
+ *   1 = BackgroundPixel  (solid colour fill)
+ *   2 = BackgroundPixmap (tile fill, bg_value is the Pixmap XID)
+ * ParentRelative is currently mapped to None. The renderer must skip
+ * any background paint when bg_type == 0, mirroring miPaintWindow's
+ * `state != None` gate in xserver/mi/miwindow.c:115. */
 extern void emx11_js_window_create(int conn_id, Window id, Window parent,
                                    int x, int y,
                                    unsigned int w, unsigned int h,
                                    unsigned int border_width,
                                    unsigned long border_pixel,
-                                   unsigned long background);
+                                   int bg_type,
+                                   unsigned long bg_value);
 /* Border-only update (XSetWindowBorder / XSetWindowBorderWidth /
  * XChangeWindowAttributes CWBorderPixel / XConfigureWindow CWBorderWidth).
  * Geometry stays unchanged; Host repaints the border ring around the
@@ -317,7 +326,7 @@ extern void emx11_js_window_set_border(Window id,
 /* Solid-background update (XSetWindowBackground / XChangeWindowAttributes
  * CWBackPixel). Repaints the window with the new colour. Distinct from
  * window_set_bg_pixmap which binds a tile pattern. */
-extern void emx11_js_window_set_bg(Window id, unsigned long background);
+extern void emx11_js_window_set_bg(Window id, int bg_type, unsigned long bg_value);
 /* Geometry change on an existing window (XMoveWindow / XResizeWindow /
  * XConfigureWindow). Distinct from window_create so Host doesn't have
  * to re-seed parent, shape, or background_pixmap -- we only touch the

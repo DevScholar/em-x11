@@ -58,15 +58,18 @@ export class Renderer implements RendererState {
   addWindow(
     id: number, parent: number, x: number, y: number,
     width: number, height: number,
-    borderWidth: number, borderPixel: number, background: number,
+    borderWidth: number, borderPixel: number,
+    bgType: 'none' | 'pixel' | 'pixmap', background: number,
   ): void {
-    tree.addWindow(this, id, parent, x, y, width, height, borderWidth, borderPixel, background);
+    tree.addWindow(this, id, parent, x, y, width, height, borderWidth, borderPixel, bgType, background);
   }
   setWindowBorder(id: number, borderWidth: number, borderPixel: number): void {
     tree.setWindowBorder(this, id, borderWidth, borderPixel);
   }
-  setWindowBackground(id: number, background: number): void {
-    tree.setWindowBackground(this, id, background);
+  setWindowBackground(
+    id: number, bgType: 'none' | 'pixel' | 'pixmap', background: number,
+  ): void {
+    tree.setWindowBackground(this, id, bgType, background);
   }
   setWindowBackgroundPixmap(id: number, pmId: number): void {
     tree.setWindowBackgroundPixmap(this, id, pmId);

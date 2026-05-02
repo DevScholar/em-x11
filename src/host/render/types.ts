@@ -27,10 +27,20 @@ export interface ManagedWindow {
    *  top-left (X semantics). bw=0 means no border. */
   borderWidth: number;
   borderPixel: number;
+  /** X11 backgroundState (xserver/dix/window.c around line 1185):
+   *    'none'   -- server does not auto-paint the bg. miPaintWindow
+   *                gates on `state != None` (xserver/mi/miwindow.c:115);
+   *                we mirror that in paintBackgroundRect. xeyes' shell
+   *                lives in this state -- the application is the only
+   *                thing that paints inside.
+   *    'pixel'  -- solid fill from `background`.
+   *    'pixmap' -- tile fill from `backgroundPixmap`.
+   *  ParentRelative is currently collapsed to 'none' at the C bridge. */
+  bgType: 'none' | 'pixel' | 'pixmap';
   background: number;
-  /** When non-null, the window background is tiled with this pixmap's
-   *  OffscreenCanvas instead of painted with `background`. Tile origin
-   *  is the window's top-left (applied via ctx.translate at paint time). */
+  /** When set (and bgType==='pixmap'), the window background is tiled
+   *  with this pixmap's OffscreenCanvas. Tile origin is the window's
+   *  top-left (applied via ctx.translate at paint time). */
   backgroundPixmap: number | null;
   mapped: boolean;
   /** SHAPE bounding rectangles (window-local coords). `null` means

@@ -22,6 +22,7 @@ export function addWindow(
   height: number,
   borderWidth: number,
   borderPixel: number,
+  bgType: 'none' | 'pixel' | 'pixmap',
   background: number,
 ): void {
   /* Create only stores state -- the window isn't visible until
@@ -36,6 +37,7 @@ export function addWindow(
     stackOrder: r.stackCounter++,
     borderWidth,
     borderPixel,
+    bgType,
     background,
     backgroundPixmap: null,
     mapped: false,
@@ -105,21 +107,42 @@ export function setWindowBorder(
   paintWindowSubtree(r, w);
 }
 
-/** Solid-background update (XSetWindowBackground / CWBackPixel). The
- *  change takes effect on the next XClearArea or Expose-triggered bg
- *  paint, just like real X -- we don't auto-repaint here because Xt's
- *  XawCommandToggle path sequences this with a ClearArea that the
- *  widget relies on for the pixel update to land. */
-export function setWindowBackground(r: RendererState, id: number, background: number): void {
+/** Solid-background update (XSetWindowBackground / CWBackPixel, or
+ *  CWBackPixmap=None which collapses to bgType='none' at the bridge).
+ *  The change takes effect on the next XClearArea or Expose-triggered
+ *  bg paint, just like real X -- we don't auto-repaint here because
+ *  Xt's XawCommandToggle path sequences this with a ClearArea that
+ *  the widget relies on for the pixel update to land. */
+export function setWindowBackground(
+  r: RendererState,
+  id: number,
+  bgType: 'none' | 'pixel' | 'pixmap',
+  background: number,
+): void {
   const w = r.windows.get(id);
   if (!w) return;
+  w.bgType = bgType;
   w.background = background;
+  /* Switching off pixmap mode (bgType='none' or 'pixel') drops any
+   * previously-bound tile so it doesn't reappear after an unrelated
+   * set_bg_pixmap(0) was missed. Mirrors xserver dix/window.c:1242
+   * which DestroyPixmap on the prior tile when CWBackPixel arrives. */
+  if (bgType !== 'pixmap') w.backgroundPixmap = null;
 }
 
 export function setWindowBackgroundPixmap(r: RendererState, id: number, pmId: number): void {
   const w = r.windows.get(id);
   if (!w) return;
-  w.backgroundPixmap = pmId > 0 ? pmId : null;
+  if (pmId > 0) {
+    w.backgroundPixmap = pmId;
+    w.bgType = 'pixmap';
+  } else {
+    w.backgroundPixmap = null;
+    /* pmId==0 here means "no pixmap, fall back to pixel" (the bridge
+     * uses set_bg with bgType=0 for the protocol-level None case;
+     * it never reaches here). */
+    w.bgType = 'pixel';
+  }
   /* Repaint sync if the window is currently visible: shared-root
    * setup calls this AFTER mapWindow(root), so we need the weave
    * to land without waiting for some external trigger. */

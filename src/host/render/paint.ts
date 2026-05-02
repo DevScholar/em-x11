@@ -247,10 +247,15 @@ export function paintWindowBorder(
 }
 
 /** Paint a (window-local) rectangle using the window's current
- *  background: solid colour, or tile pattern when backgroundPixmap is
- *  bound. Tile origin is the window's absolute top-left, so moving
- *  the window (or its parent) shifts the tile with it. Caller owns
- *  ctx.save/restore and clipping. */
+ *  background. Mirrors xserver/mi/miwindow.c miPaintWindow's
+ *  `pWin->backgroundState != None` gate at line 115: when bgType is
+ *  'none' (XCreateWindow without CWBackPixel, CWBackPixmap=None,
+ *  ParentRelative collapsed) the server does not paint at all, leaving
+ *  whatever pixels were there (the application owns the pixels --
+ *  e.g. xeyes' shell, twm's iconmgr root). 'pixmap' tiles the bound
+ *  Pixmap; 'pixel' fills with `background`. Tile origin is the
+ *  window's absolute top-left, so moving the window (or its parent)
+ *  shifts the tile with it. Caller owns ctx.save/restore and clipping. */
 export function paintBackgroundRect(
   r: RendererState,
   ctx: RootCanvasContext,
@@ -260,10 +265,10 @@ export function paintBackgroundRect(
   w: number,
   h: number,
 ): void {
+  if (win.bgType === 'none') return;
   const { ax, ay } = absOrigin(r, win);
-  const pmId = win.backgroundPixmap;
-  if (pmId !== null) {
-    const pmCanvas = r.pixmapLookup(pmId);
+  if (win.bgType === 'pixmap' && win.backgroundPixmap !== null) {
+    const pmCanvas = r.pixmapLookup(win.backgroundPixmap);
     if (pmCanvas) {
       const pattern = ctx.createPattern(
         pmCanvas as unknown as CanvasImageSource,

@@ -120,14 +120,32 @@ Window XCreateSimpleWindow(Display *display, Window parent,
 
     emx11_js_window_create(display->conn_id, w->id, parent,
                            x, y, width, height,
-                           border_width, border, background);
+                           border_width, border,
+                           /* XCreateSimpleWindow takes an explicit
+                            * background pixel; that fixes state to
+                            * BackgroundPixel (= 1). XCreateWindow uses
+                            * the bridge directly when CWBackPixel is
+                            * absent so it can pass state=None (= 0). */
+                           1, background);
     return w->id;
 }
 
 /* Full XCreateWindow with attributes -- Xt calls this directly from
  * XtRealizeWidget rather than the simple form. The attributes struct
  * lets the caller override background, border, event mask, and
- * override_redirect; visual/depth we ignore (single-visual world). */
+ * override_redirect; visual/depth we ignore (single-visual world).
+ *
+ * Background-state semantics (xserver/dix/window.c around line 1180):
+ * - CWBackPixel set      -> BackgroundPixel
+ * - CWBackPixmap set:
+ *     None            -> None
+ *     ParentRelative  -> ParentRelative (we treat as None for now)
+ *     real Pixmap     -> BackgroundPixmap
+ * - neither set          -> None (default)
+ * Without this, every Xt-created shell ends up with our old default
+ * pixel=0 = solid black, which stomps the application's drawing on
+ * every Expose/raise (xeyes regressed this way once z-order paint
+ * actually started honouring window bg). */
 Window XCreateWindow(Display *display, Window parent,
                      int x, int y,
                      unsigned int width, unsigned int height,
@@ -137,18 +155,39 @@ Window XCreateWindow(Display *display, Window parent,
                      XSetWindowAttributes *attrs) {
     (void)depth; (void)class_; (void)visual;
 
-    unsigned long bg = 0x00000000UL;
-    unsigned long bd = 0x00000000UL;
-    if (attrs && (valuemask & CWBackPixel))   bg = attrs->background_pixel;
+    EmxWindow *w = emx11_window_alloc(display);
+    if (!w) return None;
+
+    unsigned long bg_pixel = 0x00000000UL;
+    unsigned long bd       = 0x00000000UL;
+    int bg_type            = 0; /* default: None */
+    if (attrs && (valuemask & CWBackPixel)) {
+        bg_pixel = attrs->background_pixel;
+        bg_type  = 1;
+    }
     if (attrs && (valuemask & CWBorderPixel)) bd = attrs->border_pixel;
 
-    Window w = XCreateSimpleWindow(display, parent, x, y, width, height,
-                                   border_width, bd, bg);
-    if (w == None || !attrs) return w;
+    w->id               = emx11_next_xid(display);
+    w->parent           = parent;
+    w->x                = x;
+    w->y                = y;
+    w->width            = width;
+    w->height           = height;
+    w->border_width     = border_width;
+    w->border_pixel     = bd;
+    w->background_pixel = bg_pixel;
+    w->mapped           = false;
 
-    /* Apply any remaining attribute bits via the common setter. */
-    XChangeWindowAttributes(display, w, valuemask, attrs);
-    return w;
+    emx11_js_window_create(display->conn_id, w->id, parent,
+                           x, y, width, height,
+                           border_width, bd,
+                           bg_type, bg_pixel);
+
+    /* Apply remaining bits (CWBackPixmap, CWEventMask, ...) via the
+     * common setter. CWBackPixel/CWBorderPixel were already shipped to
+     * Host above so XChangeWindowAttributes' redundant push is fine. */
+    if (attrs) XChangeWindowAttributes(display, w->id, valuemask, attrs);
+    return w->id;
 }
 
 int XMapWindow(Display *display, Window w) {
@@ -345,7 +384,7 @@ int XChangeWindowAttributes(Display *display, Window w,
     if (!win || !attrs) return 0;
     if (valuemask & CWBackPixel) {
         win->background_pixel = attrs->background_pixel;
-        emx11_js_window_set_bg(w, win->background_pixel);
+        emx11_js_window_set_bg(w, 1, win->background_pixel);
     }
     if (valuemask & CWBorderPixel) {
         win->border_pixel = attrs->border_pixel;
@@ -360,13 +399,23 @@ int XChangeWindowAttributes(Display *display, Window w,
         emx11_js_set_override_redirect(w, attrs->override_redirect ? 1 : 0);
     }
     if (valuemask & CWBackPixmap) {
-        /* X semantics: ParentRelative and None are legal values here,
-         * distinct from "a real Pixmap id". We honour only the real-id
-         * case; the two sentinels collapse to "no tile, use pixel". */
+        /* X semantics (xserver/dix/window.c:1186-1216):
+         *   None           -> backgroundState = None (no auto-paint)
+         *   ParentRelative -> use parent's tile (we map to None for now;
+         *                     proper impl needs parent lookup at paint
+         *                     time)
+         *   real Pixmap    -> backgroundState = BackgroundPixmap
+         * We must NOT collapse None to "use the pixel" -- doing so
+         * caused xeyes' shell (default bg = None) to paint solid black
+         * over the application's drawing on every Expose/raise. */
         Pixmap pm = attrs->background_pixmap;
-        if (pm == ParentRelative || pm == None) pm = 0;
-        win->background_pixmap = pm;
-        emx11_js_window_set_bg_pixmap(w, pm);
+        if (pm == None || pm == ParentRelative) {
+            win->background_pixmap = 0;
+            emx11_js_window_set_bg(w, 0, 0); /* state = None */
+        } else {
+            win->background_pixmap = pm;
+            emx11_js_window_set_bg_pixmap(w, pm);
+        }
     }
     /* Ignored: CWBorderPixmap, CWCursor, ... */
     return 1;
@@ -388,7 +437,7 @@ int XSetWindowBackground(Display *display, Window w, unsigned long background) {
      * compositor keeps the old colour -- the next clearArea fills
      * with the OLD bg while Label redraws text using the NEW fg
      * (which equals the old bg), rendering invisible text. */
-    emx11_js_window_set_bg(w, background);
+    emx11_js_window_set_bg(w, 1, background);
     return 1;
 }
 

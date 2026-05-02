@@ -31,7 +31,7 @@ export class WindowManager {
   installSharedRoot(): void {
     const w = this.host.canvas.cssWidth;
     const h = this.host.canvas.cssHeight;
-    this.host.renderer.addWindow(HOST_ROOT_ID, 0, 0, 0, w, h, 0, 0, 0xFFFFFF);
+    this.host.renderer.addWindow(HOST_ROOT_ID, 0, 0, 0, w, h, 0, 0, 'pixel', 0xFFFFFF);
     this.host.renderer.mapWindow(HOST_ROOT_ID);
     this.host.connection.bindWindowToConn(HOST_ROOT_ID, 0); // conn_id=0 = Host
 
@@ -88,11 +88,22 @@ export class WindowManager {
     height: number,
     borderWidth: number,
     borderPixel: number,
-    background: number,
+    bgType: number,
+    bgValue: number,
   ): void {
     this.host.connection.recordOwnership(connId, id);
+    /* Bridge ints → renderer enum. ParentRelative (3) collapses to
+     * 'none' for now -- proper impl needs parent-tile lookup at paint
+     * time. xserver/dix/window.c:1212 stores ParentRelative as a
+     * distinct state. */
+    const type =
+      bgType === 1 ? 'pixel'
+      : bgType === 2 ? 'pixmap'
+      : 'none';
     this.host.renderer.addWindow(
-      id, parent, x, y, width, height, borderWidth, borderPixel, background,
+      id, parent, x, y, width, height, borderWidth, borderPixel,
+      type,
+      bgValue,
     );
   }
 
@@ -100,8 +111,12 @@ export class WindowManager {
     this.host.renderer.setWindowBorder(id, borderWidth, borderPixel);
   }
 
-  onSetBg(id: number, background: number): void {
-    this.host.renderer.setWindowBackground(id, background);
+  onSetBg(id: number, bgType: number, bgValue: number): void {
+    const type =
+      bgType === 1 ? 'pixel'
+      : bgType === 2 ? 'pixmap'
+      : 'none';
+    this.host.renderer.setWindowBackground(id, type, bgValue);
   }
 
   onSetBgPixmap(id: number, pmId: number): void {
