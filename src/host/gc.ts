@@ -175,7 +175,12 @@ export class GcManager {
   }
 
   onWindowShape(id: number, rects: ShapeRect[]): void {
-    this.host.renderer.setWindowShape(id, rects);
+    /* Shape change rebuilds clipLists for the shaped window AND every
+     * lower-z sibling whose visibility through the shape just changed
+     * (the see-through-xeyes case). Region-driven Expose so each
+     * affected window gets one Expose per rect. */
+    const exposed = this.host.renderer.setWindowShape(id, rects);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   /* -- Pixmap lifecycle --------------------------------------------------- */
@@ -240,7 +245,8 @@ export class GcManager {
       }
     }
 
-    this.host.renderer.setWindowShape(destId, rects);
+    const exposed = this.host.renderer.setWindowShape(destId, rects);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   /* -- Drawable-to-drawable copy ---------------------------------------- */

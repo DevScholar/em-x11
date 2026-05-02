@@ -29,6 +29,7 @@
 import { RootCanvas } from '../runtime/canvas.js';
 import type { RootCanvasOptions } from '../runtime/canvas.js';
 import { Renderer } from './render/index.js';
+import { installDumpHelper } from './render/hit-test.js';
 import { absOrigin } from './render/window-tree.js';
 import { AtomManager } from './atom.js';
 import { PropertyManager } from './property.js';
@@ -82,6 +83,11 @@ export class Host implements EmX11Host {
     this.atom = new AtomManager();
     this.gc = new GcManager(this);
     this.renderer = new Renderer(this.canvas, (id) => this.gc.pixmapCanvas(id));
+    /* DevTools entry points: __EMX11_TRACE_HIT__/__EMX11_TRACE_HIT_NEXT__
+     * gate hit-test logging; __EMX11_DUMP_WINDOWS__() prints every mapped
+     * window's bbox/shape/clip state. Wired right after Renderer
+     * construction so the helper can close over `this.renderer`. */
+    installDumpHelper(this.renderer);
     this.property = new PropertyManager(this);
     this.events = new EventDispatcher(this);
     this.connection = new ConnectionManager(this);

@@ -115,34 +115,72 @@ function computeClipsRecursive(
 ): void {
   /* xorg miComputeClips:
    *   pWin->borderClip = universe
-   *   universe ∩= winSize          (winSize = content rect)
+   *   universe ∩= winSize          (winSize = content rect, shaped)
    *   for each viewable child top-to-bottom:
-   *     childUniverse = universe ∩ child->borderSize
+   *     childUniverse = universe ∩ child->borderSize  (shaped)
    *     recurse(child, childUniverse)
-   *     universe -= child->borderSize
+   *     universe -= child->borderSize                  (shaped)
    *   pWin->clipList = universe
-   */
+   *
+   * SHAPE integration: when a window has a bounding shape (XShape
+   * SHAPE_BOUNDING), `borderSize` is the bounding rect intersected
+   * with the shape, and `winSize` is the content rect intersected
+   * with the shape. Both are used to occlude lower siblings -- so
+   * xcalc sitting under a shaped xeyes shell now sees only the
+   * SHAPE silhouette as the occluder, not the full bounding rect.
+   * That's how the see-through area between the eyes lets lower-z
+   * pixels (and incoming Expose) propagate to xcalc, mirroring
+   * xserver/Xext/shape.c. */
   win.borderClip = universe;
 
-  const contentRect: Rect = {
-    ax: absOriginAx(r, win),
-    ay: absOriginAy(r, win),
-    w: win.width,
-    h: win.height,
-  };
-  let innerUniverse = regionIntersect(universe, [contentRect]);
+  let innerUniverse = regionIntersect(universe, winSize(r, win));
 
   /* Top-to-bottom traversal: descending stackOrder so each iteration
    * sees only what wasn't covered by higher-z siblings. */
   const children = sortedMappedChildrenDescending(r, win.id);
   for (const child of children) {
-    const childBounding = absBoundingRectOf(r, child);
-    const childUniverse = regionIntersect(innerUniverse, [childBounding]);
+    const childBSize = borderSize(r, child);
+    const childUniverse = regionIntersect(innerUniverse, childBSize);
     computeClipsRecursive(r, child, childUniverse);
-    innerUniverse = regionSubtract(innerUniverse, [childBounding]);
+    innerUniverse = regionSubtract(innerUniverse, childBSize);
   }
 
   win.clipList = innerUniverse;
+}
+
+/** Window's `borderSize` (xorg term): bounding rect, possibly clipped
+ *  by the bounding shape. Used for parent universe intersection +
+ *  sibling occlusion subtraction. */
+function borderSize(r: RendererState, win: ManagedWindow): Region {
+  const bbox = absBoundingRectOf(r, win);
+  if (!win.shape) return [bbox];
+  const { ax, ay } = absOrigin(r, win);
+  /* Shape rects are window-local (relative to content origin). Convert
+   * to absolute and intersect with the bounding rect so a shape
+   * covering the border ring still respects bw. */
+  const shapeAbs: Region = win.shape.map((s) => ({
+    ax: ax + s.x,
+    ay: ay + s.y,
+    w: s.w,
+    h: s.h,
+  }));
+  return regionIntersect(shapeAbs, [bbox]);
+}
+
+/** Window's `winSize` (xorg term): content rect, possibly clipped by
+ *  the bounding shape. Used for the window's own clipList -- limits
+ *  where the window paints. */
+function winSize(r: RendererState, win: ManagedWindow): Region {
+  const { ax, ay } = absOrigin(r, win);
+  const cr: Rect = { ax, ay, w: win.width, h: win.height };
+  if (!win.shape) return [cr];
+  const shapeAbs: Region = win.shape.map((s) => ({
+    ax: ax + s.x,
+    ay: ay + s.y,
+    w: s.w,
+    h: s.h,
+  }));
+  return regionIntersect(shapeAbs, [cr]);
 }
 
 function sortedMappedChildrenDescending(
@@ -157,19 +195,13 @@ function sortedMappedChildrenDescending(
   return out;
 }
 
-/* Internal helpers that avoid the option-type wrapper of the public
+/* Internal helper that avoids the option-type wrapper of the public
  * `absBoundingRect` -- recompute path always has a valid window so
  * the null branch would just be dead weight. */
 function absBoundingRectOf(r: RendererState, win: ManagedWindow): Rect {
   const { ax, ay } = absOrigin(r, win);
   const bw = win.borderWidth;
   return { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
-}
-function absOriginAx(r: RendererState, win: ManagedWindow): number {
-  return absOrigin(r, win).ax;
-}
-function absOriginAy(r: RendererState, win: ManagedWindow): number {
-  return absOrigin(r, win).ay;
 }
 
 /** Border-only update. Width or pixel can change independently of
@@ -471,18 +503,23 @@ export function absOrigin(r: RendererState, win: ManagedWindow): { ax: number; a
   return { ax, ay };
 }
 
-export function setWindowShape(r: RendererState, id: number, rects: ShapeRect[]): void {
+export function setWindowShape(r: RendererState, id: number, rects: ShapeRect[]): Map<number, Region> {
   const w = r.windows.get(id);
-  if (!w) return;
+  if (!w) return new Map();
+  if (!w.mapped) {
+    w.shape = rects.length > 0 ? rects : null;
+    return new Map();
+  }
+  /* Shape integrated into borderSize/winSize: the diff pipeline now
+   * captures who newly sees through (lower-z siblings exposed in the
+   * shape "holes") and who newly hides behind shape edges. xorg
+   * Xext/shape.c calls `(*pScreen->ResizeWindow)` after SetShape,
+   * which runs the full Mark/Validate/HandleExposures dance --
+   * snapshotClips / paintExposedRegions is our equivalent. */
+  const oldClips = snapshotClips(r);
   w.shape = rects.length > 0 ? rects : null;
-  /* clipList is computed from bounding rect, not shape, so shape-only
-   * changes don't strictly need a recompute -- but call it anyway so
-   * a future shape-aware implementation drops in cleanly. */
   recomputeClipsAll(r);
-  /* Shape change while mapped means the visible region just changed;
-   * repaint so newly-uncovered parts pick up bg and newly-covered
-   * parts get clipped on next paint. */
-  if (w.mapped) paintWindowSubtree(r, w);
+  return paintExposedRegions(r, oldClips);
 }
 
 /** X11 "viewable" semantics: a window produces pixels only if it and
