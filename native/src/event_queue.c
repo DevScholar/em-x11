@@ -136,10 +136,10 @@ int XEventsQueued(Display *display, int mode) {
 }
 
 int XNextEvent(Display *display, XEvent *event_return) {
-    /* XNextEvent blocks in real X. emscripten_sleep yields to the browser
-     * event loop; Asyncify must be enabled at link time for this to work. */
-    while (emx11_event_queue_size(display) == 0) {
-        emscripten_sleep(1);
-    }
+    /* DIAGNOSTIC: was a busy-wait emscripten_sleep loop. The browser
+     * pump pushes events from JS, so blocking inside wasm is wrong --
+     * it spins consuming CPU instead of yielding. Return 0 if no event
+     * is available; callers should check XPending first. */
+    if (emx11_event_queue_size(display) == 0) return 0;
     return emx11_event_queue_pop(display, event_return) ? 1 : 0;
 }

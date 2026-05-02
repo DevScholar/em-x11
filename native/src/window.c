@@ -50,7 +50,10 @@ static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
     XEvent ev = {0};
     if (mapped) {
         ev.type = MapNotify;
-        ev.xmap.serial     = 0;
+        /* See push_configure_notify: serial must equal Tk's captured
+         * NextRequest() value. The XMap/XUnmapWindow callers bump
+         * dpy->request before this fires, so dpy->request matches. */
+        ev.xmap.serial     = dpy->request;
         ev.xmap.send_event = False;
         ev.xmap.display    = dpy;
         ev.xmap.event      = win->id;
@@ -58,7 +61,7 @@ static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
         ev.xmap.override_redirect = win->override_redirect ? True : False;
     } else {
         ev.type = UnmapNotify;
-        ev.xunmap.serial     = 0;
+        ev.xunmap.serial     = dpy->request;
         ev.xunmap.send_event = False;
         ev.xunmap.display    = dpy;
         ev.xunmap.event      = win->id;
@@ -71,7 +74,15 @@ static void push_map_notify(Display *dpy, EmxWindow *win, bool mapped) {
 static void push_configure_notify(Display *dpy, EmxWindow *win) {
     XEvent ev = {0};
     ev.type = ConfigureNotify;
-    ev.xconfigure.serial     = 0;
+    /* Tk's WaitForConfigureNotify (tkUnixWm.c:5204) computes
+     *   diff = event.xconfigure.serial - serial
+     * and only accepts the event when diff >= 0. The `serial` Tk
+     * captures via NextRequest() before sending XResize/Configure
+     * equals the post-send dpy->request value. Using `dpy->request`
+     * here matches that exactly; serial=0 (the previous default)
+     * left Tk waiting 2s per top-level resize because every
+     * comparison underflowed. */
+    ev.xconfigure.serial     = dpy->request;
     ev.xconfigure.send_event = False;
     ev.xconfigure.display    = dpy;
     ev.xconfigure.event      = win->id;
@@ -178,6 +189,7 @@ int XMapWindow(Display *display, Window w) {
         bool was_mapped = win->mapped;
         win->mapped = true;
         if (!was_mapped) {
+            display->request++;  /* match Tk's NextRequest() — see notify_js_reconfigure */
             push_map_notify(display, win, true);
         }
 
@@ -209,6 +221,7 @@ int XUnmapWindow(Display *display, Window w) {
         bool was_mapped = win->mapped;
         win->mapped = false;
         if (was_mapped) {
+            display->request++;
             push_map_notify(display, win, false);
         }
     }
@@ -236,6 +249,18 @@ int XDestroyWindow(Display *display, Window w) {
  *    emx11_js_window_create when a window is logically "re-set". */
 
 static void notify_js_reconfigure(Display *dpy, EmxWindow *win) {
+    /* Bump dpy->request to model the X protocol "request serial" Xlib
+     * tracks per outgoing request. Tk captures `serial = NextRequest()`
+     * (= dpy->request + 1) BEFORE calling XResizeWindow / XConfigure-
+     * Window, then waits for a ConfigureNotify whose serial >= captured.
+     * Without this bump, dpy->request stays at 0 and push_configure_notify
+     * pushes serial=0; Tk's diff = 0 - serial < 0 and the wait loops on
+     * tkUnixWm.c's hard-coded 2-second deadline (see project_emx11_
+     * configure_serial in memory). Incrementing here makes dpy->request
+     * equal to the value Tk captured, so the synthetic ConfigureNotify
+     * satisfies the wait on the first poll.
+     */
+    dpy->request++;
     /* Geometry-only path: window already exists on Host; just update
      * its (x, y, w, h). We deliberately avoid re-calling window_create
      * here -- doing so stomped on parent / shape / background_pixmap.

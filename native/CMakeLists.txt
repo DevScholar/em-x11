@@ -36,7 +36,10 @@ set(EMX11_SOURCES
     src/keysym_table.c
     src/bridges.c
     src/notifier.c
+    src/fontconfig.c
+    src/xft.c
     src/ext/shape.c
+    src/ext/xrender.c
 )
 
 # Regenerate keysym_table.c from keysymdef.h whenever the header changes.
