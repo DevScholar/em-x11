@@ -11,6 +11,95 @@ import { absOrigin } from './window-tree.js';
 import { MAX_PARENT_WALK } from '../constants.js';
 import { pixelToCssColor, type RootCanvasContext } from '../../runtime/canvas.js';
 
+/** Children of `parentId` sorted bottom-to-top by stackOrder. */
+function sortedChildren(r: RendererState, parentId: number): ManagedWindow[] {
+  const out: ManagedWindow[] = [];
+  for (const w of r.windows.values()) {
+    if (w.parent === parentId) out.push(w);
+  }
+  out.sort((a, b) => a.stackOrder - b.stackOrder);
+  return out;
+}
+
+/** Push the absolute bounding rect (content + border) of `w` if mapped.
+ *  We deliberately do NOT recurse into descendants: applyWindowClip
+ *  intersects every child paint with its parent's bounding rect, so
+ *  the parent's rect already covers every visible descendant. Adding
+ *  nested descendant rects breaks the evenodd subtraction below --
+ *  three overlapping rects (canvas + frame + nested child) = odd parity
+ *  = "inside", which leaves a hole in the occluder and the underlying
+ *  root weave bleeds through windows that should be solid. */
+function pushOccluderRect(
+  r: RendererState,
+  w: ManagedWindow,
+  out: Array<{ ax: number; ay: number; w: number; h: number }>,
+): void {
+  if (!w.mapped) return;
+  const { ax, ay } = absOrigin(r, w);
+  const bw = w.borderWidth;
+  out.push({
+    ax: ax - bw,
+    ay: ay - bw,
+    w: w.width + 2 * bw,
+    h: w.height + 2 * bw,
+  });
+}
+
+/** Compute occluder rects for `win`: every window that paints AFTER `win`
+ *  in the global stacking order, walking up `win`'s parent chain.
+ *
+ *  At each level, siblings of the path-window with higher `stackOrder`
+ *  render later (their subtrees paint over `win`); their entire mapped
+ *  subtree is added as an occluder. Used to subtract covered areas from
+ *  the canvas clip so that draws into `win` don't leak over windows
+ *  that are visually above it.
+ *
+ *  Real X computes the full visible region taking shapes into account;
+ *  we use bounding rects only. Conservative: over-subtracts when
+ *  occluders are shaped, which costs pixels (drawings clipped out of
+ *  shape-holes) but never paints into wrong areas. */
+function getOccluderRects(
+  r: RendererState,
+  win: ManagedWindow,
+): Array<{ ax: number; ay: number; w: number; h: number }> {
+  const out: Array<{ ax: number; ay: number; w: number; h: number }> = [];
+  let current: ManagedWindow | undefined = win;
+  for (let i = 0; current && current.parent !== 0 && i < MAX_PARENT_WALK; i++) {
+    const parentId = current.parent;
+    const myStackOrder = current.stackOrder;
+    const myId = current.id;
+    for (const sibling of r.windows.values()) {
+      if (sibling.parent !== parentId) continue;
+      if (sibling.id === myId) continue;
+      if (sibling.stackOrder <= myStackOrder) continue;
+      pushOccluderRect(r, sibling, out);
+    }
+    current = r.windows.get(parentId);
+  }
+  return out;
+}
+
+/** Subtract higher-z sibling rects from the current canvas clip using
+ *  evenodd fill rule. Caller must have already called ctx.save() and
+ *  installed the window's own/ancestor clip; this further intersects
+ *  with (full-canvas - union(occluders)). No-op when nothing occludes. */
+function applyOcclusionClip(
+  r: RendererState,
+  ctx: RootCanvasContext,
+  win: ManagedWindow,
+): void {
+  const occluders = getOccluderRects(r, win);
+  if (occluders.length === 0) return;
+  const cw = r.canvas.cssWidth;
+  const ch = r.canvas.cssHeight;
+  ctx.beginPath();
+  ctx.rect(0, 0, cw, ch);
+  for (const o of occluders) {
+    ctx.rect(o.ax, o.ay, o.w, o.h);
+  }
+  ctx.clip('evenodd');
+}
+
 /** Push a clip region matching the window's visible area onto `ctx`.
  *  Caller must have done ctx.save() and must ctx.restore() after.
  *
@@ -52,6 +141,7 @@ export function applyWindowClip(
     }
     ctx.clip();
   }
+  applyOcclusionClip(r, ctx, win);
 }
 
 /** Like applyWindowClip but skips the window's own bounding rect.
@@ -84,14 +174,13 @@ export function applyAncestorClip(
     }
     ctx.clip();
   }
+  applyOcclusionClip(r, ctx, win);
 }
 
 /** Paint a window's background, then recurse into its mapped children
- *  in insertion order (closest we have to X stacking order). DFS in
+ *  in stacking order (ascending stackOrder = bottom to top). DFS in
  *  parent-before-child order matches X: a child must paint over its
- *  parent's background, never the other way around. After a reparent
- *  the Map's insertion order is no longer tree order, so flat
- *  iteration would put the wrong thing on top. */
+ *  parent's background, never the other way around. */
 export function paintWindowSubtree(r: RendererState, w: ManagedWindow): void {
   if (w.mapped) {
     const ctx = r.canvas.ctx;
@@ -105,9 +194,7 @@ export function paintWindowSubtree(r: RendererState, w: ManagedWindow): void {
     paintBackgroundRect(r, ctx, w, 0, 0, w.width, w.height);
     ctx.restore();
   }
-  for (const child of r.windows.values()) {
-    if (child.parent === w.id) paintWindowSubtree(r, child);
-  }
+  for (const child of sortedChildren(r, w.id)) paintWindowSubtree(r, child);
 }
 
 /** Paint the X11 server-drawn border ring around a window. The ring
@@ -223,13 +310,9 @@ export function repaintAbsoluteRect(
       paintBackgroundRect(r, ctx, win, 0, 0, win.width, win.height);
       ctx.restore();
     }
-    for (const child of r.windows.values()) {
-      if (child.parent === win.id) visit(child);
-    }
+    for (const child of sortedChildren(r, win.id)) visit(child);
   };
-  for (const win of r.windows.values()) {
-    if (win.parent === 0) visit(win);
-  }
+  for (const win of sortedChildren(r, 0)) visit(win);
   ctx.restore();
 }
 

@@ -327,6 +327,7 @@ extern void emx11_js_window_configure(Window id, int x, int y,
 extern void emx11_js_window_map(int conn_id, Window id);
 extern void emx11_js_window_unmap(int conn_id, Window id);
 extern void emx11_js_window_destroy(Window id);
+extern void emx11_js_window_raise(Window id);
 /* Per-window event-mask subscription. XSelectInput mirrors its new
  * value to the Host so SubstructureRedirect / SubstructureNotify holders
  * can be located without scanning every client's C-side window table. */

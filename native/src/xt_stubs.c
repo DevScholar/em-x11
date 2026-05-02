@@ -545,8 +545,9 @@ int XUngrabPointer (Display *dpy, Time t) { (void)dpy; (void)t; return 1; }
 /* -- Window manager convenience calls -------------------------------- */
 
 int XMapRaised(Display *dpy, Window w) {
-    /* No z-order yet; just map. */
-    return XMapWindow(dpy, w);
+    XMapWindow(dpy, w);
+    emx11_js_window_raise(w);
+    return 1;
 }
 
 int XMapSubwindows(Display *dpy, Window w) {

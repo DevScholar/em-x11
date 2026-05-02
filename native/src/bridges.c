@@ -474,6 +474,10 @@ EM_JS(void, emx11_js_window_destroy, (unsigned int id), {
     globalThis.__EMX11__ && globalThis.__EMX11__.onWindowDestroy(id);
 });
 
+EM_JS(void, emx11_js_window_raise, (unsigned int id), {
+    globalThis.__EMX11__ && globalThis.__EMX11__.onWindowRaise(id);
+});
+
 EM_JS(void, emx11_js_select_input, (int connId, unsigned int id, unsigned int mask), {
     globalThis.__EMX11__ &&
         globalThis.__EMX11__.onSelectInput(connId, id, mask >>> 0);

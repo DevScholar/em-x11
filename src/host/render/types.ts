@@ -17,6 +17,10 @@ export interface ManagedWindow {
   y: number;
   width: number;
   height: number;
+  /** Monotonically increasing raise counter. Siblings are painted
+   *  bottom-to-top by ascending stackOrder so that higher values
+   *  appear on top, matching XRaiseWindow semantics. */
+  stackOrder: number;
   /** X11 server-drawn border. Lives OUTSIDE (x,y,width,height): the
    *  border ring occupies [x-bw, y-bw, w+2bw, h+2bw] in parent coords.
    *  Children's local (x,y) are still relative to the content rect's
@@ -48,4 +52,5 @@ export interface RendererState {
   readonly canvas: RootCanvas;
   readonly windows: Map<number, ManagedWindow>;
   readonly pixmapLookup: PixmapLookup;
+  stackCounter: number;
 }

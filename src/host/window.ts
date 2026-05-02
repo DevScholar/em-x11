@@ -237,6 +237,20 @@ export class WindowManager {
     else this.overrideRedirect.delete(id);
   }
 
+  onRaise(id: number): void {
+    this.host.renderer.raiseWindow(id);
+    /* repaintAbsoluteRect wiped all descendant content (no backing store).
+     * Send Expose to the raised window and every mapped descendant so
+     * applications redraw their content on the freshly painted bg.
+     * Mirrors the Expose burst in onMap / onConfigure. */
+    if (this.host.renderer.isViewable(id)) {
+      this.host.events.pushExposeForWindow(id, null);
+      for (const descendant of this.host.renderer.mappedDescendants(id)) {
+        this.host.events.pushExposeForWindow(descendant, null);
+      }
+    }
+  }
+
   onReparent(id: number, parent: number, x: number, y: number): void {
     this.host.renderer.reparentWindow(id, parent, x, y);
     /* Notify the window's *owner* connection that its shadow is now stale.

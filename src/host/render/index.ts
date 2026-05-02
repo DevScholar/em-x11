@@ -46,6 +46,7 @@ export class Renderer implements RendererState {
   readonly canvas: RootCanvas;
   readonly pixmapLookup: PixmapLookup;
   readonly windows = new Map<number, ManagedWindow>();
+  stackCounter = 0;
 
   constructor(canvas: RootCanvas, pixmapLookup: PixmapLookup = () => null) {
     this.canvas = canvas;
@@ -80,6 +81,7 @@ export class Renderer implements RendererState {
   unmapWindow(id: number): void { tree.unmapWindow(this, id); }
   destroyWindow(id: number): void { tree.destroyWindow(this, id); }
   setWindowShape(id: number, rects: ShapeRect[]): void { tree.setWindowShape(this, id, rects); }
+  raiseWindow(id: number): void { tree.raiseWindow(this, id); }
 
   parentOf(id: number): number { return tree.parentOf(this, id); }
   mappedDescendants(id: number): number[] { return tree.mappedDescendants(this, id); }

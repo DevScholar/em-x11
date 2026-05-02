@@ -128,6 +128,8 @@ export interface EmX11Host {
   onWindowMap(connId: number, id: number): void;
   onWindowUnmap(connId: number, id: number): void;
   onWindowDestroy(id: number): void;
+  /** XRaiseWindow: move window to top of sibling stacking order. */
+  onWindowRaise(id: number): void;
   /** XSelectInput mirror. Host stores the mask per (window, caller)
    *  and enforces at-most-one SubstructureRedirectMask per window
    *  (x11protocol.txt §1477). */

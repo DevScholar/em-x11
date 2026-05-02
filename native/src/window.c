@@ -328,8 +328,8 @@ int XConfigureWindow(Display *display, Window w,
 }
 
 int XRaiseWindow(Display *display, Window w) {
-    (void)display; (void)w;
-    /* Z-order: no-op. v1's compositor paints in insertion order. */
+    (void)display;
+    emx11_js_window_raise(w);
     return 1;
 }
 

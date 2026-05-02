@@ -33,6 +33,7 @@ export function addWindow(
     y,
     width,
     height,
+    stackOrder: r.stackCounter++,
     borderWidth,
     borderPixel,
     background,
@@ -221,6 +222,23 @@ export function reparentWindow(
  *  parent XID or 0 when the window is unknown / parentless. */
 export function parentOf(r: RendererState, id: number): number {
   return r.windows.get(id)?.parent ?? 0;
+}
+
+/** XRaiseWindow: give the window the highest stackOrder among siblings
+ *  so it paints on top. Repaints the affected rect so the new order
+ *  is reflected immediately. */
+export function raiseWindow(r: RendererState, id: number): void {
+  const w = r.windows.get(id);
+  if (!w) return;
+  w.stackOrder = r.stackCounter++;
+  if (w.mapped && isViewable(r, id)) {
+    const { ax, ay } = absOrigin(r, w);
+    const bw = w.borderWidth;
+    /* repaintAbsoluteRect already paints all windows in the area in
+     * the new stackOrder, including this window on top. paintWindowSubtree
+     * would be redundant here and re-wiping descendant content. */
+    repaintAbsoluteRect(r, ax - bw, ay - bw, w.width + 2 * bw, w.height + 2 * bw);
+  }
 }
 
 /** Enumerate the mapped descendants of `id` in parent-before-child DFS

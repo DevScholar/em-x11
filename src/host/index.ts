@@ -172,6 +172,7 @@ export class Host implements EmX11Host {
   onWindowMap(connId: number, id: number): void { this.window.onMap(connId, id); }
   onWindowUnmap(connId: number, id: number): void { this.window.onUnmap(connId, id); }
   onWindowDestroy(id: number): void { this.window.onDestroy(id); }
+  onWindowRaise(id: number): void { this.window.onRaise(id); }
   onSelectInput(connId: number, id: number, mask: number): void {
     this.events.onSelectInput(connId, id, mask);
   }
