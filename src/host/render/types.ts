@@ -8,6 +8,7 @@
 
 import type { RootCanvas } from '../../runtime/canvas.js';
 import type { ShapeRect } from '../../types/emscripten.js';
+import type { Region } from './region.js';
 
 export interface ManagedWindow {
   id: number;
@@ -46,6 +47,17 @@ export interface ManagedWindow {
   /** SHAPE bounding rectangles (window-local coords). `null` means
    *  unshaped -- the window is a plain rectangle of (width, height). */
   shape: ShapeRect[] | null;
+  /** Visible content area in absolute canvas coords, mirroring
+   *  xserver `pWin->clipList` (xserver/include/windowstr.h). Empty
+   *  when the window is unmapped, has an unmapped ancestor, or is
+   *  fully obscured. Recomputed on every structural change by
+   *  `recomputeClipsAll` -- it is the source of truth that bg paint
+   *  and Expose synthesis read from in step 3. */
+  clipList: Region;
+  /** Visible content + border ring in absolute canvas coords,
+   *  mirroring xserver `pWin->borderClip`. Always a superset of
+   *  `clipList`; the border ring is `borderClip - clipList`. */
+  borderClip: Region;
 }
 
 /** Callback the Host supplies so the renderer can reach into the

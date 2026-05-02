@@ -8,8 +8,113 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import { absOrigin } from './window-tree.js';
-import { MAX_PARENT_WALK } from '../constants.js';
 import { pixelToCssColor, type RootCanvasContext } from '../../runtime/canvas.js';
+import {
+  EMPTY_REGION,
+  isEmpty as regionIsEmpty,
+  subtract as regionSubtract,
+  type Region,
+} from './region.js';
+
+export interface ClipSnapshot {
+  readonly clip: Region;
+  readonly border: Region;
+}
+
+/** Capture every window's current `clipList` and `borderClip`. Pair with
+ *  a later `paintExposedRegions(r, snapshot)` to repaint only the area
+ *  that changed visibility, mirroring xserver's
+ *  `valdata->after.exposed = newClipList - oldClipList` machinery
+ *  (mi/mivaltree.c:724). Cheaper than the full Mark/Validate pipeline
+ *  and good enough for our scale. */
+export function snapshotClips(r: RendererState): Map<number, ClipSnapshot> {
+  const out = new Map<number, ClipSnapshot>();
+  for (const w of r.windows.values()) {
+    out.set(w.id, { clip: w.clipList, border: w.borderClip });
+  }
+  return out;
+}
+
+/** For every window still in the tree: paint background where its
+ *  `clipList` newly grew, and paint the border ring where its
+ *  `borderClip` newly grew. Returns a Map of `windowId -> Region`
+ *  containing each window's newly-exposed content area (in absolute
+ *  canvas coords). The caller (WindowManager) feeds this into
+ *  `pushExposesForRegion` so clients see one Expose per rect, mirroring
+ *  xserver's `miSendExposures` (mi/miexpose.c:419) -- whose input is
+ *  exactly the per-window `valdata->after.exposed` set built by
+ *  `mi/mivaltree.c::miComputeClips`. */
+export function paintExposedRegions(
+  r: RendererState,
+  oldClips: Map<number, ClipSnapshot>,
+): Map<number, Region> {
+  const ctx = r.canvas.ctx;
+  const exposedByWindow = new Map<number, Region>();
+  /* Iterate windows in painting order (ascending stackOrder, parent
+   * before child). DFS so a parent's bg lands before any child's
+   * paint that might cover the same pixels in `exposed`. */
+  for (const root of sortedChildren(r, 0)) walk(root);
+  return exposedByWindow;
+
+  function walk(w: ManagedWindow): void {
+    const old = oldClips.get(w.id) ?? { clip: EMPTY_REGION, border: EMPTY_REGION };
+    const contentExposed = regionSubtract(w.clipList, old.clip);
+    if (!regionIsEmpty(contentExposed)) {
+      paintBgInRegion(r, ctx, w, contentExposed);
+      exposedByWindow.set(w.id, contentExposed);
+    }
+    /* Border ring: newly-exposed part of (borderClip - contentRect).
+     * Compute via (newBorder - oldBorder) - newContent, matching
+     * miComputeClips:373's `borderExposed = exposed - winSize`. */
+    if (w.borderWidth > 0) {
+      const borderDiff = regionSubtract(w.borderClip, old.border);
+      if (borderDiff.length > 0) {
+        const { ax, ay } = absOrigin(r, w);
+        const contentRect = { ax, ay, w: w.width, h: w.height };
+        const ringExposed = regionSubtract(borderDiff, [contentRect]);
+        if (!regionIsEmpty(ringExposed)) paintBorderInRegion(r, ctx, w, ringExposed);
+      }
+    }
+    for (const child of sortedChildren(r, w.id)) walk(child);
+  }
+}
+
+function paintBgInRegion(
+  r: RendererState,
+  ctx: RootCanvasContext,
+  w: ManagedWindow,
+  region: Region,
+): void {
+  if (w.bgType === 'none') return;
+  ctx.save();
+  ctx.beginPath();
+  for (const rc of region) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+  ctx.clip();
+  paintBackgroundRect(r, ctx, w, 0, 0, w.width, w.height);
+  ctx.restore();
+}
+
+function paintBorderInRegion(
+  r: RendererState,
+  ctx: RootCanvasContext,
+  w: ManagedWindow,
+  region: Region,
+): void {
+  ctx.save();
+  ctx.beginPath();
+  for (const rc of region) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+  ctx.clip();
+  ctx.fillStyle = pixelToCssColor(w.borderPixel);
+  const { ax, ay } = absOrigin(r, w);
+  const bw = w.borderWidth;
+  /* Same four-strip layout as paintWindowBorder; clip restricts to
+   * the exposed sub-region. */
+  ctx.fillRect(ax - bw, ay - bw, w.width + 2 * bw, bw);
+  ctx.fillRect(ax - bw, ay + w.height, w.width + 2 * bw, bw);
+  ctx.fillRect(ax - bw, ay, bw, w.height);
+  ctx.fillRect(ax + w.width, ay, bw, w.height);
+  ctx.restore();
+}
 
 /** Children of `parentId` sorted bottom-to-top by stackOrder. */
 function sortedChildren(r: RendererState, parentId: number): ManagedWindow[] {
@@ -21,178 +126,59 @@ function sortedChildren(r: RendererState, parentId: number): ManagedWindow[] {
   return out;
 }
 
-/** Push the absolute bounding rect (content + border) of `w` if mapped. */
-function pushOccluderRect(
-  r: RendererState,
-  w: ManagedWindow,
-  out: Array<{ ax: number; ay: number; w: number; h: number }>,
-): void {
-  if (!w.mapped) return;
-  const { ax, ay } = absOrigin(r, w);
-  const bw = w.borderWidth;
-  out.push({
-    ax: ax - bw,
-    ay: ay - bw,
-    w: w.width + 2 * bw,
-    h: w.height + 2 * bw,
-  });
-}
-
-/** Collect rect of `root` and every mapped descendant. Border included
- *  so the ring counts. Recursion is needed because a child can sit at
- *  a coordinate that, while inside its parent's *paint clip*, is not
- *  fully inside the parent's bounding rect once you account for shape
- *  and our coarse rect-only model: missing the descendant lets paints
- *  underneath leak into spots the descendant covers. */
-function collectMappedSubtreeRects(
-  r: RendererState,
-  root: ManagedWindow,
-  out: Array<{ ax: number; ay: number; w: number; h: number }>,
-): void {
-  pushOccluderRect(r, root, out);
-  if (!root.mapped) return;
-  for (const child of r.windows.values()) {
-    if (child.parent === root.id) collectMappedSubtreeRects(r, child, out);
-  }
-}
-
-/** Compute occluder rects for `win`: every window that paints AFTER `win`
- *  in the global stacking order, walking up `win`'s parent chain.
+/** Push the window's effective drawing clip onto `ctx`. Mirrors xorg's
+ *  GC composite clip: every drawing primitive clips to `pWin->clipList`
+ *  (xserver/dix/window.c::ChangeWindowAttributes via miComputeClips),
+ *  intersected with the GC's `clientClip` when set. We don't model
+ *  per-GC clientClip so this is just `clipList`.
  *
- *  At each level, siblings of the path-window with higher `stackOrder`
- *  render later (their subtrees paint over `win`); their entire mapped
- *  subtree is added as an occluder. Used to subtract covered areas from
- *  the canvas clip so that draws into `win` don't leak over windows
- *  that are visually above it.
- *
- *  Real X computes the full visible region taking shapes into account;
- *  we use bounding rects only. Conservative: over-subtracts when
- *  occluders are shaped, which costs pixels (drawings clipped out of
- *  shape-holes) but never paints into wrong areas. */
-function getOccluderRects(
-  r: RendererState,
-  win: ManagedWindow,
-): Array<{ ax: number; ay: number; w: number; h: number }> {
-  const out: Array<{ ax: number; ay: number; w: number; h: number }> = [];
-  let current: ManagedWindow | undefined = win;
-  for (let i = 0; current && current.parent !== 0 && i < MAX_PARENT_WALK; i++) {
-    const parentId = current.parent;
-    const myStackOrder = current.stackOrder;
-    const myId = current.id;
-    for (const sibling of r.windows.values()) {
-      if (sibling.parent !== parentId) continue;
-      if (sibling.id === myId) continue;
-      if (sibling.stackOrder <= myStackOrder) continue;
-      collectMappedSubtreeRects(r, sibling, out);
-    }
-    current = r.windows.get(parentId);
-  }
-  return out;
-}
-
-/** Subtract higher-z sibling rects from the current canvas clip. We
- *  apply ONE occluder per ctx.clip() call using evenodd on (canvas +
- *  occluder), instead of stuffing them all into a single path: with
- *  many overlapping/nested rects the evenodd parity flips back to
- *  "inside" wherever an odd number of rects overlap (a frame + its
- *  shell + a widget = 3 = inside), leaving holes in the occluder that
- *  let lower-z paints leak through. Per-occluder clipping is robust
- *  to nesting because each call only ever touches 2 rects. Caller
- *  must have already called ctx.save() and installed the window's
- *  own/ancestor clip; this further intersects with each (canvas -
- *  one_occluder). No-op when nothing occludes. */
-function applyOcclusionClip(
-  r: RendererState,
-  ctx: RootCanvasContext,
-  win: ManagedWindow,
-): void {
-  const occluders = getOccluderRects(r, win);
-  if (occluders.length === 0) return;
-  const cw = r.canvas.cssWidth;
-  const ch = r.canvas.cssHeight;
-  for (const o of occluders) {
-    ctx.beginPath();
-    ctx.rect(0, 0, cw, ch);
-    ctx.rect(o.ax, o.ay, o.w, o.h);
-    ctx.clip('evenodd');
-  }
-}
-
-/** Push a clip region matching the window's visible area onto `ctx`.
  *  Caller must have done ctx.save() and must ctx.restore() after.
  *
- *  Walks the parent chain: real X clips a child to every ancestor's
- *  bounding shape. Our renderer is flat (no native parent/child),
- *  so we enforce this explicitly. Without it, a shell window with
- *  SHAPE (xeyes) has its eye-cutout covered by the Eyes widget child's
- *  full-rectangle bg paint, because the child's own clip is just its
- *  rectangle.
+ *  Why this is the load-bearing fix: an unmapped window (or a "mapped
+ *  but not viewable" descendant of an unmapped ancestor) has an empty
+ *  clipList after recomputeClipsAll, so every draw op naturally
+ *  no-ops. Without this, clearArea/fillRect/etc. only check the
+ *  shallow `win.mapped` flag and let a hidden window keep painting
+ *  hover effects (twm icon-manager iconify symptom: invisible widget
+ *  still receives Motion → repaints itself onto the canvas).
  *
- *  Canvas 2D clip semantics: successive ctx.clip() calls intersect
- *  with the existing clip, so we emit one clip per chain level and
- *  they combine correctly. Uses absOrigin for each level so coords
- *  in reparented sub-trees stay consistent with the paint path. */
+ *  Shape: when set, intersect with shape rects too. xorg integrates
+ *  shape into clipList via miSetShape; we keep shape separate for now
+ *  and AND it in here. Either way the visible region shrinks; the
+ *  result is identical for drawing. */
 export function applyWindowClip(
   r: RendererState,
   ctx: RootCanvasContext,
   win: ManagedWindow,
 ): void {
-  const chain: ManagedWindow[] = [win];
-  let parentId = win.parent;
-  for (let i = 0; parentId !== 0 && i < MAX_PARENT_WALK; i++) {
-    const p = r.windows.get(parentId);
-    if (!p) break;
-    chain.push(p);
-    parentId = p.parent;
-  }
-
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const w = chain[i]!;
-    const { ax, ay } = absOrigin(r, w);
+  ctx.beginPath();
+  for (const rc of win.clipList) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+  ctx.clip();
+  if (win.shape) {
+    const { ax, ay } = absOrigin(r, win);
     ctx.beginPath();
-    if (w.shape) {
-      for (const r of w.shape) {
-        ctx.rect(ax + r.x, ay + r.y, r.w, r.h);
-      }
-    } else {
-      ctx.rect(ax, ay, w.width, w.height);
-    }
+    for (const sh of win.shape) ctx.rect(ax + sh.x, ay + sh.y, sh.w, sh.h);
     ctx.clip();
   }
-  applyOcclusionClip(r, ctx, win);
 }
 
-/** Like applyWindowClip but skips the window's own bounding rect.
- *  Used for painting the border ring, which lives outside the
- *  window's content rect but must still be clipped to every ancestor
- *  so it doesn't bleed past the parent's bounds. */
+/** Push the border-ring clip onto `ctx`. The ring region is
+ *  `borderClip - contentRect` -- the part of the bounding rect that
+ *  lies OUTSIDE the window's content area. Used by paintWindowBorder
+ *  so the ring honours every ancestor's clip and every higher-z
+ *  sibling's occlusion (both already baked into borderClip by
+ *  recomputeClipsAll, mirroring miComputeClips:373). */
 export function applyAncestorClip(
   r: RendererState,
   ctx: RootCanvasContext,
   win: ManagedWindow,
 ): void {
-  const chain: ManagedWindow[] = [];
-  let parentId = win.parent;
-  for (let i = 0; parentId !== 0 && i < MAX_PARENT_WALK; i++) {
-    const p = r.windows.get(parentId);
-    if (!p) break;
-    chain.push(p);
-    parentId = p.parent;
-  }
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const w = chain[i]!;
-    const { ax, ay } = absOrigin(r, w);
-    ctx.beginPath();
-    if (w.shape) {
-      for (const rect of w.shape) {
-        ctx.rect(ax + rect.x, ay + rect.y, rect.w, rect.h);
-      }
-    } else {
-      ctx.rect(ax, ay, w.width, w.height);
-    }
-    ctx.clip();
-  }
-  applyOcclusionClip(r, ctx, win);
+  const { ax, ay } = absOrigin(r, win);
+  const contentRect = { ax, ay, w: win.width, h: win.height };
+  const ring = regionSubtract(win.borderClip, [contentRect]);
+  ctx.beginPath();
+  for (const rc of ring) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+  ctx.clip();
 }
 
 /** Paint a window's background, then recurse into its mapped children

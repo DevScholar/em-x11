@@ -13,6 +13,7 @@
 
 import type { Host } from './index.js';
 import type { ModuleCcallSurface } from './connection.js';
+import type { Region } from './render/region.js';
 import { SubstructureRedirectMask } from './constants.js';
 
 export class EventDispatcher {
@@ -161,6 +162,67 @@ export class EventDispatcher {
       ['number', 'number', 'number', 'number', 'number'],
       [id, 0, 0, geom.width, geom.height],
     );
+  }
+
+  /** Region-driven Expose synthesis. Mirrors xserver mi/miexpose.c
+   *  miSendExposures (around line 419): take the per-window exposed
+   *  region computed during ValidateTree and convert each rect into an
+   *  Expose event in the window's local coord system. When the region
+   *  has more than RECTLIMIT (25) rects, send one extents-Expose
+   *  instead -- prevents an event flood for pathological diffs.
+   *
+   *  Input region is in absolute canvas coords; we translate to local
+   *  using the window's absolute origin. Skips Host-owned windows
+   *  (root) and unbound owners (queued via deferExpose). */
+  pushExposesForRegions(
+    exposedByWindow: Map<number, Region>,
+    forceModule: ModuleCcallSurface | null = null,
+  ): void {
+    if (exposedByWindow.size === 0) return;
+    for (const [id, region] of exposedByWindow) {
+      if (region.length === 0) continue;
+      const origin = this.host.getWindowAbsOrigin(id);
+      if (!origin) continue;
+      let module: ModuleCcallSurface | null = forceModule;
+      if (!module) {
+        const ownerConnId = this.host.connection.connOf(id);
+        if (ownerConnId === undefined) continue;
+        if (ownerConnId === 0) continue; /* root: no client */
+        const conn = this.host.connection.get(ownerConnId);
+        if (!conn) continue;
+        if (!conn.module) {
+          this.host.connection.deferExpose(ownerConnId, id);
+          continue;
+        }
+        module = conn.module;
+      }
+      /* xorg RECTLIMIT cap: single bounding-box Expose when too many
+       * fragments (mi/miexpose.c:80). */
+      if (region.length > 25) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const r of region) {
+          if (r.ax < minX) minX = r.ax;
+          if (r.ay < minY) minY = r.ay;
+          if (r.ax + r.w > maxX) maxX = r.ax + r.w;
+          if (r.ay + r.h > maxY) maxY = r.ay + r.h;
+        }
+        module.ccall(
+          'emx11_push_expose_event',
+          null,
+          ['number', 'number', 'number', 'number', 'number'],
+          [id, minX - origin.ax, minY - origin.ay, maxX - minX, maxY - minY],
+        );
+        continue;
+      }
+      for (const r of region) {
+        module.ccall(
+          'emx11_push_expose_event',
+          null,
+          ['number', 'number', 'number', 'number', 'number'],
+          [id, r.ax - origin.ax, r.ay - origin.ay, r.w, r.h],
+        );
+      }
+    }
   }
 
   /** Push a MapRequest into the holder's event queue via ccall. The

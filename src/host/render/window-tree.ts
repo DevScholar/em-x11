@@ -10,7 +10,14 @@
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import { MAX_PARENT_WALK } from '../constants.js';
-import { paintWindowBorder, paintWindowSubtree, repaintAbsoluteRect } from './paint.js';
+import { paintWindowBorder, paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
+import {
+  EMPTY_REGION,
+  intersect as regionIntersect,
+  subtract as regionSubtract,
+  type Region,
+  type Rect,
+} from './region.js';
 
 export function addWindow(
   r: RendererState,
@@ -42,7 +49,127 @@ export function addWindow(
     backgroundPixmap: null,
     mapped: false,
     shape: null,
+    /* Clip lists start empty: an unmapped window has nothing visible.
+     * `recomputeClipsAll` populates them when the window (or an
+     * ancestor) maps. */
+    clipList: EMPTY_REGION,
+    borderClip: EMPTY_REGION,
   });
+}
+
+/** Recompute `clipList` and `borderClip` for every window in the tree.
+ *  Mirrors `xserver/mi/mivaltree.c::miComputeClips` recursion -- each
+ *  child receives `parent.universe ∩ child.borderRect`, then the
+ *  child's `borderRect` is subtracted from the working universe so
+ *  later (lower-z) siblings see only what's left.
+ *
+ *  Differences vs xorg:
+ *  - Recompute-from-scratch on every structural op rather than the
+ *    incremental Mark/Validate path. Our scale (~10 mapped windows
+ *    in demos) makes the perf delta a non-issue and the from-scratch
+ *    version is dramatically easier to verify against the source.
+ *  - Bounding-rect approximation for shaped windows: a shaped window
+ *    contributes its full bounding rect to occlusion, never its
+ *    shape geometry. Conservative -- over-occludes through shape
+ *    holes, never under-occludes.
+ *  - No ParentRelative / Composite / RANDR / multi-screen handling. */
+export function recomputeClipsAll(r: RendererState): void {
+  /* Pre-pass: anything not currently mapped (or any descendant of an
+   * unmapped ancestor) gets empty clip. xorg gates on `viewable`;
+   * since we don't track that explicitly, the "viewable" check happens
+   * naturally as `mapped && (mapped ancestor chain)` -- the recursion
+   * below only descends into mapped subtrees, so unmapped windows are
+   * skipped entirely and stay at whatever they had. Reset everyone
+   * first to clear stale state from before an unmap/destroy. */
+  for (const w of r.windows.values()) {
+    w.clipList = EMPTY_REGION;
+    w.borderClip = EMPTY_REGION;
+  }
+
+  /* Walk every root-level window (parent === 0). The shared root
+   * occupies the canvas; toplevel client windows are direct children
+   * of it. We start the recursion at each parent===0 window with its
+   * own bounding rect as the universe. */
+  const roots: ManagedWindow[] = [];
+  for (const w of r.windows.values()) {
+    if (w.parent === 0 && w.mapped) roots.push(w);
+  }
+  roots.sort((a, b) => a.stackOrder - b.stackOrder);
+
+  /* Top-to-bottom (highest stackOrder first), so each level subtracts
+   * higher-z siblings before recursing into lower ones, matching
+   * mivaltree.c:401 firstChild→nextSib iteration where firstChild is
+   * topmost. We store siblings with stackOrder ascending so reverse
+   * gives top-to-bottom. */
+  for (let i = roots.length - 1; i >= 0; i--) {
+    const root = roots[i]!;
+    const bounding: Rect = absBoundingRectOf(r, root);
+    computeClipsRecursive(r, root, [bounding]);
+  }
+}
+
+function computeClipsRecursive(
+  r: RendererState,
+  win: ManagedWindow,
+  universe: Region,
+): void {
+  /* xorg miComputeClips:
+   *   pWin->borderClip = universe
+   *   universe ∩= winSize          (winSize = content rect)
+   *   for each viewable child top-to-bottom:
+   *     childUniverse = universe ∩ child->borderSize
+   *     recurse(child, childUniverse)
+   *     universe -= child->borderSize
+   *   pWin->clipList = universe
+   */
+  win.borderClip = universe;
+
+  const contentRect: Rect = {
+    ax: absOriginAx(r, win),
+    ay: absOriginAy(r, win),
+    w: win.width,
+    h: win.height,
+  };
+  let innerUniverse = regionIntersect(universe, [contentRect]);
+
+  /* Top-to-bottom traversal: descending stackOrder so each iteration
+   * sees only what wasn't covered by higher-z siblings. */
+  const children = sortedMappedChildrenDescending(r, win.id);
+  for (const child of children) {
+    const childBounding = absBoundingRectOf(r, child);
+    const childUniverse = regionIntersect(innerUniverse, [childBounding]);
+    computeClipsRecursive(r, child, childUniverse);
+    innerUniverse = regionSubtract(innerUniverse, [childBounding]);
+  }
+
+  win.clipList = innerUniverse;
+}
+
+function sortedMappedChildrenDescending(
+  r: RendererState,
+  parentId: number,
+): ManagedWindow[] {
+  const out: ManagedWindow[] = [];
+  for (const w of r.windows.values()) {
+    if (w.parent === parentId && w.mapped) out.push(w);
+  }
+  out.sort((a, b) => b.stackOrder - a.stackOrder);
+  return out;
+}
+
+/* Internal helpers that avoid the option-type wrapper of the public
+ * `absBoundingRect` -- recompute path always has a valid window so
+ * the null branch would just be dead weight. */
+function absBoundingRectOf(r: RendererState, win: ManagedWindow): Rect {
+  const { ax, ay } = absOrigin(r, win);
+  const bw = win.borderWidth;
+  return { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
+}
+function absOriginAx(r: RendererState, win: ManagedWindow): number {
+  return absOrigin(r, win).ax;
+}
+function absOriginAy(r: RendererState, win: ManagedWindow): number {
+  return absOrigin(r, win).ay;
 }
 
 /** Border-only update. Width or pixel can change independently of
@@ -73,38 +200,30 @@ export function setWindowBorder(
   id: number,
   borderWidth: number,
   borderPixel: number,
-): void {
+): Map<number, Region> {
   const w = r.windows.get(id);
-  if (!w) return;
+  if (!w) return new Map();
   const oldBw = w.borderWidth;
   const widthChanged = oldBw !== borderWidth;
   w.borderWidth = borderWidth;
   w.borderPixel = borderPixel;
-  if (!w.mapped) return;
+  if (!w.mapped) return new Map();
   if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
     console.log('[paint] setWindowBorder', id, 'widthChanged=', widthChanged);
   }
   if (!widthChanged) {
     /* Color-only change: ring is in the same place, just different
-     * pixel. Repaint just the ring. paintWindowBorder is ancestor-
-     * clipped so it can't bleed past the parent. */
+     * pixel. Repaint just the ring -- no Expose needed because
+     * `clipList` is unchanged so no client pixels are invalidated. */
     paintWindowBorder(r, r.canvas.ctx, w);
-    return;
+    return new Map();
   }
-  /* Width changed: fall through to the old wipe-and-repaint. The
-   * subtree will lose its drawn content; descendants need an Expose
-   * burst from the caller (WindowManager) to redraw. Not currently
-   * exercised by twm focus-follow path. */
-  const { ax, ay } = absOrigin(r, w);
-  const maxBw = Math.max(oldBw, borderWidth);
-  repaintAbsoluteRect(
-    r,
-    ax - maxBw,
-    ay - maxBw,
-    w.width + 2 * maxBw,
-    w.height + 2 * maxBw,
-  );
-  paintWindowSubtree(r, w);
+  /* Width changed: bounding rect grew/shrank, clipLists move. Diff
+   * paint via the snapshot/recompute pipeline so we touch only what
+   * actually changed visibility. */
+  const oldClips = snapshotClips(r);
+  recomputeClipsAll(r);
+  return paintExposedRegions(r, oldClips);
 }
 
 /** Solid-background update (XSetWindowBackground / CWBackPixel, or
@@ -167,41 +286,22 @@ export function configureWindow(
   y: number,
   w: number,
   h: number,
-): void {
+): Map<number, Region> {
   const win = r.windows.get(id);
-  if (!win) return;
-  let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
-  if (win.mapped) {
-    const { ax, ay } = absOrigin(r, win);
-    const bw = win.borderWidth;
-    oldRect = { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
-  }
+  if (!win) return new Map();
   const sameGeom =
     win.x === x && win.y === y && win.width === w && win.height === h;
+  if (sameGeom) return new Map();
+  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+    console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
+  }
+  const oldClips = snapshotClips(r);
   win.x = x;
   win.y = y;
   win.width = w;
   win.height = h;
-  /* No-op configure (twm sends XMoveWindow / XConfigureWindow with the
-   * current geometry on click-without-drag once the move loop exits
-   * with a synthetic SetupWindow call). Without this guard our wipe
-   * runs on a no-op move and erases descendant content (Xaw button
-   * labels) without sending Expose -- same shape as the setWindowBorder
-   * over-wipe fix. */
-  if (sameGeom) return;
-  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
-    console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
-  }
-  if (oldRect) {
-    /* Erase old position. mapped is still true at this point but the
-     * window now sits at the NEW position, so painting from root will
-     * fill the old rect with parents/siblings, and the window's bg
-     * lands at the new rect (which intersects oldRect only on a
-     * shrinking move -- harmless, the new paint goes on top below). */
-    repaintAbsoluteRect(r, oldRect.ax, oldRect.ay, oldRect.w, oldRect.h);
-    /* Paint new position fresh. paintWindowSubtree handles children. */
-    paintWindowSubtree(r, win);
-  }
+  recomputeClipsAll(r);
+  return paintExposedRegions(r, oldClips);
 }
 
 /** XReparentWindow: change a window's parent link and local origin.
@@ -223,22 +323,15 @@ export function reparentWindow(
   parent: number,
   x: number,
   y: number,
-): void {
+): Map<number, Region> {
   const win = r.windows.get(id);
-  if (!win) return;
-  let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
-  if (win.mapped) {
-    const { ax, ay } = absOrigin(r, win);
-    const bw = win.borderWidth;
-    oldRect = { ax: ax - bw, ay: ay - bw, w: win.width + 2 * bw, h: win.height + 2 * bw };
-  }
+  if (!win) return new Map();
+  const oldClips = snapshotClips(r);
   win.parent = parent;
   win.x = x;
   win.y = y;
-  if (oldRect) {
-    repaintAbsoluteRect(r, oldRect.ax, oldRect.ay, oldRect.w, oldRect.h);
-    paintWindowSubtree(r, win);
-  }
+  recomputeClipsAll(r);
+  return paintExposedRegions(r, oldClips);
 }
 
 /** Read-only accessor for redirect decisions in Host. Returns the
@@ -250,18 +343,13 @@ export function parentOf(r: RendererState, id: number): number {
 /** XRaiseWindow: give the window the highest stackOrder among siblings
  *  so it paints on top. Repaints the affected rect so the new order
  *  is reflected immediately. */
-export function raiseWindow(r: RendererState, id: number): void {
+export function raiseWindow(r: RendererState, id: number): Map<number, Region> {
   const w = r.windows.get(id);
-  if (!w) return;
+  if (!w) return new Map();
+  const oldClips = snapshotClips(r);
   w.stackOrder = r.stackCounter++;
-  if (w.mapped && isViewable(r, id)) {
-    const { ax, ay } = absOrigin(r, w);
-    const bw = w.borderWidth;
-    /* repaintAbsoluteRect already paints all windows in the area in
-     * the new stackOrder, including this window on top. paintWindowSubtree
-     * would be redundant here and re-wiping descendant content. */
-    repaintAbsoluteRect(r, ax - bw, ay - bw, w.width + 2 * bw, w.height + 2 * bw);
-  }
+  recomputeClipsAll(r);
+  return paintExposedRegions(r, oldClips);
 }
 
 /** Enumerate the mapped descendants of `id` in parent-before-child DFS
@@ -387,6 +475,10 @@ export function setWindowShape(r: RendererState, id: number, rects: ShapeRect[])
   const w = r.windows.get(id);
   if (!w) return;
   w.shape = rects.length > 0 ? rects : null;
+  /* clipList is computed from bounding rect, not shape, so shape-only
+   * changes don't strictly need a recompute -- but call it anyway so
+   * a future shape-aware implementation drops in cleanly. */
+  recomputeClipsAll(r);
   /* Shape change while mapped means the visible region just changed;
    * repaint so newly-uncovered parts pick up bg and newly-covered
    * parts get clipped on next paint. */
@@ -413,59 +505,47 @@ export function isViewable(r: RendererState, id: number): boolean {
   return false;
 }
 
-export function mapWindow(r: RendererState, id: number): void {
+export function mapWindow(r: RendererState, id: number): Map<number, Region> {
   const w = r.windows.get(id);
-  if (!w) return;
-  w.mapped = true;
+  if (!w) return new Map();
   if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
     console.log('[paint] mapWindow', id, 'parent=', w.parent);
   }
-  /* Skip paint when an ancestor is still unmapped: the window is
-   * "mapped but not viewable" in X terms and MUST NOT produce pixels
-   * yet. When the ancestor later maps, paintWindowSubtree recurses
-   * into this now-viewable subtree and paints it then. This prevents
-   * xeyes' Xt child widgets from drawing at root-local (0,0) during
-   * the brief window between child-map and shell-map. */
-  if (!isViewable(r, id)) return;
-  /* Sync paint: the C-side XMapWindow synthesizes an Expose to the
-   * caller's queue immediately after this call returns. The Expose
-   * handler runs synchronously before the next emscripten_sleep yield,
-   * so we MUST have the bg down before then or the handler's drawing
-   * gets overwritten on the next RAF. */
-  paintWindowSubtree(r, w);
+  const oldClips = snapshotClips(r);
+  w.mapped = true;
+  recomputeClipsAll(r);
+  /* Mapped-but-not-viewable windows have empty newClip (their ancestor
+   * chain blocks them); paintExposedRegions naturally no-ops on them.
+   * When the ancestor later maps, ITS recompute discovers the now-
+   * viewable subtree and the diff is non-empty. */
+  return paintExposedRegions(r, oldClips);
 }
 
-export function unmapWindow(r: RendererState, id: number): void {
+export function unmapWindow(r: RendererState, id: number): Map<number, Region> {
   const w = r.windows.get(id);
-  if (!w) return;
-  if (!w.mapped) return;
+  if (!w) return new Map();
+  if (!w.mapped) return new Map();
   if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
     console.log('[paint] unmapWindow', id, 'parent=', w.parent);
   }
-  const { ax, ay } = absOrigin(r, w);
-  const bw = w.borderWidth;
-  const oldX = ax - bw;
-  const oldY = ay - bw;
-  const oldW = w.width + 2 * bw;
-  const oldH = w.height + 2 * bw;
+  const oldClips = snapshotClips(r);
   w.mapped = false;
-  /* Repaint the freed area (content + border) from root downwards. */
-  repaintAbsoluteRect(r, oldX, oldY, oldW, oldH);
+  recomputeClipsAll(r);
+  /* Lower-z siblings whose clipLists just absorbed this window's old
+   * area get newClip > oldClip in the vacated rect; paintExposedRegions
+   * paints their bg there. The unmapped window itself has newClip=empty
+   * so contributes nothing to repainting -- correct, it's leaving. */
+  return paintExposedRegions(r, oldClips);
 }
 
-export function destroyWindow(r: RendererState, id: number): void {
+export function destroyWindow(r: RendererState, id: number): Map<number, Region> {
   const w = r.windows.get(id);
-  if (!w) return;
-  let oldRect: { ax: number; ay: number; w: number; h: number } | null = null;
-  if (w.mapped) {
-    const { ax, ay } = absOrigin(r, w);
-    const bw = w.borderWidth;
-    oldRect = { ax: ax - bw, ay: ay - bw, w: w.width + 2 * bw, h: w.height + 2 * bw };
-  }
+  if (!w) return new Map();
+  const oldClips = snapshotClips(r);
   r.windows.delete(id);
-  if (oldRect) {
-    /* Same caveat as unmapWindow: siblings overlapping the destroyed
-     * window's rect lose their drawn content. */
-    repaintAbsoluteRect(r, oldRect.ax, oldRect.ay, oldRect.w, oldRect.h);
-  }
+  recomputeClipsAll(r);
+  /* Same shape as unmap: lower windows reclaim the freed area through
+   * their newClip - oldClip. The destroyed window is gone from
+   * r.windows so paintExposedRegions skips it. */
+  return paintExposedRegions(r, oldClips);
 }

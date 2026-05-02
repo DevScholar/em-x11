@@ -35,11 +35,13 @@
 import type { RootCanvas } from '../../runtime/canvas.js';
 import type { Point, ShapeRect } from '../../types/emscripten.js';
 import type { ManagedWindow, PixmapLookup, RendererState } from './types.js';
+import type { Region } from './region.js';
 import * as tree from './window-tree.js';
 import * as draw from './draw.js';
 import { findWindowAt } from './hit-test.js';
 
 export type { ManagedWindow, PixmapLookup, RendererState } from './types.js';
+export type { Region } from './region.js';
 export { arcPath } from './draw.js';
 
 export class Renderer implements RendererState {
@@ -63,8 +65,8 @@ export class Renderer implements RendererState {
   ): void {
     tree.addWindow(this, id, parent, x, y, width, height, borderWidth, borderPixel, bgType, background);
   }
-  setWindowBorder(id: number, borderWidth: number, borderPixel: number): void {
-    tree.setWindowBorder(this, id, borderWidth, borderPixel);
+  setWindowBorder(id: number, borderWidth: number, borderPixel: number): Map<number, Region> {
+    return tree.setWindowBorder(this, id, borderWidth, borderPixel);
   }
   setWindowBackground(
     id: number, bgType: 'none' | 'pixel' | 'pixmap', background: number,
@@ -74,17 +76,17 @@ export class Renderer implements RendererState {
   setWindowBackgroundPixmap(id: number, pmId: number): void {
     tree.setWindowBackgroundPixmap(this, id, pmId);
   }
-  configureWindow(id: number, x: number, y: number, w: number, h: number): void {
-    tree.configureWindow(this, id, x, y, w, h);
+  configureWindow(id: number, x: number, y: number, w: number, h: number): Map<number, Region> {
+    return tree.configureWindow(this, id, x, y, w, h);
   }
-  reparentWindow(id: number, parent: number, x: number, y: number): void {
-    tree.reparentWindow(this, id, parent, x, y);
+  reparentWindow(id: number, parent: number, x: number, y: number): Map<number, Region> {
+    return tree.reparentWindow(this, id, parent, x, y);
   }
-  mapWindow(id: number): void { tree.mapWindow(this, id); }
-  unmapWindow(id: number): void { tree.unmapWindow(this, id); }
-  destroyWindow(id: number): void { tree.destroyWindow(this, id); }
+  mapWindow(id: number): Map<number, Region> { return tree.mapWindow(this, id); }
+  unmapWindow(id: number): Map<number, Region> { return tree.unmapWindow(this, id); }
+  destroyWindow(id: number): Map<number, Region> { return tree.destroyWindow(this, id); }
   setWindowShape(id: number, rects: ShapeRect[]): void { tree.setWindowShape(this, id, rects); }
-  raiseWindow(id: number): void { tree.raiseWindow(this, id); }
+  raiseWindow(id: number): Map<number, Region> { return tree.raiseWindow(this, id); }
 
   parentOf(id: number): number { return tree.parentOf(this, id); }
   mappedDescendants(id: number): number[] { return tree.mappedDescendants(this, id); }

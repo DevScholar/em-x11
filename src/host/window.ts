@@ -108,7 +108,10 @@ export class WindowManager {
   }
 
   onSetBorder(id: number, borderWidth: number, borderPixel: number): void {
-    this.host.renderer.setWindowBorder(id, borderWidth, borderPixel);
+    /* Width-changed path returns a non-empty exposed map (bounding rect
+     * grew/shrank → clipLists shifted); color-only returns empty. */
+    const exposed = this.host.renderer.setWindowBorder(id, borderWidth, borderPixel);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onSetBg(id: number, bgType: number, bgValue: number): void {
@@ -124,30 +127,15 @@ export class WindowManager {
   }
 
   onConfigure(id: number, x: number, y: number, w: number, h: number): void {
-    this.host.renderer.configureWindow(id, x, y, w, h);
-    /* Configuring a mapped window erases its old content (we have no
-     * per-window backing store), so the owner needs an Expose to redraw.
-     * Routes via the window's owner module rather than the calling
-     * connection: a WM resizing a managed client's shell is a cross-
-     * connection call. attrsOf() reflects the post-configure state, so
-     * we read mapped from there.
-     *
-     * Subtree Expose: paintWindowSubtree (host/render/paint.ts) wipes
-     * this window AND every mapped descendant back to its background.
-     * A TWM frame has the title bar (title_w), iconify button, and
-     * resize handles as its children; without an Expose to each of
-     * them, their content stays wiped and the frame looks like a solid
-     * teal rectangle. Descendants can belong to a different owner than
-     * the configured window (TWM resizes its own frame but the shell
-     * inside belongs to the client), so pushExposeForWindow routes
-     * each via its own owner module. */
-    const attrs = this.host.renderer.attrsOf(id);
-    if (attrs?.mapped) {
-      this.host.events.pushExposeForWindow(id, null);
-      for (const descendant of this.host.renderer.mappedDescendants(id)) {
-        this.host.events.pushExposeForWindow(descendant, null);
-      }
-    }
+    const exposed = this.host.renderer.configureWindow(id, x, y, w, h);
+    /* Region-driven Expose: paintExposedRegions returned the per-window
+     * newClip - oldClip diff (mirroring xserver miHandleValidateExposures,
+     * mi/miexpose.c). Lower-z siblings whose clipList grew where this
+     * window vacated, and the moved window itself for the area it now
+     * covers, all get one Expose per rect. Pixels in oldClip ∩ newClip
+     * are NOT in the diff so the client doesn't get a redundant
+     * Expose / overpaint there. */
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onMap(connId: number, id: number): void {
@@ -170,81 +158,44 @@ export class WindowManager {
       this.host.events.dispatchMapRequest(holderConnId, parent, id);
       return;
     }
-    this.host.renderer.mapWindow(id);
-    /* Expose synthesis: route to the window's actual owner, not the
-     * calling connection. C-side XMapWindow used to push directly into
-     * the caller's queue, which only worked for self-mapped windows --
-     * a WM mapping a managed client's shell is the canonical case where
-     * caller != owner, and the previous shape sent Expose to the WM
-     * instead of the client whose shell just appeared on screen.
+    /* Region-driven Expose: mapping a window expands its clipList from
+     * empty to its new visible area; previously-higher-z siblings'
+     * clipLists shrink (no expose for them, correctly). Already-mapped
+     * descendants of a freshly-mapped ancestor (Xt maps children before
+     * shell; mapping shell makes the whole subtree viewable for the
+     * first time) get a non-empty diff via the recompute pass.
      *
-     * pushExposeForWindow handles both bound and unbound owner modules:
-     * during the initial XOpenDisplay -> XMapWindow burst, the owner's
-     * Module reference isn't installed yet (launchClient awaits the
-     * factory which only resolves after main() suspends in XNextEvent's
-     * emscripten_sleep). Those Exposes get queued in pendingExposes and
-     * drained from launchClient once `conn.module` lands.
-     *
-     * Subtree Expose: if this window has already-mapped descendants
-     * (e.g. a reparented shell under a freshly-mapped WM frame), they
-     * also got wiped by paintWindowSubtree and need Expose to redraw.
-     *
-     * Viewability gate: skip Expose when the window isn't actually
-     * viewable (ancestor chain still contains an unmapped node). X
-     * servers never send Expose to a non-viewable window; doing so
-     * would let the client paint at coordinates the renderer
-     * deliberately skipped, which produces the (0,0) ghost-paint
-     * artefact when Xt maps children before their shell. */
-    if (!this.host.renderer.isViewable(id)) return;
-    this.host.events.pushExposeForWindow(id, null);
-    for (const descendant of this.host.renderer.mappedDescendants(id)) {
-      this.host.events.pushExposeForWindow(descendant, null);
-    }
+     * Routing: pushExposesForRegions resolves each window's owner via
+     * connOf(id). When the owner has no Module yet (initial bootstrap),
+     * the call defers via deferExpose and ConnectionManager.launchClient
+     * drains it once the Module binds. */
+    const exposed = this.host.renderer.mapWindow(id);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onUnmap(_connId: number, id: number): void {
     /* Unmap isn't redirected in X -- only Map / Configure / Circulate
      * go through SubstructureRedirect. Unmap is always immediate.
      *
-     * Expose synthesis on overpaint: when our renderer wipes the rect
-     * the unmapped window vacated, every mapped window that intersects
-     * gets its bg repainted (wiping any application drawings inside the
-     * intersection). Real X uses per-window backing store + DamageReport
-     * to drive Expose to those siblings; we emit the Exposes explicitly
-     * here. Without this, twm's icon-manager-driven deiconify (which
-     * unmaps the iconified placeholder window) leaves xcalc / xeyes
-     * widget pixels wiped under that placeholder's old footprint, and
-     * the visible buttons all go blank until re-hovered. */
-    const oldRect = this.host.renderer.absBoundingRect(id);
-    this.host.renderer.unmapWindow(id);
-    if (oldRect) {
-      const affected = this.host.renderer.mappedWindowsIntersecting(
-        oldRect.ax, oldRect.ay, oldRect.w, oldRect.h, id,
-      );
-      for (const wId of affected) {
-        this.host.events.pushExposeForWindow(wId, null);
-      }
-    }
+     * Region-driven Expose: the unmapped window vanishes from the
+     * clipList map; lower-z siblings reclaim the vacated area through
+     * newClip - oldClip > 0 and get one Expose per rect. The unmapped
+     * window itself contributes empty newClip and never sees an Expose
+     * (correct -- it's gone). */
+    const exposed = this.host.renderer.unmapWindow(id);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onDestroy(id: number): void {
-    /* Same Expose-on-overpaint dance as onUnmap: capture the old rect
-     * before destroyWindow mutates the tree, then re-expose any
-     * intersecting mapped sibling whose pixels were wiped. */
-    const oldRect = this.host.renderer.absBoundingRect(id);
     this.host.connection.dropOwnership(id);
     this.host.events.forgetWindow(id);
     this.overrideRedirect.delete(id);
     this.host.property.deleteAllForWindow(id);   /* dix/property.c::DeleteAllWindowProperties */
-    this.host.renderer.destroyWindow(id);
-    if (oldRect) {
-      const affected = this.host.renderer.mappedWindowsIntersecting(
-        oldRect.ax, oldRect.ay, oldRect.w, oldRect.h, id,
-      );
-      for (const wId of affected) {
-        this.host.events.pushExposeForWindow(wId, null);
-      }
-    }
+    /* Same shape as onUnmap: lower-z siblings reclaim the area; we
+     * Expose them. The destroyed window is gone from r.windows so it
+     * receives no Expose (correct). */
+    const exposed = this.host.renderer.destroyWindow(id);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onSetOverrideRedirect(id: number, flag: boolean): void {
@@ -253,21 +204,19 @@ export class WindowManager {
   }
 
   onRaise(id: number): void {
-    this.host.renderer.raiseWindow(id);
-    /* repaintAbsoluteRect wiped all descendant content (no backing store).
-     * Send Expose to the raised window and every mapped descendant so
-     * applications redraw their content on the freshly painted bg.
-     * Mirrors the Expose burst in onMap / onConfigure. */
-    if (this.host.renderer.isViewable(id)) {
-      this.host.events.pushExposeForWindow(id, null);
-      for (const descendant of this.host.renderer.mappedDescendants(id)) {
-        this.host.events.pushExposeForWindow(descendant, null);
-      }
-    }
+    /* Region-driven Expose: the raised window's clipList grows to
+     * absorb the area previously-higher siblings used to cover.
+     * exposed = newClip - oldClip = exactly that area. Lower-z
+     * siblings whose clipLists shrank contribute empty exposed --
+     * their pixels are NOT touched and they get no Expose. xorg
+     * dix/window.c ReflectStackChange via VTStack runs this same
+     * algorithm. */
+    const exposed = this.host.renderer.raiseWindow(id);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onReparent(id: number, parent: number, x: number, y: number): void {
-    this.host.renderer.reparentWindow(id, parent, x, y);
+    const exposed = this.host.renderer.reparentWindow(id, parent, x, y);
     /* Notify the window's *owner* connection that its shadow is now stale.
      * In the TWM case the reparent is issued by twm's display, but xcalc
      * (the owner) still has its shell recorded as parent=root in its own
@@ -278,8 +227,7 @@ export class WindowManager {
      * otherwise consume. emx11_push_reparent_notify (event.c) updates
      * the local shadow unconditionally and pushes a ReparentNotify XEvent
      * gated on the StructureNotify/SubstructureNotify masks, mirroring
-     * dix/events.c::DeliverEvents. See project_emx11_mask_gating.md for
-     * the adjacent gate that landed alongside this. */
+     * dix/events.c::DeliverEvents. */
     const ownerConnId = this.host.connection.connOf(id);
     if (ownerConnId !== undefined && ownerConnId !== 0) {
       const owner = this.host.connection.get(ownerConnId);
@@ -292,22 +240,12 @@ export class WindowManager {
         );
       }
     }
-    /* After reparent the renderer repainted background at the new
-     * position but did not restore pixel content; the reparented window
-     * and its mapped descendants need Expose to redraw. In the TWM case
-     * this is how xeyes learns that its shell has been moved under a
-     * frame and has to repaint its eyes inside the new absolute area --
-     * without it, the canvas only shows the teal frame background and
-     * no client-drawn content. attrsOf tells us whether the moved
-     * window is actually visible (an unmapped reparent doesn't need
-     * Expose; only a mapped one). */
-    const attrs = this.host.renderer.attrsOf(id);
-    if (attrs?.mapped) {
-      this.host.events.pushExposeForWindow(id, null);
-      for (const descendant of this.host.renderer.mappedDescendants(id)) {
-        this.host.events.pushExposeForWindow(descendant, null);
-      }
-    }
+    /* Region-driven Expose: reparent = vacate old position + occupy
+     * new position. The reparented window's exposed = newClip
+     * (everything visible at NEW location it didn't cover before).
+     * Lower-z windows at the OLD location get exposed in the freed
+     * area through their own newClip - oldClip diffs. */
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   /** Used by ConnectionManager.closeDisplay to drop per-window
