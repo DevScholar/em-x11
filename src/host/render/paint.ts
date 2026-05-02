@@ -21,14 +21,7 @@ function sortedChildren(r: RendererState, parentId: number): ManagedWindow[] {
   return out;
 }
 
-/** Push the absolute bounding rect (content + border) of `w` if mapped.
- *  We deliberately do NOT recurse into descendants: applyWindowClip
- *  intersects every child paint with its parent's bounding rect, so
- *  the parent's rect already covers every visible descendant. Adding
- *  nested descendant rects breaks the evenodd subtraction below --
- *  three overlapping rects (canvas + frame + nested child) = odd parity
- *  = "inside", which leaves a hole in the occluder and the underlying
- *  root weave bleeds through windows that should be solid. */
+/** Push the absolute bounding rect (content + border) of `w` if mapped. */
 function pushOccluderRect(
   r: RendererState,
   w: ManagedWindow,
@@ -43,6 +36,24 @@ function pushOccluderRect(
     w: w.width + 2 * bw,
     h: w.height + 2 * bw,
   });
+}
+
+/** Collect rect of `root` and every mapped descendant. Border included
+ *  so the ring counts. Recursion is needed because a child can sit at
+ *  a coordinate that, while inside its parent's *paint clip*, is not
+ *  fully inside the parent's bounding rect once you account for shape
+ *  and our coarse rect-only model: missing the descendant lets paints
+ *  underneath leak into spots the descendant covers. */
+function collectMappedSubtreeRects(
+  r: RendererState,
+  root: ManagedWindow,
+  out: Array<{ ax: number; ay: number; w: number; h: number }>,
+): void {
+  pushOccluderRect(r, root, out);
+  if (!root.mapped) return;
+  for (const child of r.windows.values()) {
+    if (child.parent === root.id) collectMappedSubtreeRects(r, child, out);
+  }
 }
 
 /** Compute occluder rects for `win`: every window that paints AFTER `win`
@@ -72,17 +83,24 @@ function getOccluderRects(
       if (sibling.parent !== parentId) continue;
       if (sibling.id === myId) continue;
       if (sibling.stackOrder <= myStackOrder) continue;
-      pushOccluderRect(r, sibling, out);
+      collectMappedSubtreeRects(r, sibling, out);
     }
     current = r.windows.get(parentId);
   }
   return out;
 }
 
-/** Subtract higher-z sibling rects from the current canvas clip using
- *  evenodd fill rule. Caller must have already called ctx.save() and
- *  installed the window's own/ancestor clip; this further intersects
- *  with (full-canvas - union(occluders)). No-op when nothing occludes. */
+/** Subtract higher-z sibling rects from the current canvas clip. We
+ *  apply ONE occluder per ctx.clip() call using evenodd on (canvas +
+ *  occluder), instead of stuffing them all into a single path: with
+ *  many overlapping/nested rects the evenodd parity flips back to
+ *  "inside" wherever an odd number of rects overlap (a frame + its
+ *  shell + a widget = 3 = inside), leaving holes in the occluder that
+ *  let lower-z paints leak through. Per-occluder clipping is robust
+ *  to nesting because each call only ever touches 2 rects. Caller
+ *  must have already called ctx.save() and installed the window's
+ *  own/ancestor clip; this further intersects with each (canvas -
+ *  one_occluder). No-op when nothing occludes. */
 function applyOcclusionClip(
   r: RendererState,
   ctx: RootCanvasContext,
@@ -92,12 +110,12 @@ function applyOcclusionClip(
   if (occluders.length === 0) return;
   const cw = r.canvas.cssWidth;
   const ch = r.canvas.cssHeight;
-  ctx.beginPath();
-  ctx.rect(0, 0, cw, ch);
   for (const o of occluders) {
+    ctx.beginPath();
+    ctx.rect(0, 0, cw, ch);
     ctx.rect(o.ax, o.ay, o.w, o.h);
+    ctx.clip('evenodd');
   }
-  ctx.clip('evenodd');
 }
 
 /** Push a clip region matching the window's visible area onto `ctx`.
