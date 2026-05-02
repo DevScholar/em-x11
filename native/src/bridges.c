@@ -229,13 +229,6 @@ EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, 
         globalThis.__emx11_measureCtx__ = c ? c.getContext("2d", { willReadFrequently: true }) : null;
     }
     if (!globalThis.__emx11_fontCache__) globalThis.__emx11_fontCache__ = new Map();
-    if (!globalThis.__emx11_fontStats__) {
-        globalThis.__emx11_fontStats__ = { fontCalls: 0, fontHits: 0, fontMs: 0,
-                                           textCalls: 0, textHits: 0, textMs: 0 };
-    }
-    var stats = globalThis.__emx11_fontStats__;
-    var t0 = (typeof performance !== "undefined") ? performance.now() : 0;
-    stats.fontCalls++;
     var ctx = globalThis.__emx11_measureCtx__;
     var fallbackWidth = 8;
     var fallbackAscent = 10;
@@ -252,13 +245,11 @@ EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, 
     var css = UTF8ToString(fontPtr);
     var entry = globalThis.__emx11_fontCache__.get(css);
     if (entry) {
-        stats.fontHits++;
         HEAP32[ascentPtr >> 2] = entry.ascent;
         HEAP32[descentPtr >> 2] = entry.descent;
         HEAP32[maxWidthPtr >> 2] = entry.maxW;
         var bbase = widthsPtr >> 2;
         for (var k = 0; k < 95; k++) HEAP32[bbase + k] = entry.widths[k];
-        stats.fontMs += ((typeof performance !== "undefined") ? performance.now() : 0) - t0;
         return;
     }
     ctx.font = css;
@@ -288,7 +279,6 @@ EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, 
     }
     HEAP32[maxWidthPtr >> 2] = maxW;
     globalThis.__emx11_fontCache__.set(css, { ascent: ascent, descent: descent, maxW: maxW, widths: widths });
-    stats.fontMs += ((typeof performance !== "undefined") ? performance.now() : 0) - t0;
 });
 
 EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
@@ -299,13 +289,6 @@ EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
         globalThis.__emx11_measureCtx__ = c ? c.getContext("2d", { willReadFrequently: true }) : null;
     }
     if (!globalThis.__emx11_textCache__) globalThis.__emx11_textCache__ = new Map();
-    if (!globalThis.__emx11_fontStats__) {
-        globalThis.__emx11_fontStats__ = { fontCalls: 0, fontHits: 0, fontMs: 0,
-                                           textCalls: 0, textHits: 0, textMs: 0 };
-    }
-    var stats = globalThis.__emx11_fontStats__;
-    var t0 = (typeof performance !== "undefined") ? performance.now() : 0;
-    stats.textCalls++;
     var ctx = globalThis.__emx11_measureCtx__;
     if (!ctx) return length * 8;
     var css = fontPtr !== 0 ? UTF8ToString(fontPtr) : "13px monospace";
@@ -313,16 +296,11 @@ EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
     var key = css + "" + text;
     var cache = globalThis.__emx11_textCache__;
     var hit = cache.get(key);
-    if (hit !== undefined) {
-        stats.textHits++;
-        stats.textMs += ((typeof performance !== "undefined") ? performance.now() : 0) - t0;
-        return hit;
-    }
+    if (hit !== undefined) return hit;
     ctx.font = css;
     var w = Math.ceil(ctx.measureText(text).width);
     if (cache.size >= 8192) cache.clear();
     cache.set(key, w);
-    stats.textMs += ((typeof performance !== "undefined") ? performance.now() : 0) - t0;
     return w;
 });
 
