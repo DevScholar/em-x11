@@ -41,6 +41,12 @@ const TWMRC_PATH = '/em-x11.twmrc';
  *     does render correctly. The slight cost is more frame redraws
  *     while dragging; in a browser demo that's fine.
  *
+ *   - `ShowIconManager`: twm defaults Scr->ShowIconManager=FALSE (twm.c:755)
+ *     and only maps the icon manager when that flag is set (twm.c:594).
+ *     For a demo where the icon manager IS the primary way to see that
+ *     twm is running, we want it visible from startup. Toggling from the
+ *     "Twm" menu at runtime still works.
+ *
  * Kept inline (rather than as a separate asset) so the Vite build doesn't
  * have to learn about a new file type. */
 const TWMRC = `
@@ -49,6 +55,7 @@ RestartPreviousState
 DecorateTransients
 RandomPlacement
 OpaqueMove
+ShowIconManager
 TitleFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
 ResizeFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
 MenuFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"

@@ -15,6 +15,7 @@
  */
 
 #include "emx11_internal.h"
+#include "emx11_meta_layout.h"
 
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
@@ -269,32 +270,51 @@ int XUndefineCursor(Display *dpy, Window w) {
 }
 
 /* -- Query stubs. XQueryPointer is called by Xaw's Tip widget for
- * tooltip placement and by xeyes every 50ms for pupil tracking.
- * Read the latest canvas pointer position from the JS host; child
- * hit-testing isn't wired yet, so child_return stays None. */
+ * tooltip placement, by xeyes every 50ms for pupil tracking, and by
+ * twm's menu loop (menus.c:509) on every MotionNotify to decide which
+ * menu entry the pointer is over. Read the latest canvas pointer
+ * position from the JS host, then translate into the requested
+ * window's local coordinate system. Without the translation, twm's
+ * menu code sees root-space x and rejects every hover whose root-x
+ * is >= menu->width -- symptom: menu items only highlight when the
+ * pointer is to the LEFT of the visible menu by an amount equal to
+ * the menu's root-space origin. */
 
 Bool XQueryPointer(Display *dpy, Window w, Window *root_return,
                    Window *child_return, int *root_x_return, int *root_y_return,
                    int *win_x_return, int *win_y_return,
                    unsigned int *mask_return) {
-    (void)w;
     int px = 0, py = 0;
     emx11_js_pointer_xy(&px, &py);
+    /* Window-local coords: root coords minus the target window's
+     * absolute origin. Ask the JS host (authoritative for every window,
+     * including ones this connection doesn't own) to avoid duplicating
+     * the parent-chain walk -- same bridge event.c uses for cross-conn
+     * reparented windows. If the lookup fails (shouldn't happen for a
+     * window the caller just passed us), fall back to root coords so
+     * the pre-fix behaviour is preserved. */
+    int wx = px, wy = py;
+    if (w != None) {
+        int origin[EMX11_ABS_ORIGIN_SIZE] = {0};
+        emx11_js_get_window_abs_origin(w, origin);
+        if (origin[EMX11_ABS_ORIGIN_PRESENT]) {
+            wx = px - origin[EMX11_ABS_ORIGIN_AX];
+            wy = py - origin[EMX11_ABS_ORIGIN_AY];
+        }
+    }
     EM_ASM({
         if (globalThis.__EMX11_TRACE_QP__) {
-            console.log('[c-qp] conn=' + $0 + ' px=' + $1 + ' py=' + $2);
+            console.log('[c-qp] conn=' + $0 + ' win=' + $1 +
+                        ' root=(' + $2 + ',' + $3 + ')' +
+                        ' local=(' + $4 + ',' + $5 + ')');
         }
-    }, dpy->conn_id, px, py);
+    }, dpy->conn_id, w, px, py, wx, wy);
     if (root_return)     *root_return     = dpy->screens[0].root;
     if (child_return)    *child_return    = None;
     if (root_x_return)   *root_x_return   = px;
     if (root_y_return)   *root_y_return   = py;
-    /* No per-window translation yet: hand back the root-relative pair
-     * as the window-relative pair too. xeyes uses XTranslateCoordinates
-     * afterward to map to its own widget, so the compounded offset
-     * still works out. */
-    if (win_x_return)    *win_x_return    = px;
-    if (win_y_return)    *win_y_return    = py;
+    if (win_x_return)    *win_x_return    = wx;
+    if (win_y_return)    *win_y_return    = wy;
     if (mask_return)     *mask_return     = 0;
     return True;
 }
