@@ -281,15 +281,41 @@ void emx11_push_motion_event(Window window, int x, int y,
     /* MotionNotify routing: grab window during a grab, pointer window
      * otherwise. */
     EmxWindow *motion_target;
+    bool via_grab = false;
     if (grab_window != None) {
         motion_target = emx11_window_find(dpy, grab_window);
         if (!motion_target || !motion_target->mapped) return;
+        via_grab = true;
     } else {
         motion_target = pointer_target;
         if (!motion_target) return;
     }
-    if (!(motion_target->event_mask & (PointerMotionMask | ButtonMotionMask)))
+    /* Mask gate. Skipped during an implicit pointer grab: x11protocol
+     * §523 specifies that MotionNotify (and ButtonRelease) are reported
+     * to the grabbing client regardless of the grab window's selected
+     * event mask. xserver/dix/events.c::CheckMotion mirrors this -- grab
+     * delivery bypasses the per-window mask check. Without this skip,
+     * twm's f.move loop never sees motion: twm selects only
+     * ButtonPressMask|Expose|Enter|Leave on its title-bar frame, and the
+     * grab during a drag pins motion_target to that frame, so every
+     * motion event hits the mask gate and gets dropped. The drag loop's
+     * XQueryPointer keeps reading the press position, abs(...) <
+     * MoveDelta stays true, and twm's `f.deltastop` aborts the move
+     * without ever calling XMoveWindow -- so the window never moves and
+     * controls under the press point remain hot. */
+    if (!via_grab &&
+        !(motion_target->event_mask & (PointerMotionMask | ButtonMotionMask)))
         return;
+
+    EM_ASM({
+        if (globalThis.__EMX11_TRACE_C_MOT__) {
+            console.log('[c-mot] conn=' + $0 + ' rx=' + $1 + ' ry=' + $2 +
+                        ' grab=' + ($3 ? 'Y' : 'N') +
+                        ' target=' + ($4 >>> 0) +
+                        ' mask=0x' + ($5 >>> 0).toString(16));
+        }
+    }, dpy->conn_id, x_root, y_root, via_grab ? 1 : 0,
+       motion_target->id, (unsigned long)motion_target->event_mask);
 
     int ax = 0, ay = 0, depth;
     window_abs_origin(dpy, motion_target, &ax, &ay, &depth);

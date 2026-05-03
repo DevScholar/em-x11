@@ -26,7 +26,23 @@ import type { EmscriptenModule } from '../types/emscripten.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';
 
-/* Mirrors third-party/twm/src/system.twmrc with `RandomPlacement` added.
+/* Mirrors third-party/twm/src/system.twmrc with two em-x11 specific
+ * additions:
+ *
+ *   - `RandomPlacement`: see the file header for why interactive placement
+ *     deadlocks our single-thread JS world.
+ *
+ *   - `OpaqueMove`: twm defaults to OpaqueMove=FALSE, which means a
+ *     window drag (f.move) draws a "rubber band" XSegment outline on the
+ *     root window using GXxor and only XMoveWindow's the real frame on
+ *     ButtonRelease. We can't honour GXxor on Canvas 2D (a second draw
+ *     can't undo the first; see native/src/drawing.c::gc_draw_disabled),
+ *     so the entire drag would be visually invisible -- the window only
+ *     jumps at release, with no feedback in between. OpaqueMove flips
+ *     twm to live-XMoveWindow during the drag, which our MoveWindow path
+ *     does render correctly. The slight cost is more frame redraws
+ *     while dragging; in a browser demo that's fine.
+ *
  * Kept inline (rather than as a separate asset) so the Vite build doesn't
  * have to learn about a new file type. */
 const TWMRC = `
@@ -34,6 +50,7 @@ NoGrabServer
 RestartPreviousState
 DecorateTransients
 RandomPlacement
+OpaqueMove
 TitleFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
 ResizeFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
 MenuFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"

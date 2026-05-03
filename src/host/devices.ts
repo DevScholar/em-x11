@@ -100,6 +100,14 @@ export class InputBridge {
      * while a drag is in progress -- a TWM title-bar drag crosses over
      * xeyes' frame mid-drag, but Motion must still reach TWM, not xeyes. */
     const module = this.dragModule ?? (win !== null ? this.moduleForWindow(win) : null);
+    const traceFlag = (
+      globalThis as { __EMX11_TRACE_MOTION__?: boolean }
+    ).__EMX11_TRACE_MOTION__;
+    if (traceFlag) {
+      console.log(
+        `[mot] (${e.x}, ${e.y}) win=${win} drag=${this.dragModule ? 'Y' : 'N'} module=${module ? 'Y' : 'N'}`,
+      );
+    }
     if (!module) return;
     module.ccall(
       'emx11_push_motion_event',
