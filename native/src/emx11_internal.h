@@ -536,6 +536,22 @@ extern Status emx11_js_parse_color(const char *name,
                                    unsigned short *green_out,
                                    unsigned short *blue_out);
 
+/* Passive button grab table (XGrabButton / XUngrabButton). The host
+ * keeps the (window, button, modifiers) -> grab-info map; devices.ts
+ * walks the parent chain at ButtonPress time and redirects the event
+ * to the deepest matching grab window. owner_events / pointer_mode /
+ * keyboard_mode / confine_to / cursor are forwarded for fidelity but
+ * the host's minimal impl honours only the routing -- there is no
+ * sync-mode replay queue, so XAllowEvents is a stub. AnyButton (0)
+ * and AnyModifier (1<<15) are wildcards on the host side. */
+extern void emx11_js_grab_button(Window window, unsigned int button,
+                                 unsigned int modifiers,
+                                 int owner_events, unsigned int event_mask,
+                                 int pointer_mode, int keyboard_mode,
+                                 Window confine_to, Cursor cursor);
+extern void emx11_js_ungrab_button(Window window, unsigned int button,
+                                   unsigned int modifiers);
+
 /* Browser clipboard bridge (see selection.c). The read path is split in
  * two because Asyncify can only suspend a single JS-to-C boundary: first
  * call awaits navigator.clipboard.readText() and stashes the UTF-8 bytes

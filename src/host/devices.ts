@@ -22,6 +22,8 @@ import { keyEventToKeysym, modifiersFromEvent } from '../runtime/keymap.js';
 import {
   X_ButtonPress,
   X_ButtonRelease,
+  X_ButtonPressMask,
+  X_ButtonReleaseMask,
   X_KeyPress,
   X_KeyRelease,
 } from './constants.js';
@@ -127,22 +129,148 @@ export class InputBridge {
 
   private deliverButton(xType: number, e: MouseEventData): void {
     this.setPointer(e.x, e.y);
-    const win = this.host.renderer.findWindowAt(e.x, e.y);
-    if (win === null) return;
-    const module = this.moduleForWindow(win);
-    if (!module) return;
+    const target = this.host.renderer.findWindowAt(e.x, e.y);
+    const traceFlag = (
+      globalThis as { __EMX11_TRACE_BUTTON__?: boolean }
+    ).__EMX11_TRACE_BUTTON__;
+    if (traceFlag) {
+      console.log(
+        `[btn] type=${xType} (${e.x}, ${e.y}) target=${target} button=${e.button} mods=0x${e.modifiers.toString(16)}`,
+      );
+    }
+    if (target === null) return;
+
+    /* Routing in xorg order (xserver/dix/events.c::DeliverDeviceEvents):
+     *
+     *   1. ActiveGrab (we don't model server-grabs explicitly here -- the
+     *      C side maintains an "implicit pointer grab" that routes
+     *      Motion/Release to the press's destination, see dragModule).
+     *   2. PassiveGrab: walk from `target` up to root looking for a
+     *      passive XGrabButton with matching (button, modifiers).
+     *      First match wins; event delivered to grab_window in its coords.
+     *   3. Plain delivery: walk from `target` up to root looking for any
+     *      ancestor with a client that selected ButtonPress(Release)Mask.
+     *      Mirrors DeliverEventsToWindow's propagation. The first
+     *      ancestor's subscriber gets the event; further ancestors and
+     *      other subscribers on the same window are not consulted (xorg
+     *      delivers to all matching clients via OtherClients, but in
+     *      practice only one client cares about button events on any
+     *      given path -- the WM at the frame, the app at the leaf).
+     *
+     * If neither (2) nor (3) finds anyone, drop the event. Real xorg
+     * silently discards in the same scenario.
+     *
+     * Why we don't just route to `target`'s owner: an X application
+     * may not select for ButtonPress on its leaf widgets at all -- Xt
+     * only selects on the toplevel shell, and lets the WM-installed
+     * ButtonPress mask on the frame fire instead. The owner of the
+     * deepest hit window is the application, but the SUBSCRIBER is
+     * the WM at the frame. Without propagation, click-to-raise and
+     * title-bar drag both vanish. */
+    let deliveryWin: number;
+    let deliveryConn: number | null = null;
+    let viaGrab = false;
+
     if (xType === X_ButtonPress) {
-      this.focusedWindow = win;
-      this.dragModule = module;
+      const grabWin = this.host.grabs.lookup(target, e.button, e.modifiers);
+      if (traceFlag) console.log(`  grab lookup -> ${grabWin}`);
+      if (grabWin !== null) {
+        deliveryWin = grabWin;
+        viaGrab = true;
+      } else {
+        const sub = this.host.events.findSubscriberFor(target, X_ButtonPressMask);
+        if (traceFlag) {
+          console.log(
+            `  subscriber lookup -> ${sub ? `win=${sub.winId} conn=${sub.connId}` : 'null'}`,
+          );
+        }
+        if (!sub) {
+          /* No subscriber on the parent chain; fall back to owner so
+           * grab-less clicks on simple test apps (xt-hello) still get
+           * delivered. xorg drops here, but our flat client-only mode
+           * has no propagation safety net otherwise. */
+          deliveryWin = target;
+          deliveryConn = this.host.connection.connOf(target) ?? null;
+        } else {
+          deliveryWin = sub.winId;
+          deliveryConn = sub.connId;
+        }
+      }
     } else {
-      this.dragModule = null;
+      /* ButtonRelease: route to whoever holds the implicit grab so it
+       * pairs with the press. The C side's grab_window state will set
+       * event.window correctly relative to the grab; we just need to
+       * deliver to the right MODULE here. dragModule was captured at
+       * press time. */
+      deliveryWin = target;
+      if (this.dragModule) {
+        /* Route via dragModule directly without consulting subscriber
+         * tables -- the press already chose. */
+        const origin = this.host.getWindowAbsOrigin(deliveryWin);
+        const lx = origin ? e.x - origin.ax : e.x;
+        const ly = origin ? e.y - origin.ay : e.y;
+        this.dragModule.ccall(
+          'emx11_push_button_event',
+          null,
+          ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+          [xType, deliveryWin, lx, ly, e.x, e.y, e.button, e.modifiers],
+        );
+        this.dragModule = null;
+        return;
+      }
+      const sub = this.host.events.findSubscriberFor(target, X_ButtonReleaseMask);
+      if (sub) {
+        deliveryWin = sub.winId;
+        deliveryConn = sub.connId;
+      } else {
+        deliveryConn = this.host.connection.connOf(target) ?? null;
+      }
+    }
+
+    /* Resolve module from grab/subscriber. Grabs go via the grab
+     * window's owner (passive grab semantics: event delivered to whoever
+     * created and registered the grab). Subscriber path uses the
+     * resolved connId directly. */
+    const module = viaGrab
+      ? this.moduleForWindow(deliveryWin)
+      : deliveryConn !== null
+        ? this.moduleForConn(deliveryConn)
+        : null;
+    if (!module) {
+      if (traceFlag) console.log(`  no module for delivery, dropping`);
+      return;
+    }
+
+    /* Translate the press point into delivery window's coord system. */
+    const origin = this.host.getWindowAbsOrigin(deliveryWin);
+    const lx = origin ? e.x - origin.ax : e.x;
+    const ly = origin ? e.y - origin.ay : e.y;
+
+    if (xType === X_ButtonPress) {
+      this.focusedWindow = deliveryWin;
+      this.dragModule = module;
     }
     module.ccall(
       'emx11_push_button_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
-      [xType, win, e.x, e.y, e.x, e.y, e.button, e.modifiers],
+      [xType, deliveryWin, lx, ly, e.x, e.y, e.button, e.modifiers],
     );
+  }
+
+  /** Resolve the Module for a connection id directly. Used by the
+   *  subscriber-propagation path -- once findSubscriberFor returns a
+   *  connId, we already know who to talk to without going through the
+   *  window-owner mapping. */
+  private moduleForConn(connId: number): ModuleCcallSurface | null {
+    if (connId === 0) {
+      for (const conn of this.host.connection.values()) {
+        if (conn.module) return conn.module;
+      }
+      return null;
+    }
+    const conn = this.host.connection.get(connId);
+    return conn?.module ?? null;
   }
 
   /** Resolve the Module that owns a window. Returns null if the window

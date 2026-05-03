@@ -306,6 +306,26 @@ export interface EmX11Host {
     fg: number,
     bg: number,
   ): void;
+  /** XGrabButton -> install a passive button grab. host walks parent
+   *  chain at ButtonPress time and redirects to the deepest grab window.
+   *  AnyButton (0) / AnyModifier (1<<15) act as wildcards. ownerEvents,
+   *  eventMask, pointerMode, keyboardMode, confineTo, cursor are accepted
+   *  for signature fidelity; the host's minimal impl honours only the
+   *  routing (no sync-mode replay queue, so XAllowEvents is a stub). */
+  onGrabButton(
+    window: number,
+    button: number,
+    modifiers: number,
+    ownerEvents: boolean,
+    eventMask: number,
+    pointerMode: number,
+    keyboardMode: number,
+    confineTo: number,
+    cursor: number,
+  ): void;
+  /** XUngrabButton -> remove a passive button grab. AnyButton / AnyModifier
+   *  act as wildcards in the matching axis (xorg semantics). */
+  onUngrabButton(window: number, button: number, modifiers: number): void;
 }
 
 declare global {

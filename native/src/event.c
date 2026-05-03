@@ -54,10 +54,15 @@ static void window_abs_origin(Display *dpy, EmxWindow *w,
 /* Given a root-relative point, find the deepest mapped window that
  * (a) contains the point and (b) has at least one of `need_mask` bits
  * in its event_mask. If the deepest containing window doesn't select
- * for the event, propagate up the parent chain to the first ancestor
- * that does -- matching real X's event-propagation semantics. Returns
- * NULL if nothing accepts the event. Root window is excluded from the
- * result (we don't deliver events to root in a single-client world).
+ * for the event, propagate up the parent chain (INCLUDING root) to the
+ * first ancestor that does -- matching xserver/dix/events.c's
+ * DeliverEventsToWindow semantics. Returns NULL only when literally
+ * nothing in the table or in the ancestor chain wants the event.
+ *
+ * Root IS a valid hit and a valid delivery target. Twm selects on root
+ * for the bare-button menus and for SubstructureRedirect; any
+ * "single-client world" pruning here breaks the WM. xserver's
+ * miSpriteTrace starts from root and hands deliveries to root too.
  *
  * `lx`/`ly` are filled with the winning window's local coordinates. */
 static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
@@ -65,12 +70,10 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
     EmxWindow *best = NULL;
     int best_depth = -1;
     int best_ax = 0, best_ay = 0;
-    Window root = dpy->screens[0].root;
 
     for (int i = 0; i < EMX11_MAX_WINDOWS; i++) {
         EmxWindow *w = &dpy->windows[i];
         if (!w->in_use || !w->mapped) continue;
-        if (w->id == root) continue;
 
         int ax, ay, depth;
         window_abs_origin(dpy, w, &ax, &ay, &depth);
@@ -78,6 +81,10 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
             rx >= ax + (int)w->width || ry >= ay + (int)w->height) {
             continue;
         }
+        /* depth tie-break by stack-ish order doesn't apply here -- we keep
+         * deepest-by-tree-depth which matches xorg's "child wins over
+         * parent at same point" semantics. Same depth means siblings,
+         * which our tree doesn't disambiguate; first-found wins. */
         if (depth > best_depth) {
             best = w;
             best_depth = depth;
@@ -87,8 +94,8 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
     }
     if (!best) return NULL;
 
-    /* Propagate up until an ancestor selects for the event. We keep
-     * updating (ax, ay) so local coords stay correct wherever we land. */
+    /* Propagate up to AND including root. We keep updating (ax, ay) so
+     * local coords stay correct wherever the chain terminates. */
     EmxWindow *cur = best;
     int ax = best_ax, ay = best_ay;
     while (cur) {
@@ -99,7 +106,7 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
         }
         if (cur->parent == None || cur->parent == cur->id) break;
         EmxWindow *p = emx11_window_find(dpy, cur->parent);
-        if (!p || p->id == root) break;
+        if (!p) break;                          /* parent in another conn's table */
         ax -= cur->x;                           /* un-offset into parent frame */
         ay -= cur->y;
         cur = p;
@@ -222,6 +229,22 @@ void emx11_push_button_event(int type, Window window, int x, int y,
             grab_button_count++;
         }
     }
+
+    /* Diagnostic trace: dump the C-side resolution so we can see what
+     * each wasm process receives. Gate on a pointer so the JS side can
+     * toggle it via globalThis.__EMX11_TRACE_C_BTN__. Gate via EM_ASM
+     * so it's free when disabled; the EM_ASM is itself ~one-line
+     * runtime cost when enabled. */
+    EM_ASM({
+        if (globalThis.__EMX11_TRACE_C_BTN__) {
+            console.log('[c-btn] conn=' + $0 + ' type=' + $1 +
+                        ' hint=' + ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 +
+                        ' button=' + $5 + ' state=0x' + ($6 >>> 0).toString(16) +
+                        ' -> target=' + ($7 >>> 0) + ' lx=' + $8 + ' ly=' + $9);
+        }
+    }, dpy->conn_id, type, window, x_root, y_root, button, state,
+       target ? target->id : 0, lx, ly);
+
     if (!target) return;
 
     XEvent ev;

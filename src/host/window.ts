@@ -187,6 +187,11 @@ export class WindowManager {
   }
 
   onDestroy(id: number): void {
+    /* xorg's DestroyWindow path frees passive grabs the destroyed window
+     * was holding (FreeAllAttachedGrabs). Without this, a stale entry
+     * lingers in GrabManager and a future window with the same XID would
+     * inherit it. */
+    this.host.grabs.forgetWindow(id);
     this.host.connection.dropOwnership(id);
     this.host.events.forgetWindow(id);
     this.overrideRedirect.delete(id);

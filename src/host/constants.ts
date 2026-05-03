@@ -12,6 +12,9 @@
 /* X11 event-type numerics we send to the C side via emx11_push_*_event. */
 export const X_ButtonPress = 4;
 export const X_ButtonRelease = 5;
+/* X11 event-mask bits for the events we route on (X11/X.h: ButtonPressMask = 1L<<4, etc.). */
+export const X_ButtonPressMask = 1 << 4;
+export const X_ButtonReleaseMask = 1 << 5;
 export const X_KeyPress = 2;
 export const X_KeyRelease = 3;
 

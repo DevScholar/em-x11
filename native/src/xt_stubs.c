@@ -524,12 +524,40 @@ void XConvertCase(KeySym keysym, KeySym *lower_return, KeySym *upper_return) {
     if (upper_return) *upper_return = hi;
 }
 
-/* -- Input grabs are no-ops in a single-focus compositor. */
+/* -- Passive input grabs --------------------------------------------------
+ *
+ * Passive button grabs are load-bearing for any window manager: twm
+ * installs them on every managed frame (add_window.c:1039) so click-to-
+ * raise / drag-titlebar / right-click menus all work. The grab table
+ * lives on the Host (TS) side; we just forward the registration through
+ * a bridge. devices.ts walks the parent chain at ButtonPress time and
+ * redirects the event to the deepest matching grab window.
+ *
+ * AnyButton == 0 and AnyModifier == 1<<15 (X.h) survive the bridge
+ * verbatim; the host treats them as wildcards.
+ *
+ * Keyboard grabs (XGrabKey) remain stubs -- twm only uses them for
+ * f.warpring / accelerator keys we don't exercise yet. Active pointer/
+ * keyboard grabs (XUngrabKeyboard / XUngrabPointer) are also still
+ * no-ops; click delivery is owner-events-style and we have no sync-
+ * mode replay queue, so XAllowEvents is irrelevant.
+ */
 
-int XGrabButton(Display *a, unsigned int b, unsigned int c, Window d, Bool e,
-                unsigned int f, int g, int h, Window i, Cursor j) {
-    (void)a; (void)b; (void)c; (void)d; (void)e;
-    (void)f; (void)g; (void)h; (void)i; (void)j;
+int XGrabButton(Display *dpy, unsigned int button, unsigned int modifiers,
+                Window grab_window, Bool owner_events,
+                unsigned int event_mask, int pointer_mode, int keyboard_mode,
+                Window confine_to, Cursor cursor) {
+    (void)dpy;
+    emx11_js_grab_button(grab_window, button, modifiers,
+                         owner_events ? 1 : 0, event_mask,
+                         pointer_mode, keyboard_mode, confine_to, cursor);
+    return 1;
+}
+
+int XUngrabButton(Display *dpy, unsigned int button, unsigned int modifiers,
+                  Window grab_window) {
+    (void)dpy;
+    emx11_js_ungrab_button(grab_window, button, modifiers);
     return 1;
 }
 

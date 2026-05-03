@@ -38,6 +38,7 @@ import { ConnectionManager } from './connection.js';
 import { WindowManager } from './window.js';
 import { GcManager } from './gc.js';
 import { InputBridge } from './devices.js';
+import { GrabManager } from './grabs.js';
 import type { LoadOptions } from '../loader/wasm.js';
 import type {
   EmX11Host,
@@ -60,6 +61,7 @@ export class Host implements EmX11Host {
   readonly window: WindowManager;
   readonly gc: GcManager;
   readonly devices: InputBridge;
+  readonly grabs: GrabManager;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -93,6 +95,11 @@ export class Host implements EmX11Host {
     this.connection = new ConnectionManager(this);
     this.window = new WindowManager(this);
     this.devices = new InputBridge(this);
+    this.grabs = new GrabManager(this);
+    /* DevTools entry point for the grab table. Call __EMX11_DUMP_GRABS__()
+     * to see whether passive grabs got registered (e.g. by twm). */
+    (globalThis as { __EMX11_DUMP_GRABS__?: () => void }).__EMX11_DUMP_GRABS__ =
+      () => this.grabs.dump();
 
     this.window.installSharedRoot();
   }
@@ -230,6 +237,29 @@ export class Host implements EmX11Host {
   }
   onFlush(): void { this.gc.onFlush(); }
   onWindowShape(id: number, rects: ShapeRect[]): void { this.gc.onWindowShape(id, rects); }
+
+  /* -- EmX11Host: passive button grab dispatch -------------------------- */
+
+  onGrabButton(
+    window: number,
+    button: number,
+    modifiers: number,
+    ownerEvents: boolean,
+    eventMask: number,
+    pointerMode: number,
+    keyboardMode: number,
+    confineTo: number,
+    cursor: number,
+  ): void {
+    this.grabs.add(
+      window, button, modifiers, ownerEvents, eventMask,
+      pointerMode, keyboardMode, confineTo, cursor,
+    );
+  }
+  onUngrabButton(window: number, button: number, modifiers: number): void {
+    this.grabs.remove(window, button, modifiers);
+  }
+
 
   /* -- EmX11Host: pixmaps + drawable copies + Shape --------------------- */
 

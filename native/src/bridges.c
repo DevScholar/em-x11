@@ -120,6 +120,42 @@ EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
     HEAP32[base + 2] = o.ay | 0;
 });
 
+/* --- passive grabs (XGrabButton / XUngrabButton) ------------------------- */
+/*
+ * twm and similar WMs install passive button grabs on every managed frame
+ * (xt_stubs.c -> xserver/dix/events.c::CheckPassiveGrabsOnWindow). Without
+ * a working grab table the WM never sees ButtonPress on its frames or root,
+ * so click-to-raise / drag-titlebar / root-menu / iconmgr toggling all fail.
+ *
+ * AnyButton == 0 and AnyModifier == 1<<15 (X.h); the host treats them as
+ * wildcards in the lookup. owner_events / event_mask / pointer_mode /
+ * keyboard_mode / confine_to / cursor are accepted for signature fidelity
+ * but the host's minimal grab impl ignores them: we always do "owner"
+ * delivery (event goes to grab window in its coords) and never sync /
+ * replay (XAllowEvents is a stub).
+ */
+EM_JS(void, emx11_js_grab_button,
+      (unsigned int window, unsigned int button, unsigned int modifiers,
+       int owner_events, unsigned int event_mask,
+       int pointer_mode, int keyboard_mode,
+       unsigned int confine_to, unsigned int cursor),
+      {
+          if (!globalThis.__EMX11__) return;
+          globalThis.__EMX11__.onGrabButton(
+              window >>> 0, button >>> 0, modifiers >>> 0,
+              owner_events !== 0, event_mask >>> 0,
+              pointer_mode | 0, keyboard_mode | 0,
+              confine_to >>> 0, cursor >>> 0);
+      });
+
+EM_JS(void, emx11_js_ungrab_button,
+      (unsigned int window, unsigned int button, unsigned int modifiers),
+      {
+          if (!globalThis.__EMX11__) return;
+          globalThis.__EMX11__.onUngrabButton(
+              window >>> 0, button >>> 0, modifiers >>> 0);
+      });
+
 /* --- atom ---------------------------------------------------------------- */
 
 EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {

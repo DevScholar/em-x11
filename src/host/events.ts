@@ -262,4 +262,55 @@ export class EventDispatcher {
   forgetWindow(id: number): void {
     this.windowSubscriptions.delete(id);
   }
+
+  /** Find the (window, connId) pair that should receive an event of
+   *  the given mask, mirroring xserver/dix/events.c::DeliverEventsToWindow
+   *  + DeliverEvents propagation:
+   *
+   *    pWin = startWin
+   *    while pWin:
+   *      for each (conn, mask) on pWin:
+   *        if mask & filter: return (pWin, conn)
+   *      pWin = pWin->parent
+   *
+   *  Returns null if no ancestor (including startWin itself) has any
+   *  client selecting `filter`. The first match wins -- if multiple
+   *  clients selected the same window, only the *first* receives the
+   *  event for now. (Real xorg delivers to each via OtherClients;
+   *  twm is the only "extra subscriber" we need to handle so far,
+   *  and it's typically the one creating the frame anyway.)
+   *
+   *  Used by InputBridge.deliverButton to route ButtonPress to the
+   *  right client even when the click lands on a deeper window
+   *  belonging to a different connection (xcalc client click
+   *  propagates up to twm-created frame -> twm gets it). */
+  findSubscriberFor(
+    startWinId: number,
+    filterMask: number,
+  ): { winId: number; connId: number } | null {
+    let cur: number | null = startWinId;
+    while (cur !== null && cur !== 0) {
+      const subs = this.windowSubscriptions.get(cur);
+      if (subs) {
+        for (const [connId, mask] of subs) {
+          if (mask & filterMask) return { winId: cur, connId };
+        }
+      }
+      const parent = this.host.renderer.parentOf(cur);
+      if (parent === cur) break;
+      cur = parent === 0 ? null : parent;
+    }
+    /* Root (id=0 in our world) sometimes has subscribers (twm selects
+     * for ButtonPress on root). Try the renderer's actual root id last. */
+    const rootId = this.host.renderer.windows.size > 0 ? this.host.window.getRootWindow() : 0;
+    if (rootId && rootId !== startWinId) {
+      const subs = this.windowSubscriptions.get(rootId);
+      if (subs) {
+        for (const [connId, mask] of subs) {
+          if (mask & filterMask) return { winId: rootId, connId };
+        }
+      }
+    }
+    return null;
+  }
 }
