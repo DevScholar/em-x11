@@ -25,7 +25,7 @@ target_link_options(xcalc PRIVATE
     "SHELL:-s EXPORT_ES6=1"
     "SHELL:-s EXPORT_NAME=createXcalcModule"
     "SHELL:-s ASYNCIFY=1"
-    "SHELL:-s ENVIRONMENT=web"
+    "SHELL:-s ENVIRONMENT=web,worker"
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     # FS needed so the runtime can stage /usr/lib/X11/app-defaults/XCalc into
     # MEMFS via preRun before Xt's XtResolvePathname looks for it. Without

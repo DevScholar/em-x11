@@ -27,7 +27,7 @@ target_link_options(xeyes PRIVATE
     "SHELL:-s EXPORT_ES6=1"
     "SHELL:-s EXPORT_NAME=createXeyesModule"
     "SHELL:-s ASYNCIFY=1"
-    "SHELL:-s ENVIRONMENT=web"
+    "SHELL:-s ENVIRONMENT=web,worker"
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString']"
     "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_expose_event','_emx11_push_map_request','_emx11_push_reparent_notify']"

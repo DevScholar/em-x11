@@ -46,7 +46,7 @@ target_link_options(twm PRIVATE
     "SHELL:-s EXPORT_ES6=1"
     "SHELL:-s EXPORT_NAME=createTwmModule"
     "SHELL:-s ASYNCIFY=1"
-    "SHELL:-s ENVIRONMENT=web"
+    "SHELL:-s ENVIRONMENT=web,worker"
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     # FS is needed for the runtime to stage /em-x11.twmrc into MEMFS via
     # preRun before main() reads it (see src/runtime/twm-launch.ts).
