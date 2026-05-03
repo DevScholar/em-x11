@@ -359,32 +359,33 @@ export function configureWindow(
   const exposed = paintExposedRegions(r, oldClips);
 
   if (captured && oldSubtreeClip) {
-    /* Union of new clipLists for the moved subtree -- the blit clamps
-     * itself to this so we don't spray pixels where an occluder now
-     * sits. */
-    let newSubtreeClip: Region = win.clipList;
+    /* Union of new borderClips for the moved subtree -- matches the
+     * borderClip-based old snapshot so the blit carries the border
+     * ring too. fb/fbwindow.c::fbCopyWindow intersects against the
+     * new borderClip before miCopyRegion fires. */
+    let newSubtreeBorderClip: Region = win.borderClip;
     const visitNew = (pid: number): void => {
       for (const child of r.windows.values()) {
         if (child.parent === pid) {
-          if (!isEmptyRegion(child.clipList)) {
-            newSubtreeClip = unionRegion(newSubtreeClip, child.clipList);
+          if (!isEmptyRegion(child.borderClip)) {
+            newSubtreeBorderClip = unionRegion(newSubtreeBorderClip, child.borderClip);
           }
           visitNew(child.id);
         }
       }
     };
     visitNew(win.id);
-    const blitted = blitCapturedSubtree(r, captured, oldSubtreeClip, newSubtreeClip, dx, dy);
-    /* Subtract the blitted rects from each window's Expose region: the
-     * canvas already has the correct pixels there, so the client
-     * doesn't need to redraw. */
-    if (blitted.length > 0) {
-      for (const [winId, region] of exposed) {
-        const reduced = regionSubtract(region, blitted);
-        if (isEmptyRegion(reduced)) exposed.delete(winId);
-        else exposed.set(winId, reduced);
-      }
-    }
+    blitCapturedSubtree(r, captured, oldSubtreeClip, newSubtreeBorderClip, dx, dy);
+    /* Deliberately NOT subtracting blitted from `exposed`. xorg's
+     * miMoveWindow sends Expose for the full `newClip - oldClip` even
+     * after CopyWindow has carried pixels to the destination; the
+     * client's redraw lands on top with the same pixels and the
+     * double-paint is not visible. Our earlier optimization to strip
+     * blitted pixels from the Expose region caused widgets on the
+     * moved window AND on siblings to miss repaints when our blit's
+     * `translated_old ∩ new` region didn't precisely match what the
+     * client would have drawn -- a borderDiff off-by-one left
+     * stale pixels that no Expose ever reached. */
   }
 
   return exposed;

@@ -351,13 +351,20 @@ function intersectsAbsRect(
   );
 }
 
-/** Collect the union of `oldClip` for `win` plus every mapped descendant,
- *  using the pre-move clip snapshot captured by `snapshotClips`. This is
- *  the "source pixels" that CopyWindow translates -- each descendant's
- *  clipList was already occluder-minus, so the union contains exactly
- *  the pixels on the canvas that belong to the moved subtree (and nothing
- *  from above-z siblings, even if a sibling corner clipped into the
- *  subtree's bounding rect). */
+/** Collect the union of `oldBorderClip` for `win` plus every mapped
+ *  descendant, using the pre-move clip snapshot captured by
+ *  `snapshotClips`. borderClip (rather than clipList) is the right
+ *  source region for CopyWindow: it includes the window's border ring,
+ *  which fb/fbwindow.c::fbCopyWindow intersects against the NEW
+ *  borderClip before miCopyRegion blits. Using just clipList leaves
+ *  the border pixels un-copied, so every drag frame has to repaint
+ *  the ring via borderDiff and accumulated residue shows up as
+ *  mis-drawn border fragments.
+ *
+ *  Each descendant's borderClip was already occluder-minus, so the
+ *  union contains exactly the pixels on the canvas that belong to
+ *  the moved subtree (and nothing from above-z siblings, even if a
+ *  sibling corner clipped into the subtree's bounding rect). */
 export function collectSubtreeOldClip(
   r: RendererState,
   win: ManagedWindow,
@@ -366,7 +373,7 @@ export function collectSubtreeOldClip(
   let out: Region = EMPTY_REGION;
   const visit = (w: ManagedWindow): void => {
     const snap = oldClips.get(w.id);
-    if (snap && !regionIsEmpty(snap.clip)) out = regionUnion(out, snap.clip);
+    if (snap && !regionIsEmpty(snap.border)) out = regionUnion(out, snap.border);
     for (const child of r.windows.values()) {
       if (child.parent === w.id) visit(child);
     }
