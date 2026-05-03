@@ -32,6 +32,8 @@ import type {
   BootstrapServer,
   ConnectServerClientPort,
   AllocateConnIdResp,
+  WaitForSubstructureRedirectReq,
+  WaitForSubstructureRedirectResp,
   DomMouseMove,
   DomMouseDown,
   DomMouseUp,
@@ -169,17 +171,45 @@ function wireMainChannel(s: ServerState): void {
     mainChannel.reply(msg.seqId, reply);
   });
 
+  /* Wait until some client holds SubstructureRedirectMask on winId.
+   * launchTwm on the main thread awaits this after its launchClient
+   * for twm resolves, before launching xeyes/xcalc. */
+  mainChannel.on<WaitForSubstructureRedirectReq & { seqId: number }>(
+    'WaitForSubstructureRedirect',
+    (msg) => {
+      host.waitForSubstructureRedirect(msg.winId, msg.timeoutMs).then(
+        (holderConnId) => {
+          const reply: WaitForSubstructureRedirectResp = { holderConnId };
+          mainChannel.reply(msg.seqId, reply);
+        },
+        (err: Error) => {
+          mainChannel.replyError(msg.seqId, err.message);
+        },
+      );
+    },
+  );
+
   /* Main posted a MessagePort for a specific connId. Install it as
    * that conn's module surface. */
   mainChannel.on<ConnectServerClientPort>('ConnectServerClientPort', (msg) => {
     const port = msg.port;
-    const surface = new PortModuleSurface(port);
+    const surface = new PortModuleSurface(port, msg.connId);
     host.connection.bindModule(surface, msg.connId);
     s.clientPorts.set(msg.connId, port);
     s.clientSurfaces.set(msg.connId, surface);
     const channel = new RpcChannel(port);
     s.clientChannels.set(msg.connId, channel);
     wireClientChannel(s, msg.connId, channel);
+
+    /* Replay every existing slot to the newcomer. Without this, a
+     * client that joins after twm already mapped its icon manager
+     * wouldn't see those slots -- fine for now (xeyes/xcalc never
+     * query twm's windows) but cheap to do and keeps the xidToSlot
+     * invariant consistent: "every mapped window has a slot entry". */
+    for (const [winId, slot] of s.xidToSlot) {
+      const replay: ServerToClientSlot = { kind: 'Slot.Assigned', winId, slot };
+      port.postMessage(replay);
+    }
   });
 }
 
@@ -232,6 +262,7 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
    * and (for Create/Destroy) push Slot.Assigned/Freed to the owner
    * client so its xidToSlot table stays current. */
   ch.on<ClientToServerVoid & { kind: 'Window.Create' }>('Window.Create', (m) => {
+    console.log('[emx11:server] Window.Create', { conn: m.connId, id: m.id.toString(16), parent: m.parent.toString(16), x: m.x, y: m.y, w: m.w, h: m.h });
     host.onWindowCreate(m.connId, m.id, m.parent, m.x, m.y, m.w, m.h, m.borderWidth, m.borderPixel, m.bgType, m.bgValue);
     const slot = allocSlot(s, m.id);
     pushSlotAssigned(s, m.connId, m.id, slot);
@@ -250,6 +281,7 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
     resyncAllSab(s);   /* geometry cascade can hit many descendants */
   });
   ch.on<ClientToServerVoid & { kind: 'Window.Map' }>('Window.Map', (m) => {
+    console.log('[emx11:server] Window.Map', { conn: m.connId, id: m.id.toString(16) });
     host.onWindowMap(m.connId, m.id);
     resyncAllSab(s);
   });
@@ -347,10 +379,13 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
  *  postMessage delivered over the port. No reply channel needed --
  *  push_* events are strictly fire-and-forget on both sides. */
 class PortModuleSurface implements ModuleCcallSurface {
-  constructor(private readonly port: MessagePort) {}
+  constructor(private readonly port: MessagePort, private readonly connId: number) {}
 
   ccall(name: string, _ret: unknown, _argTypes: unknown, args: unknown): unknown {
     const a = args as number[];
+    if (name === 'emx11_push_map_request' || name === 'emx11_push_reparent_notify' || name === 'emx11_push_expose_event') {
+      console.log(`[emx11:server] → conn ${this.connId} ccall ${name}`, a);
+    }
     switch (name) {
       case 'emx11_push_button_event':
         this.port.postMessage({
@@ -422,18 +457,20 @@ function freeSlot(s: ServerState, winId: number): void {
   clearWinSlot(s.sab, slot);
 }
 
-function pushSlotAssigned(s: ServerState, connId: number, winId: number, slot: number): void {
-  const port = s.clientPorts.get(connId);
-  if (!port) return;
+function pushSlotAssigned(s: ServerState, _ownerConnId: number, winId: number, slot: number): void {
+  /* Broadcast to EVERY connected client, not just the owner. A WM
+   * (twm) needs to resolve cross-conn XIDs (xeyes's shell, xcalc's
+   * shell) to SAB slots when it handles MapRequest -- without the
+   * broadcast the WM's xidToSlot map returns undefined for those
+   * foreign XIDs and XGetWindowAttributes reports "not present",
+   * so AddWindow silently drops the client. */
   const msg: ServerToClientSlot = { kind: 'Slot.Assigned', winId, slot };
-  port.postMessage(msg);
+  for (const port of s.clientPorts.values()) port.postMessage(msg);
 }
 
-function pushSlotFreed(s: ServerState, connId: number, winId: number): void {
-  const port = s.clientPorts.get(connId);
-  if (!port) return;
+function pushSlotFreed(s: ServerState, _ownerConnId: number, winId: number): void {
   const msg: ServerToClientSlot = { kind: 'Slot.Freed', winId };
-  port.postMessage(msg);
+  for (const port of s.clientPorts.values()) port.postMessage(msg);
 }
 
 function syncWindowSab(s: ServerState, winId: number): void {

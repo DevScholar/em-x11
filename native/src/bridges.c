@@ -140,12 +140,11 @@ EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
     var sab = globalThis.__EMX11_SAB__;
     if (sab) {
         var xts = globalThis.__EMX11_XID_TO_SLOT__;
-        var conn = globalThis.__EMX11_CONN__;
-        if (xts && conn) {
-            var rel = (id >>> 0) - (conn.xidBase >>> 0);
-            var slot = (rel >= 0 && rel < xts.length) ? xts[rel] : 0;
-            /* slot 0 = not mirrored (either not ours, or not yet
-             * pushed). Fall through to RPC. */
+        if (xts) {
+            /* xts is a Map<number, number> keyed by full XID so any
+             * window -- including cross-conn ones the WM is handling
+             * via MapRequest -- resolves correctly. */
+            var slot = xts.get(id >>> 0) | 0;
             if (slot > 0) {
                 /* Header = 16 ints; attr stride = 8. */
                 var base = 16 + slot * 8;
@@ -199,10 +198,8 @@ EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
     var sab = globalThis.__EMX11_SAB__;
     if (sab) {
         var xts = globalThis.__EMX11_XID_TO_SLOT__;
-        var conn = globalThis.__EMX11_CONN__;
-        if (xts && conn) {
-            var rel = (id >>> 0) - (conn.xidBase >>> 0);
-            var slot = (rel >= 0 && rel < xts.length) ? xts[rel] : 0;
+        if (xts) {
+            var slot = xts.get(id >>> 0) | 0;
             if (slot > 0) {
                 /* Header 16 ints + attr table 128*8=1024 ints; origin
                  * stride = 3. */

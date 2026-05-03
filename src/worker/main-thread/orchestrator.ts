@@ -15,7 +15,10 @@
 
 import type { RpcChannel } from '../rpc/channel.js';
 import type { SabViews } from '../rpc/sab.js';
-import type { AllocateConnIdResp } from '../rpc/protocol.js';
+import type {
+  AllocateConnIdResp,
+  WaitForSubstructureRedirectResp,
+} from '../rpc/protocol.js';
 import { spawnServerWorker } from './server-proxy.js';
 import { attachInputForwarder } from './input-forwarder.js';
 import {
@@ -38,6 +41,9 @@ export class Orchestrator {
   readonly sab: SabViews;
   private readonly clients: ClientWorkerHandle[] = [];
   private readonly detachInput: () => void;
+  /** Cached once the first AllocateConnId round-trips; stable for the
+   *  life of the Server Worker's Host. */
+  private rootWindow = 0;
 
   constructor(opts: OrchestratorOptions) {
     this.canvas = opts.canvas;
@@ -61,6 +67,7 @@ export class Orchestrator {
     const conn = await this.serverChannel.call<AllocateConnIdResp>({
       kind: 'AllocateConnId',
     });
+    this.rootWindow = conn.rootWindow;
     const allocated: AllocatedConn = {
       connId: conn.connId,
       xidBase: conn.xidBase,
@@ -75,6 +82,30 @@ export class Orchestrator {
     });
     this.clients.push(handle);
     return handle;
+  }
+
+  /** Gate launchClient(xeyes/xcalc) on the WM (twm) having armed
+   *  SubstructureRedirectMask on the target window (usually root).
+   *  Mirrors Host.waitForSubstructureRedirect exactly; Server Worker
+   *  resolves this against its in-Host EventDispatcher. */
+  async waitForSubstructureRedirect(
+    winId: number,
+    timeoutMs?: number,
+  ): Promise<number> {
+    const reply = await this.serverChannel.call<WaitForSubstructureRedirectResp>({
+      kind: 'WaitForSubstructureRedirect',
+      winId,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+    return reply.holderConnId;
+  }
+
+  /** Root-window XID. Cached on first launchClient; launchers that need
+   *  the root to gate `waitForSubstructureRedirect` should always have
+   *  launched their WM client first. Returns 0 before any launch -- a
+   *  thin guard against misuse, not a load-bearing invariant. */
+  getRootWindow(): number {
+    return this.rootWindow;
   }
 
   /** Kill all clients and the server worker. Not typically called

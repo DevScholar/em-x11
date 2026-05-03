@@ -23,6 +23,8 @@
 
 import type { Host } from '../host/index.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
+import type { Orchestrator } from '../worker/main-thread/orchestrator.js';
+import type { ClientWorkerHandle } from '../worker/main-thread/client-proxy.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';
 
@@ -155,4 +157,26 @@ export async function launchTwm(
    * stays as a residual" in the session demo. */
   await host.waitForSubstructureRedirect(host.getRootWindow());
   return result;
+}
+
+/** Worker-mode twm launcher. Spawns twm in its own Client Worker via
+ *  the Orchestrator; twmrc is staged via the `stagedFiles` bootstrap
+ *  field instead of a preRun callback (functions can't cross
+ *  postMessage). Gate still applies: returns only after twm has armed
+ *  SubstructureRedirectMask on root, so the caller's next launchClient
+ *  is guaranteed to route through twm's MapRequest intercept. */
+export async function launchTwmWorker(
+  orch: Orchestrator,
+  options: LaunchTwmOptions = {},
+): Promise<ClientWorkerHandle> {
+  const base = options.artifactBase ?? '/build/artifacts/twm';
+  const handle = await orch.launchClient({
+    glueUrl: `${base}/twm.js`,
+    wasmUrl: `${base}/twm.wasm`,
+    arguments: ['-f', TWMRC_PATH],
+    stagedFiles: [{ path: TWMRC_PATH, contents: TWMRC.trimStart() }],
+    name: 'emx11-twm',
+  });
+  await orch.waitForSubstructureRedirect(orch.getRootWindow());
+  return handle;
 }

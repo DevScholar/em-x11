@@ -7,7 +7,11 @@
  */
 
 import type { RpcChannel } from '../rpc/channel.js';
-import type { BootstrapClient, ConnectServerClientPort } from '../rpc/protocol.js';
+import type {
+  BootstrapClient,
+  ConnectServerClientPort,
+  StagedMemfsFile,
+} from '../rpc/protocol.js';
 import type { SabViews } from '../rpc/sab.js';
 
 export interface SpawnClientOpts {
@@ -18,6 +22,10 @@ export interface SpawnClientOpts {
   wasmUrl: string;
   /** argv for the wasm's main(). */
   arguments?: string[];
+  /** Files to write into the Client Worker's MEMFS before main() runs.
+   *  Replaces the legacy preRun callback model -- functions can't cross
+   *  postMessage, so staging is described as plain data. */
+  stagedFiles?: StagedMemfsFile[];
   /** Optional human-readable name for DevTools / logs. */
   name?: string;
 }
@@ -75,6 +83,7 @@ export function spawnClientWorker(params: {
     glueUrl: opts.glueUrl,
     wasmUrl: opts.wasmUrl,
     ...(opts.arguments !== undefined ? { arguments: opts.arguments } : {}),
+    ...(opts.stagedFiles !== undefined ? { stagedFiles: opts.stagedFiles } : {}),
     serverPort: clientPort,
     sab: sab.sab,
     connId: conn.connId,

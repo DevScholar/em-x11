@@ -20,6 +20,7 @@ import type {
   BootstrapClient,
   ServerToClientXEvent,
   ServerToClientSlot,
+  StagedMemfsFile,
 } from '../rpc/protocol.js';
 import { attachSab, type SabViews } from '../rpc/sab.js';
 import type { EmscriptenModule } from '../../types/emscripten.js';
@@ -38,7 +39,13 @@ declare global {
     xidMask: number;
     rootWindow: number;
   } | undefined;
-  var __EMX11_XID_TO_SLOT__: Uint32Array | undefined;
+  /** Map XID → SAB slot for EVERY window currently mirrored (not just
+   *  windows this client created). Server broadcasts Slot.Assigned to
+   *  every client so a WM's cross-connection XGetWindowAttributes /
+   *  XGetGeometry call resolves to the right slot. A dense Uint32Array
+   *  only covers one conn's XID range and would fail on cross-conn
+   *  lookups (the twm→xeyes MapRequest path). */
+  var __EMX11_XID_TO_SLOT__: Map<number, number> | undefined;
   var __EMX11_MODULE__: EmscriptenModule | undefined;
   /* eslint-enable no-var */
 }
@@ -53,13 +60,9 @@ function bootstrapOnce(ev: MessageEvent): void {
   const channel = new RpcChannel(data.serverPort);
   const sabViews = attachSab(data.sab);
 
-  /* XID-to-slot lookup table. XIDs are per-conn via xidBase+xidMask,
-   * so a dense Uint32Array indexed by `(xid - xidBase)` is at most
-   * xidMask+1 entries. xidMask is typically 0x001FFFFF = ~2M ids,
-   * which is ~8MB. That's too big to allocate eagerly -- in practice
-   * clients rarely allocate more than a few hundred XIDs. Size the
-   * table to 65536 (256KB) and grow on Slot.Assigned if needed. */
-  const xidToSlot = new Uint32Array(65536);
+  /* Global XID → slot map. Server pushes Slot.Assigned for every
+   * window Create (from any conn), Slot.Freed on every Destroy. */
+  const xidToSlot = new Map<number, number>();
 
   globalThis.__EMX11_CHANNEL__ = channel;
   globalThis.__EMX11_SAB__ = sabViews;
@@ -73,28 +76,11 @@ function bootstrapOnce(ev: MessageEvent): void {
 
   channel.on<ServerToClientSlot>('Slot.Assigned', (msg) => {
     if (msg.kind !== 'Slot.Assigned') return;
-    const base = data.xidBase >>> 0;
-    const rel = (msg.winId >>> 0) - base;
-    if (rel >= xidToSlot.length) {
-      /* Grow the table. 2x until it fits. Cap at xidMask+1. */
-      const maxLen = (data.xidMask >>> 0) + 1;
-      let newLen = xidToSlot.length;
-      while (newLen <= rel && newLen < maxLen) newLen *= 2;
-      if (newLen > maxLen) newLen = maxLen;
-      if (newLen <= rel) return;    /* exceeds xidMask; shouldn't happen */
-      const grown = new Uint32Array(newLen);
-      grown.set(xidToSlot);
-      globalThis.__EMX11_XID_TO_SLOT__ = grown;
-      grown[rel] = msg.slot;
-      return;
-    }
-    xidToSlot[rel] = msg.slot;
+    xidToSlot.set(msg.winId >>> 0, msg.slot);
   });
   channel.on<ServerToClientSlot>('Slot.Freed', (msg) => {
     if (msg.kind !== 'Slot.Freed') return;
-    const rel = (msg.winId >>> 0) - (data.xidBase >>> 0);
-    const table = globalThis.__EMX11_XID_TO_SLOT__;
-    if (table && rel >= 0 && rel < table.length) table[rel] = 0;
+    xidToSlot.delete(msg.winId >>> 0);
   });
 
   /* XEvent delivery: Server Worker posts these on our port; we turn
@@ -102,6 +88,9 @@ function bootstrapOnce(ev: MessageEvent): void {
    * the factory below. Buffer early arrivals until Module is ready. */
   const eventBacklog: ServerToClientXEvent[] = [];
   const deliver = (msg: ServerToClientXEvent): void => {
+    if (msg.kind === 'XEvent.MapRequest' || msg.kind === 'XEvent.ReparentNotify' || msg.kind === 'XEvent.Expose') {
+      console.log(`[emx11:client conn ${data.connId}] recv`, msg);
+    }
     const m = globalThis.__EMX11_MODULE__;
     if (!m) { eventBacklog.push(msg); return; }
     routeXEvent(m, msg);
@@ -133,16 +122,25 @@ function bootstrapOnce(ev: MessageEvent): void {
 
     /* Now load the wasm. glue is ESM (EXPORT_ES6=1), so dynamic import
      * resolves its default to the factory. `locateFile` points the
-     * factory at the sibling .wasm URL. */
+     * factory at the sibling .wasm URL. Inject a `preRun` hook that
+     * stages any files the caller listed in BootstrapClient.stagedFiles
+     * (twmrc, app-defaults/*, etc.) -- same role Host.launchClient's
+     * preRun played in legacy mode. */
     try {
       const glue = await import(/* @vite-ignore */ data.glueUrl);
       const factory = glue.default as (opts: {
         locateFile?: (p: string) => string;
         arguments?: string[];
+        preRun?: ((mod: EmscriptenModule) => void)[];
       }) => Promise<EmscriptenModule>;
+      const preRunHooks: ((mod: EmscriptenModule) => void)[] = [];
+      if (data.stagedFiles && data.stagedFiles.length > 0) {
+        preRunHooks.push(makeStagingPreRun(data.stagedFiles));
+      }
       const module = await factory({
         locateFile: (p) => (p.endsWith('.wasm') ? data.wasmUrl : p),
         ...(data.arguments !== undefined ? { arguments: data.arguments } : {}),
+        ...(preRunHooks.length > 0 ? { preRun: preRunHooks } : {}),
       });
       globalThis.__EMX11_MODULE__ = module;
       /* Flush any XEvents that arrived before Module finished loading. */
@@ -192,12 +190,25 @@ function routeXEvent(m: EmscriptenModule, msg: ServerToClientXEvent): void {
       );
       break;
     case 'XEvent.MapRequest':
-      m.ccall(
-        'emx11_push_map_request',
-        null,
-        ['number', 'number'],
-        [msg.parent, msg.window],
-      );
+      console.log(`[emx11:client conn ${(globalThis as { __EMX11_CONN__?: { connId: number } }).__EMX11_CONN__?.connId ?? '?'}] ccall emx11_push_map_request BEGIN`, msg.parent, msg.window);
+      try {
+        m.ccall(
+          'emx11_push_map_request',
+          null,
+          ['number', 'number'],
+          [msg.parent, msg.window],
+        );
+        console.log(`[emx11:client] ccall emx11_push_map_request END OK`);
+      } catch (e) {
+        console.error(`[emx11:client] ccall emx11_push_map_request THREW`, e);
+      }
+      /* Heartbeat: if twm's worker event loop is ticking at all, this
+       * should fire at 500ms. If we never see it after the ccall, the
+       * worker is stuck in a synchronous loop and postMessage delivery
+       * is blocked. If we DO see it, the worker's yielding -- meaning
+       * wasm is in emscripten_sleep -- but twm isn't draining the
+       * queue for some reason. */
+      setTimeout(() => console.log('[emx11:client] heartbeat t+500ms'), 500);
       break;
     case 'XEvent.ReparentNotify':
       m.ccall(
@@ -208,4 +219,40 @@ function routeXEvent(m: EmscriptenModule, msg: ServerToClientXEvent): void {
       );
       break;
   }
+}
+
+/** Build a preRun hook that mkdir -p's each parent dir and writes every
+ *  file in `files` to MEMFS. Duplicates src/runtime/app-defaults.ts so
+ *  the worker layer doesn't depend on runtime/ (which pulls in Host). */
+function makeStagingPreRun(
+  files: StagedMemfsFile[],
+): (mod: EmscriptenModule) => void {
+  return (mod) => {
+    const fs = mod.FS;
+    if (!fs) {
+      throw new Error(
+        '[emx11:client] wasm has no FS — was it built without Emscripten ' +
+          'filesystem support?',
+      );
+    }
+    const dirs = new Set<string>();
+    for (const f of files) {
+      const parts = f.path.split('/').filter((p) => p.length > 0);
+      for (let i = 1; i < parts.length; i++) {
+        dirs.add('/' + parts.slice(0, i).join('/'));
+      }
+    }
+    const ordered = [...dirs].sort((a, b) => a.length - b.length);
+    for (const dir of ordered) {
+      try {
+        fs.mkdir(dir);
+      } catch (e) {
+        const msg = (e as Error).message ?? '';
+        if (!msg.includes('exist') && !msg.includes('EEXIST')) throw e;
+      }
+    }
+    for (const f of files) {
+      fs.writeFile(f.path, f.contents);
+    }
+  };
 }

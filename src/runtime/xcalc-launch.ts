@@ -17,6 +17,8 @@
 import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
 import type { Host } from '../host/index.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
+import type { Orchestrator } from '../worker/main-thread/orchestrator.js';
+import type { ClientWorkerHandle } from '../worker/main-thread/client-proxy.js';
 import { makeStagingPreRun } from './app-defaults.js';
 
 export interface LaunchXcalcOptions {
@@ -37,5 +39,23 @@ export async function launchXcalc(
         { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
       ]),
     ],
+  });
+}
+
+/** Worker-mode xcalc launcher. Same app-defaults staging as the legacy
+ *  launcher, but described as data so it can cross the worker boundary
+ *  (the Client Worker's bootstrap applies it as preRun internally). */
+export async function launchXcalcWorker(
+  orch: Orchestrator,
+  options: LaunchXcalcOptions = {},
+): Promise<ClientWorkerHandle> {
+  const base = options.artifactBase ?? '/build/artifacts/xcalc';
+  return orch.launchClient({
+    glueUrl: `${base}/xcalc.js`,
+    wasmUrl: `${base}/xcalc.wasm`,
+    stagedFiles: [
+      { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
+    ],
+    name: 'emx11-xcalc',
   });
 }

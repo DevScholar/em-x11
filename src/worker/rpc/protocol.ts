@@ -31,11 +31,26 @@ export interface BootstrapServer {
   cssHeight: number;
 }
 
+/** File to stage into the Client Worker's MEMFS before the wasm factory
+ *  runs. Mirrors src/runtime/app-defaults.ts::MemfsFile, but duplicated
+ *  here because the worker layer must not import from runtime/ (runtime
+ *  depends on Host, which we don't want pulled into main-thread builds
+ *  of orchestrator). Contents are plain strings; binary staging is
+ *  rare enough to defer. */
+export interface StagedMemfsFile {
+  path: string;
+  contents: string;
+}
+
 export interface BootstrapClient {
   kind: 'BootstrapClient';
   glueUrl: string;
   wasmUrl: string;
   arguments?: string[];
+  /** Files the Client Worker writes into MEMFS before the factory runs.
+   *  Replaces the main-thread-only `preRun` hook model used by legacy
+   *  Host.launchClient. */
+  stagedFiles?: StagedMemfsFile[];
   serverPort: MessagePort;   /* direct channel to Server Worker */
   sab: SharedArrayBuffer;
   connId: number;
@@ -57,6 +72,20 @@ export interface AllocateConnIdResp {
   xidBase: number;
   xidMask: number;
   rootWindow: number;
+}
+
+/** Main → Server reply RPC: resolve when some client holds
+ *  SubstructureRedirectMask on `winId`. Used by launchTwm to gate the
+ *  next launchClient on twm having armed MapRequest redirection --
+ *  without this barrier, xeyes can map at root-local (0,0) before twm
+ *  ever sees a MapRequest. Mirrors Host.waitForSubstructureRedirect. */
+export interface WaitForSubstructureRedirectReq {
+  kind: 'WaitForSubstructureRedirect';
+  winId: number;
+  timeoutMs?: number;
+}
+export interface WaitForSubstructureRedirectResp {
+  holderConnId: number;
 }
 
 /* --- Draw / window / grab / property (Server ← Client, void or reply) --- */
@@ -189,7 +218,8 @@ export type MainToServer =
   | BootstrapServer
   | ConnectServerClientPort
   | DomRelayMessage
-  | (AllocateConnIdReq & { seqId: number });
+  | (AllocateConnIdReq & { seqId: number })
+  | (WaitForSubstructureRedirectReq & { seqId: number });
 
 export type ServerToMain = Reply;
 

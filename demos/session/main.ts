@@ -1,27 +1,35 @@
 /**
  * Session harness.
  *
- * Two modes:
- *   - default (`?worker=1` absent): legacy main-thread Host. All wasm
- *     clients share the main JS thread via Asyncify yields.
- *   - `?worker=1`: new Worker-based architecture. Main thread forwards
- *     DOM input to a Server Worker that owns the OffscreenCanvas and
- *     the Renderer; each wasm client gets its own Worker. See
- *     plans/tender-jingling-boot.md.
+ * M3: worker mode is the default. Main thread is a thin DOM-input
+ * forwarder + orchestrator; Server Worker owns OffscreenCanvas + Host;
+ * each wasm (twm, xcalc, xeyes) runs in its own Client Worker. Mirrors
+ * xorg's server-process + client-process model.
  *
- * M2 scope: only xeyes is launched under worker mode (simplest client,
- * exercises every EM_JS category). twm + xcalc fall in M3 once the
- * input-sink grab-table + subscriber routing migrate.
+ * Legacy main-thread `Host` path still exists (see src/host/) and is
+ * exercised by pyodide-tk + wacl-tk; it's no longer the default for
+ * the demo session harness. Set `?legacy=1` to fall back.
  */
 
-import { Host } from '../../src/host/index.js';
-import { launchTwm } from '../../src/runtime/twm-launch.js';
-import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
 import { Orchestrator } from '../../src/worker/main-thread/orchestrator.js';
+import { launchTwm, launchTwmWorker } from '../../src/runtime/twm-launch.js';
+import { launchXcalc, launchXcalcWorker } from '../../src/runtime/xcalc-launch.js';
+import { Host } from '../../src/host/index.js';
 
-const useWorker = new URLSearchParams(location.search).has('worker');
+const useLegacy = new URLSearchParams(location.search).has('legacy');
 
-if (useWorker) {
+if (useLegacy) {
+  const host = new Host();
+  host.install();
+
+  await launchTwm(host);
+  await host.launchClient({
+    glueUrl: '/build/artifacts/xeyes/xeyes.js',
+    wasmUrl: '/build/artifacts/xeyes/xeyes.wasm',
+  });
+  await launchXcalc(host);
+  console.log('[emx11:main] legacy main-thread mode booted');
+} else {
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
   canvas.style.margin = '0 auto';
@@ -33,23 +41,18 @@ if (useWorker) {
   /* Expose on window for console debugging. */
   (window as unknown as { __orch: Orchestrator }).__orch = orch;
 
-  /* M2: xeyes only. */
+  /* twm first so its SubstructureRedirect lands before subsequent
+   * launches; launchTwmWorker awaits waitForSubstructureRedirect
+   * internally. */
+  await launchTwmWorker(orch);
+
   await orch.launchClient({
     glueUrl: '/build/artifacts/xeyes/xeyes.js',
     wasmUrl: '/build/artifacts/xeyes/xeyes.wasm',
     name: 'emx11-xeyes',
   });
-  console.log('[emx11:main] worker mode booted (M2: xeyes)');
-} else {
-  const host = new Host();
-  host.install();
 
-  await launchTwm(host);
+  await launchXcalcWorker(orch);
 
-  await host.launchClient({
-    glueUrl: '/build/artifacts/xeyes/xeyes.js',
-    wasmUrl: '/build/artifacts/xeyes/xeyes.wasm',
-  });
-
-  await launchXcalc(host);
+  console.log('[emx11:main] worker mode booted (twm + xeyes + xcalc)');
 }
