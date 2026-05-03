@@ -87,6 +87,14 @@ export default defineConfig({
 
   assetsInclude: ['**/*.wasm'],
 
+  worker: {
+    /* Emit workers as ES modules so dynamic `import(glueUrl)` inside the
+     * Client Worker sees the glue's `export default` -- Emscripten's
+     * MODULARIZE=1+EXPORT_ES6=1 output is ESM, and a classic-script
+     * worker can't import it. */
+    format: 'es',
+  },
+
   optimizeDeps: {
     // Emscripten glue is ESM-ish but does odd things; exclude from pre-bundling.
     exclude: ['@/loader/wasm'],
