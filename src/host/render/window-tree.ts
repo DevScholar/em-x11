@@ -10,11 +10,13 @@
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import { MAX_PARENT_WALK } from '../constants.js';
-import { paintWindowBorder, paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
+import { paintWindowBorder, paintWindowSubtree, snapshotClips, paintExposedRegions, collectSubtreeOldClip, copySubtreeByDelta } from './paint.js';
 import {
   EMPTY_REGION,
   intersect as regionIntersect,
+  isEmpty as isEmptyRegion,
   subtract as regionSubtract,
+  union as unionRegion,
   type Region,
   type Rect,
 } from './region.js';
@@ -303,14 +305,17 @@ export function setWindowBackgroundPixmap(r: RendererState, id: number, pmId: nu
 /** Geometry-only update for an existing window. Preserves parent,
  *  shape, background_pixmap, and mapped state. No-op if id is unknown.
  *
- *  Repaint strategy: erase the OLD absolute rect (paints whatever's
- *  underneath -- root + ancestors + still-mapped siblings that
- *  intersect), then paint the moved window's subtree at the NEW
- *  absolute position. The window's app-level drawings are gone; the C
- *  side synthesizes an Expose in notify_js_reconfigure so the client
- *  redraws content. Children that moved with their parent ALSO lost
- *  their drawings -- they don't get Expose under our model (real X
- *  has backing store; we don't), accepted as a known visual gap. */
+ *  xorg CopyWindow path: when the geometry change is a pure move (same
+ *  width/height), capture the old subtree's visible pixels before the
+ *  clip recompute, then blit them to the new position AFTER bg paint.
+ *  Clients only get Expose for residual area -- the translated-old area
+ *  is already correct on the canvas. Mirrors mi/miwindow.c::miMoveWindow.
+ *
+ *  Resize path (or width/height change): no CopyWindow possible; falls
+ *  back to erase-old-and-repaint. The client receives Expose for the
+ *  full new visible area and redraws content. Matches real xorg's
+ *  resize path too (CopyWindow is skipped when the window's size
+ *  changed). */
 export function configureWindow(
   r: RendererState,
   id: number,
@@ -327,13 +332,54 @@ export function configureWindow(
   if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
     console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
   }
+  const isMoveOnly = win.width === w && win.height === h;
+  const dx = x - win.x;
+  const dy = y - win.y;
   const oldClips = snapshotClips(r);
+
+  /* For the move-only fast path, pre-compute the old subtree clip now
+   * (still reading the pre-move state). After recomputeClipsAll the
+   * old clip data only survives inside `oldClips`; this collects it
+   * into the union the blit needs. */
+  const oldSubtreeClip = isMoveOnly ? collectSubtreeOldClip(r, win, oldClips) : null;
+
   win.x = x;
   win.y = y;
   win.width = w;
   win.height = h;
   recomputeClipsAll(r);
-  return paintExposedRegions(r, oldClips);
+  const exposed = paintExposedRegions(r, oldClips);
+
+  if (oldSubtreeClip && !isEmptyRegion(oldSubtreeClip) && (dx !== 0 || dy !== 0)) {
+    /* Union of new clipLists for the moved subtree -- the blit clamps
+     * itself to this so we don't spray pixels where an occluder now
+     * sits. */
+    let newSubtreeClip: Region = win.clipList;
+    const visitNew = (pid: number): void => {
+      for (const child of r.windows.values()) {
+        if (child.parent === pid) {
+          if (!isEmptyRegion(child.clipList)) {
+            newSubtreeClip = unionRegion(newSubtreeClip, child.clipList);
+          }
+          visitNew(child.id);
+        }
+      }
+    };
+    visitNew(win.id);
+    const blitted = copySubtreeByDelta(r, oldSubtreeClip, newSubtreeClip, dx, dy);
+    /* Subtract the blitted rects from each window's Expose region: the
+     * canvas already has the correct pixels there, so the client
+     * doesn't need to redraw. */
+    if (blitted.length > 0) {
+      for (const [winId, region] of exposed) {
+        const reduced = regionSubtract(region, blitted);
+        if (isEmptyRegion(reduced)) exposed.delete(winId);
+        else exposed.set(winId, reduced);
+      }
+    }
+  }
+
+  return exposed;
 }
 
 /** XReparentWindow: change a window's parent link and local origin.

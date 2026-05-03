@@ -11,8 +11,11 @@ import { absOrigin } from './window-tree.js';
 import { pixelToCssColor, type RootCanvasContext } from '../../runtime/canvas.js';
 import {
   EMPTY_REGION,
+  extents as regionExtents,
   isEmpty as regionIsEmpty,
   subtract as regionSubtract,
+  translate as regionTranslate,
+  union as regionUnion,
   type Region,
 } from './region.js';
 
@@ -346,4 +349,114 @@ function intersectsAbsRect(
     ay - bw < ray + rh &&
     ay + win.height + bw > ray
   );
+}
+
+/** Collect the union of `oldClip` for `win` plus every mapped descendant,
+ *  using the pre-move clip snapshot captured by `snapshotClips`. This is
+ *  the "source pixels" that CopyWindow translates -- each descendant's
+ *  clipList was already occluder-minus, so the union contains exactly
+ *  the pixels on the canvas that belong to the moved subtree (and nothing
+ *  from above-z siblings, even if a sibling corner clipped into the
+ *  subtree's bounding rect). */
+export function collectSubtreeOldClip(
+  r: RendererState,
+  win: ManagedWindow,
+  oldClips: Map<number, ClipSnapshot>,
+): Region {
+  let out: Region = EMPTY_REGION;
+  const visit = (w: ManagedWindow): void => {
+    const snap = oldClips.get(w.id);
+    if (snap && !regionIsEmpty(snap.clip)) out = regionUnion(out, snap.clip);
+    for (const child of r.windows.values()) {
+      if (child.parent === w.id) visit(child);
+    }
+  };
+  visit(win);
+  return out;
+}
+
+/** xorg `CopyWindow` equivalent: blit the subtree's old pixels from the
+ *  main canvas to the new position before clients get any Expose, so
+ *  XMoveWindow looks like a pixel translate instead of a wipe-and-redraw.
+ *  Mirrors mi/miwindow.c::miMoveWindow → pScreen->CopyWindow: the server
+ *  copies the old visible region (old clipList minus occluders) to the
+ *  new position; clients only get Expose for the residual
+ *  `new - copied` set, not for the whole moved area.
+ *
+ *  Without this, every XMoveWindow frame during a drag paints the bg
+ *  (via paintExposedRegions) and then relies on the client to redraw
+ *  its content on the next Expose -- which they can't keep up with at
+ *  drag rate, so the window visibly blanks out during the drag and
+ *  often finishes with holes where the client didn't catch the last
+ *  Expose in time.
+ *
+ *  Uses a temp OffscreenCanvas instead of a direct same-canvas drawImage
+ *  so the src/dst overlap case (small delta) doesn't corrupt pixels --
+ *  same-canvas drawImage behavior with overlap is implementation-defined
+ *  per HTML spec, the round-trip through an intermediate surface is the
+ *  well-defined escape hatch. */
+export function copySubtreeByDelta(
+  r: RendererState,
+  oldSubtreeClip: Region,
+  newSubtreeClip: Region,
+  dx: number,
+  dy: number,
+): Region {
+  if ((dx === 0 && dy === 0) || regionIsEmpty(oldSubtreeClip)) {
+    return EMPTY_REGION;
+  }
+  const ext = regionExtents(oldSubtreeClip);
+  if (!ext || ext.w <= 0 || ext.h <= 0) return EMPTY_REGION;
+
+  /* The "safe to blit" area at the new position is the intersection of
+   * (oldSubtreeClip + delta) and the new subtree's clipList. A pixel
+   * outside newSubtreeClip might now be occluded by something that was
+   * behind the moved window before; blitting there would paint over
+   * unrelated content. */
+  const translated = regionTranslate(oldSubtreeClip, dx, dy);
+  const blitDest: Array<{ ax: number; ay: number; w: number; h: number }> = [];
+  for (const tr of translated) {
+    for (const nr of newSubtreeClip) {
+      const ix = Math.max(tr.ax, nr.ax);
+      const iy = Math.max(tr.ay, nr.ay);
+      const ex = Math.min(tr.ax + tr.w, nr.ax + nr.w);
+      const ey = Math.min(tr.ay + tr.h, nr.ay + nr.h);
+      if (ex > ix && ey > iy) {
+        blitDest.push({ ax: ix, ay: iy, w: ex - ix, h: ey - iy });
+      }
+    }
+  }
+  if (blitDest.length === 0) return EMPTY_REGION;
+
+  const tmp = new OffscreenCanvas(ext.w, ext.h);
+  const tctx = tmp.getContext('2d');
+  if (!tctx) return EMPTY_REGION;
+
+  /* Copy src region out of main canvas into tmp, clipped to the
+   * pre-translate old clip so we don't pick up sibling pixels that
+   * happen to sit inside the extents bbox. */
+  tctx.save();
+  tctx.beginPath();
+  for (const rc of oldSubtreeClip) {
+    tctx.rect(rc.ax - ext.ax, rc.ay - ext.ay, rc.w, rc.h);
+  }
+  tctx.clip();
+  tctx.drawImage(
+    r.canvas.surface as unknown as CanvasImageSource,
+    -ext.ax,
+    -ext.ay,
+  );
+  tctx.restore();
+
+  /* Draw tmp back onto main canvas at the new (offset) extents, clipped
+   * to the blitDest region computed above. */
+  const ctx = r.canvas.ctx;
+  ctx.save();
+  ctx.beginPath();
+  for (const rc of blitDest) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+  ctx.clip();
+  ctx.drawImage(tmp as unknown as CanvasImageSource, ext.ax + dx, ext.ay + dy);
+  ctx.restore();
+
+  return blitDest;
 }
