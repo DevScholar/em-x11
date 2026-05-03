@@ -88,9 +88,6 @@ function bootstrapOnce(ev: MessageEvent): void {
    * the factory below. Buffer early arrivals until Module is ready. */
   const eventBacklog: ServerToClientXEvent[] = [];
   const deliver = (msg: ServerToClientXEvent): void => {
-    if (msg.kind === 'XEvent.MapRequest' || msg.kind === 'XEvent.ReparentNotify' || msg.kind === 'XEvent.Expose') {
-      console.log(`[emx11:client conn ${data.connId}] recv`, msg);
-    }
     const m = globalThis.__EMX11_MODULE__;
     if (!m) { eventBacklog.push(msg); return; }
     routeXEvent(m, msg);
@@ -106,7 +103,7 @@ function bootstrapOnce(ev: MessageEvent): void {
    * assigns a stable root xid (typically 1); clients use it for
    * XDefaultRootWindow / XRootWindow. Injected here so `open_display`
    * bridge can echo it back synchronously without an RPC. */
-  (async () => {
+  void (async () => {
     /* Ask server for the root window in case main didn't inject it in
      * BootstrapClient (simplification vs. a 7-field bootstrap). This
      * fires once at startup; cheap. */
@@ -124,15 +121,16 @@ function bootstrapOnce(ev: MessageEvent): void {
      * resolves its default to the factory. `locateFile` points the
      * factory at the sibling .wasm URL. Inject a `preRun` hook that
      * stages any files the caller listed in BootstrapClient.stagedFiles
-     * (twmrc, app-defaults/*, etc.) -- same role Host.launchClient's
-     * preRun played in legacy mode. */
+     * (twmrc, app-defaults/*, etc.). */
     try {
-      const glue = await import(/* @vite-ignore */ data.glueUrl);
-      const factory = glue.default as (opts: {
-        locateFile?: (p: string) => string;
-        arguments?: string[];
-        preRun?: ((mod: EmscriptenModule) => void)[];
-      }) => Promise<EmscriptenModule>;
+      const glue = (await import(/* @vite-ignore */ data.glueUrl)) as {
+        default: (opts: {
+          locateFile?: (p: string) => string;
+          arguments?: string[];
+          preRun?: ((mod: EmscriptenModule) => void)[];
+        }) => Promise<EmscriptenModule>;
+      };
+      const factory = glue.default;
       const preRunHooks: ((mod: EmscriptenModule) => void)[] = [];
       if (data.stagedFiles && data.stagedFiles.length > 0) {
         preRunHooks.push(makeStagingPreRun(data.stagedFiles));
@@ -190,25 +188,12 @@ function routeXEvent(m: EmscriptenModule, msg: ServerToClientXEvent): void {
       );
       break;
     case 'XEvent.MapRequest':
-      console.log(`[emx11:client conn ${(globalThis as { __EMX11_CONN__?: { connId: number } }).__EMX11_CONN__?.connId ?? '?'}] ccall emx11_push_map_request BEGIN`, msg.parent, msg.window);
-      try {
-        m.ccall(
-          'emx11_push_map_request',
-          null,
-          ['number', 'number'],
-          [msg.parent, msg.window],
-        );
-        console.log(`[emx11:client] ccall emx11_push_map_request END OK`);
-      } catch (e) {
-        console.error(`[emx11:client] ccall emx11_push_map_request THREW`, e);
-      }
-      /* Heartbeat: if twm's worker event loop is ticking at all, this
-       * should fire at 500ms. If we never see it after the ccall, the
-       * worker is stuck in a synchronous loop and postMessage delivery
-       * is blocked. If we DO see it, the worker's yielding -- meaning
-       * wasm is in emscripten_sleep -- but twm isn't draining the
-       * queue for some reason. */
-      setTimeout(() => console.log('[emx11:client] heartbeat t+500ms'), 500);
+      m.ccall(
+        'emx11_push_map_request',
+        null,
+        ['number', 'number'],
+        [msg.parent, msg.window],
+      );
       break;
     case 'XEvent.ReparentNotify':
       m.ccall(
@@ -222,8 +207,7 @@ function routeXEvent(m: EmscriptenModule, msg: ServerToClientXEvent): void {
 }
 
 /** Build a preRun hook that mkdir -p's each parent dir and writes every
- *  file in `files` to MEMFS. Duplicates src/runtime/app-defaults.ts so
- *  the worker layer doesn't depend on runtime/ (which pulls in Host). */
+ *  file in `files` to MEMFS. */
 function makeStagingPreRun(
   files: StagedMemfsFile[],
 ): (mod: EmscriptenModule) => void {

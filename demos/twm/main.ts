@@ -1,9 +1,11 @@
 /**
- * xeyes demo harness. Spawns the xeyes wasm in its own Client Worker
- * via Orchestrator.
+ * twm-only demo. Useful for inspecting how the window manager itself
+ * paints: root weave, icon manager frame, default menu. No managed
+ * clients are launched, so every window on screen belongs to twm.
  */
 
 import { Orchestrator } from '../../src/worker/main-thread/orchestrator.js';
+import { launchTwm } from '../../src/runtime/twm-launch.js';
 
 const canvas = document.createElement('canvas');
 canvas.style.display = 'block';
@@ -12,10 +14,4 @@ canvas.tabIndex = 0;
 document.body.appendChild(canvas);
 
 const orch = new Orchestrator({ canvas, cssWidth: 1024, cssHeight: 768 });
-
-const base = '/build/artifacts/xeyes';
-await orch.launchClient({
-  glueUrl: `${base}/xeyes.js`,
-  wasmUrl: `${base}/xeyes.wasm`,
-  name: 'emx11-xeyes',
-});
+await launchTwm(orch);

@@ -32,11 +32,9 @@ export interface BootstrapServer {
 }
 
 /** File to stage into the Client Worker's MEMFS before the wasm factory
- *  runs. Mirrors src/runtime/app-defaults.ts::MemfsFile, but duplicated
- *  here because the worker layer must not import from runtime/ (runtime
- *  depends on Host, which we don't want pulled into main-thread builds
- *  of orchestrator). Contents are plain strings; binary staging is
- *  rare enough to defer. */
+ *  runs. Contents are plain strings; binary staging is rare enough to
+ *  defer. Lives in this layer (rather than runtime/) because functions
+ *  can't cross postMessage — staging has to be described as data. */
 export interface StagedMemfsFile {
   path: string;
   contents: string;

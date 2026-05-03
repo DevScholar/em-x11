@@ -96,9 +96,10 @@ export class RpcChannel {
       this.handlers.set(kind, set);
     }
     set.add(handler as Handler);
+    const created = set;
     return () => {
-      set!.delete(handler as Handler);
-      if (set!.size === 0) this.handlers.delete(kind);
+      created.delete(handler as Handler);
+      if (created.size === 0) this.handlers.delete(kind);
     };
   }
 

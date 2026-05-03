@@ -193,7 +193,7 @@ function wireMainChannel(s: ServerState): void {
    * that conn's module surface. */
   mainChannel.on<ConnectServerClientPort>('ConnectServerClientPort', (msg) => {
     const port = msg.port;
-    const surface = new PortModuleSurface(port, msg.connId);
+    const surface = new PortModuleSurface(port);
     host.connection.bindModule(surface, msg.connId);
     s.clientPorts.set(msg.connId, port);
     s.clientSurfaces.set(msg.connId, surface);
@@ -262,7 +262,6 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
    * and (for Create/Destroy) push Slot.Assigned/Freed to the owner
    * client so its xidToSlot table stays current. */
   ch.on<ClientToServerVoid & { kind: 'Window.Create' }>('Window.Create', (m) => {
-    console.log('[emx11:server] Window.Create', { conn: m.connId, id: m.id.toString(16), parent: m.parent.toString(16), x: m.x, y: m.y, w: m.w, h: m.h });
     host.onWindowCreate(m.connId, m.id, m.parent, m.x, m.y, m.w, m.h, m.borderWidth, m.borderPixel, m.bgType, m.bgValue);
     const slot = allocSlot(s, m.id);
     pushSlotAssigned(s, m.connId, m.id, slot);
@@ -281,7 +280,6 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
     resyncAllSab(s);   /* geometry cascade can hit many descendants */
   });
   ch.on<ClientToServerVoid & { kind: 'Window.Map' }>('Window.Map', (m) => {
-    console.log('[emx11:server] Window.Map', { conn: m.connId, id: m.id.toString(16) });
     host.onWindowMap(m.connId, m.id);
     resyncAllSab(s);
   });
@@ -339,13 +337,13 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
     const r = host.peekProperty(m.w, m.atom, m.reqType, m.longOffset, m.longLength, m.deleteFlag);
     if (!r || !r.found) { ch.reply(m.seqId, { data: new ArrayBuffer(0) }); return; }
     /* Transfer the bytes -- copy into a fresh ArrayBuffer for transfer. */
-    const copy = r.data.slice().buffer as ArrayBuffer;
+    const copy = r.data.slice().buffer;
     ch.reply(m.seqId, { data: copy }, [copy]);
   });
   ch.on<ClientToServerCall & { kind: 'Property.ListCount' }>('Property.ListCount', (m) => {
     const atoms = host.listProperties(m.w);
     const u32 = new Uint32Array(atoms);
-    const buf = u32.buffer as ArrayBuffer;
+    const buf = u32.buffer;
     ch.reply(m.seqId, { atoms: u32 }, [buf]);
   });
 
@@ -379,13 +377,10 @@ function wireClientChannel(s: ServerState, connId: number, ch: RpcChannel): void
  *  postMessage delivered over the port. No reply channel needed --
  *  push_* events are strictly fire-and-forget on both sides. */
 class PortModuleSurface implements ModuleCcallSurface {
-  constructor(private readonly port: MessagePort, private readonly connId: number) {}
+  constructor(private readonly port: MessagePort) {}
 
   ccall(name: string, _ret: unknown, _argTypes: unknown, args: unknown): unknown {
     const a = args as number[];
-    if (name === 'emx11_push_map_request' || name === 'emx11_push_reparent_notify' || name === 'emx11_push_expose_event') {
-      console.log(`[emx11:server] → conn ${this.connId} ccall ${name}`, a);
-    }
     switch (name) {
       case 'emx11_push_button_event':
         this.port.postMessage({

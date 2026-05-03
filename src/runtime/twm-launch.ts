@@ -1,5 +1,5 @@
 /**
- * twm launcher with em-x11 specific config.
+ * twm launcher.
  *
  * The vendored twm in third-party/ is a verbatim X.Org tarball that gets
  * fetched at setup time and is NOT git-tracked. Patching it in-place would
@@ -10,19 +10,15 @@
  * blocks in XMaskEvent waiting for a button press to commit the new
  * window's position (see add_window.c around line 532). On real X this
  * works because there's a human at the keyboard who clicks; in our
- * single-thread JS world the only client running while twm waits is
- * twm itself (xeyes is suspended on its redirected XMapWindow), so the
- * wait would never end. RandomPlacement makes twm pick a position
- * automatically and proceed straight to XCreateWindow(frame) +
- * XReparentWindow.
+ * browser world the only client running while twm waits is twm itself
+ * (xeyes is suspended on its redirected XMapWindow), so the wait would
+ * never end. RandomPlacement makes twm pick a position automatically.
  *
- * Strategy: stage a twmrc into MEMFS via the Module's preRun hook, then
- * tell twm to read it via `-f`. Same mechanism people use on real Linux
+ * Strategy: stage a twmrc into MEMFS via `stagedFiles`, then tell twm
+ * to read it via `-f`. Same mechanism people use on real Linux
  * (`twm -f ~/.twmrc`).
  */
 
-import type { Host } from '../host/index.js';
-import type { EmscriptenModule } from '../types/emscripten.js';
 import type { Orchestrator } from '../worker/main-thread/orchestrator.js';
 import type { ClientWorkerHandle } from '../worker/main-thread/client-proxy.js';
 
@@ -32,7 +28,7 @@ const TWMRC_PATH = '/em-x11.twmrc';
  * additions:
  *
  *   - `RandomPlacement`: see the file header for why interactive placement
- *     deadlocks our single-thread JS world.
+ *     deadlocks our browser world.
  *
  *   - `OpaqueMove`: twm defaults to OpaqueMove=FALSE, which means a
  *     window drag (f.move) draws a "rubber band" XSegment outline on the
@@ -126,46 +122,12 @@ export interface LaunchTwmOptions {
   artifactBase?: string;
 }
 
-export async function launchTwm(
-  host: Host,
-  options: LaunchTwmOptions = {},
-): Promise<{ connId: number; module: EmscriptenModule }> {
-  const base = options.artifactBase ?? '/build/artifacts/twm';
-  const result = await host.launchClient({
-    glueUrl: `${base}/twm.js`,
-    wasmUrl: `${base}/twm.wasm`,
-    arguments: ['-f', TWMRC_PATH],
-    preRun: [
-      (mod) => {
-        const fs = mod.FS;
-        if (!fs) {
-          throw new Error(
-            'em-x11: twm wasm has no FS — was it built with the default ' +
-              'Emscripten filesystem support?',
-          );
-        }
-        fs.writeFile(TWMRC_PATH, TWMRC.trimStart());
-      },
-    ],
-  });
-  /* Gate the return on twm having armed SubstructureRedirect on root.
-   * Without this gate, the caller's next launchClient (xeyes in
-   * demos/session) can race ahead of twm's XSelectInput call and get
-   * its shell mapped at root-local (0,0) before the MapRequest path
-   * is even active. This was visible as "xeyes briefly paints at
-   * canvas (0,0), then twm reparents and the original (0,0) paint
-   * stays as a residual" in the session demo. */
-  await host.waitForSubstructureRedirect(host.getRootWindow());
-  return result;
-}
-
-/** Worker-mode twm launcher. Spawns twm in its own Client Worker via
- *  the Orchestrator; twmrc is staged via the `stagedFiles` bootstrap
- *  field instead of a preRun callback (functions can't cross
- *  postMessage). Gate still applies: returns only after twm has armed
+/** Spawn twm in its own Client Worker. Returns once twm has armed
  *  SubstructureRedirectMask on root, so the caller's next launchClient
- *  is guaranteed to route through twm's MapRequest intercept. */
-export async function launchTwmWorker(
+ *  is guaranteed to route through twm's MapRequest intercept. Without
+ *  that barrier, a racing client could map at root-local (0,0) before
+ *  twm ever sees a MapRequest. */
+export async function launchTwm(
   orch: Orchestrator,
   options: LaunchTwmOptions = {},
 ): Promise<ClientWorkerHandle> {
