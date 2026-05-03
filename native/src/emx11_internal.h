@@ -22,7 +22,14 @@
 #include <stddef.h>
 
 #define EMX11_MAX_WINDOWS          256
-#define EMX11_EVENT_QUEUE_CAPACITY 256
+/* Queue sized for a multi-second drag: twm's F_MOVE only drains the events
+ * its XMaskEvent mask selects (Button/Motion/Crossing/Expose/Visibility),
+ * so every XMoveWindow we generate accumulates a StructureNotify-gated
+ * ConfigureNotify on twm's queue that won't be consumed until F_MOVE
+ * returns. At 60Hz a 4-second drag lands ~240 entries; add Expose for
+ * siblings + headroom and 256 overflows, dropping ButtonRelease and
+ * wedging F_MOVE's XMaskEvent. */
+#define EMX11_EVENT_QUEUE_CAPACITY 4096
 
 /* ------------------------------------------------------------------------- */
 /*  GC -- opaque to clients; upstream only exposes "ext_data" (through the  */

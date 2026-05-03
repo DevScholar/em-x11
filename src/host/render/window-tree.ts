@@ -10,7 +10,7 @@
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import { MAX_PARENT_WALK } from '../constants.js';
-import { paintWindowBorder, paintWindowSubtree, snapshotClips, paintExposedRegions, collectSubtreeOldClip, copySubtreeByDelta } from './paint.js';
+import { paintWindowBorder, paintWindowSubtree, snapshotClips, paintExposedRegions, collectSubtreeOldClip, captureSubtreePixels, blitCapturedSubtree } from './paint.js';
 import {
   EMPTY_REGION,
   intersect as regionIntersect,
@@ -337,11 +337,19 @@ export function configureWindow(
   const dy = y - win.y;
   const oldClips = snapshotClips(r);
 
-  /* For the move-only fast path, pre-compute the old subtree clip now
-   * (still reading the pre-move state). After recomputeClipsAll the
-   * old clip data only survives inside `oldClips`; this collects it
-   * into the union the blit needs. */
+  /* Move-only fast path: capture the old subtree pixels from the main
+   * canvas BEFORE the structural update runs. paintExposedRegions will
+   * repaint sibling / root bg over the vacated old position as part of
+   * its newClip-oldClip diff walk, so reading from the canvas after
+   * recompute gets wiped bg pixels instead of the window's content.
+   * The two-phase capture→blit mirrors mi/miwindow.c::miMoveWindow
+   * which snapshots the old source region before the clip recompute
+   * and calls pScreen->CopyWindow afterward. */
   const oldSubtreeClip = isMoveOnly ? collectSubtreeOldClip(r, win, oldClips) : null;
+  const captured =
+    oldSubtreeClip && !isEmptyRegion(oldSubtreeClip) && (dx !== 0 || dy !== 0)
+      ? captureSubtreePixels(r, oldSubtreeClip)
+      : null;
 
   win.x = x;
   win.y = y;
@@ -350,7 +358,7 @@ export function configureWindow(
   recomputeClipsAll(r);
   const exposed = paintExposedRegions(r, oldClips);
 
-  if (oldSubtreeClip && !isEmptyRegion(oldSubtreeClip) && (dx !== 0 || dy !== 0)) {
+  if (captured && oldSubtreeClip) {
     /* Union of new clipLists for the moved subtree -- the blit clamps
      * itself to this so we don't spray pixels where an occluder now
      * sits. */
@@ -366,7 +374,7 @@ export function configureWindow(
       }
     };
     visitNew(win.id);
-    const blitted = copySubtreeByDelta(r, oldSubtreeClip, newSubtreeClip, dx, dy);
+    const blitted = blitCapturedSubtree(r, captured, oldSubtreeClip, newSubtreeClip, dx, dy);
     /* Subtract the blitted rects from each window's Expose region: the
      * canvas already has the correct pixels there, so the client
      * doesn't need to redraw. */
