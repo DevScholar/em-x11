@@ -135,6 +135,18 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
 static Window       grab_window         = None;
 static unsigned int grab_button_count   = 0;
 
+/* Monotonic millisecond timestamp for xbutton/xmotion/xkey/xcrossing `time`
+ * fields. Some WMs (twm's ConstrainedMove in particular: menus.c:1500) compare
+ * `event.time - last_click_time` against a timeout to detect rapid successive
+ * clicks. Leaving time=0 on every event makes the delta always 0, which trips
+ * the < 400ms gate on *every* press -- twm then enters ConstMove and freezes
+ * one axis of the drag. emscripten_get_now is a double of ms since epoch, so
+ * unsigned-casting it is fine for the 32-bit Time field (wraps every ~49 days
+ * like a real X server does). */
+static Time event_now(void) {
+    return (Time)(unsigned long)emscripten_get_now();
+}
+
 /* Window the pointer is currently over, as of the last motion or press we
  * observed. Real X servers synthesize EnterNotify / LeaveNotify whenever the
  * pointer crosses a window boundary (x11protocol §Window crossing), grab or
@@ -174,6 +186,7 @@ static void emit_crossing(Display *dpy, int type, Window w,
     ev.xcrossing.same_screen = True;
     ev.xcrossing.focus       = (w == dpy->focus_window);
     ev.xcrossing.state       = state;
+    ev.xcrossing.time        = event_now();
     emx11_event_queue_push(dpy, &ev);
 }
 
@@ -259,6 +272,7 @@ void emx11_push_button_event(int type, Window window, int x, int y,
     ev.xbutton.button      = button;
     ev.xbutton.state       = state;
     ev.xbutton.same_screen = True;
+    ev.xbutton.time        = event_now();
     emx11_event_queue_push(dpy, &ev);
 }
 
@@ -332,6 +346,7 @@ void emx11_push_motion_event(Window window, int x, int y,
     ev.xmotion.state       = state;
     ev.xmotion.is_hint     = NotifyNormal;
     ev.xmotion.same_screen = True;
+    ev.xmotion.time        = event_now();
     emx11_event_queue_push(dpy, &ev);
 }
 
@@ -351,6 +366,7 @@ void emx11_push_key_event(int type, Window window, unsigned int keysym,
     ev.xkey.state       = state;
     ev.xkey.keycode     = emx11_keysym_to_keycode(dpy, (KeySym)keysym);
     ev.xkey.same_screen = True;
+    ev.xkey.time        = event_now();
     emx11_event_queue_push(dpy, &ev);
 }
 

@@ -280,6 +280,11 @@ Bool XQueryPointer(Display *dpy, Window w, Window *root_return,
     (void)w;
     int px = 0, py = 0;
     emx11_js_pointer_xy(&px, &py);
+    EM_ASM({
+        if (globalThis.__EMX11_TRACE_QP__) {
+            console.log('[c-qp] conn=' + $0 + ' px=' + $1 + ' py=' + $2);
+        }
+    }, dpy->conn_id, px, py);
     if (root_return)     *root_return     = dpy->screens[0].root;
     if (child_return)    *child_return    = None;
     if (root_x_return)   *root_x_return   = px;

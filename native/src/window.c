@@ -2,6 +2,7 @@
 #include "emx11_meta_layout.h"
 
 #include <X11/Xatom.h>
+#include <emscripten.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -321,6 +322,13 @@ static void notify_js_reconfigure(Display *dpy, EmxWindow *win) {
 int XMoveWindow(Display *display, Window w, int x, int y) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
+    EM_ASM({
+        if (globalThis.__EMX11_TRACE_MOVE__) {
+            console.log('[c-move] conn=' + $0 + ' win=' + ($1 >>> 0) +
+                        ' x=' + $2 + ' y=' + $3 +
+                        ' old_x=' + $4 + ' old_y=' + $5);
+        }
+    }, display->conn_id, w, x, y, win->x, win->y);
     win->x = x;
     win->y = y;
     notify_js_reconfigure(display, win);
@@ -551,10 +559,34 @@ Bool XTranslateCoordinates(Display *display, Window src_w, Window dest_w,
     EmxWindow *src = emx11_window_find(display, src_w);
     EmxWindow *dst = emx11_window_find(display, dest_w);
     if (!src || !dst) return False;
-    /* Windows are children of the root in our flat model: adding src pos
-     * and subtracting dst pos is enough. */
-    if (dest_x_return) *dest_x_return = src->x + src_x - dst->x;
-    if (dest_y_return) *dest_y_return = src->y + src_y - dst->y;
+    /* Walk src and dst to their root-relative origins, then compute the
+     * destination offset. The old implementation assumed a flat tree
+     * (all windows children of root) and did `src->x + src_x - dst->x`,
+     * which is wrong as soon as src or dst has a non-root parent -- twm
+     * frames contain a titlebar child, and F_MOVE's XTranslateCoordinates
+     * from titlebar to frame returned `0 + click_x - frame_x` instead
+     * of `click_x`, so the drag offset was off by the frame's current
+     * position and the window jumped on drag start. */
+    int src_ax = 0, src_ay = 0;
+    for (EmxWindow *cur = src; cur; ) {
+        src_ax += cur->x;
+        src_ay += cur->y;
+        if (cur->parent == None || cur->parent == cur->id) break;
+        EmxWindow *p = emx11_window_find(display, cur->parent);
+        if (!p) break;
+        cur = p;
+    }
+    int dst_ax = 0, dst_ay = 0;
+    for (EmxWindow *cur = dst; cur; ) {
+        dst_ax += cur->x;
+        dst_ay += cur->y;
+        if (cur->parent == None || cur->parent == cur->id) break;
+        EmxWindow *p = emx11_window_find(display, cur->parent);
+        if (!p) break;
+        cur = p;
+    }
+    if (dest_x_return) *dest_x_return = src_ax + src_x - dst_ax;
+    if (dest_y_return) *dest_y_return = src_ay + src_y - dst_ay;
     if (child_return)  *child_return  = None;
     return True;
 }
