@@ -10,13 +10,11 @@
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import { MAX_PARENT_WALK } from '../constants.js';
-import { paintWindowBorder, paintWindowSubtree, snapshotClips, paintExposedRegions, collectSubtreeOldClip, captureSubtreePixels, blitCapturedSubtree } from './paint.js';
+import { paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
 import {
   EMPTY_REGION,
   intersect as regionIntersect,
-  isEmpty as isEmptyRegion,
   subtract as regionSubtract,
-  union as unionRegion,
   type Region,
   type Rect,
 } from './region.js';
@@ -36,6 +34,7 @@ export function addWindow(
 ): void {
   /* Create only stores state -- the window isn't visible until
    * mapWindow flips `mapped` and triggers the sync paint. */
+  const { surface, ctx } = allocBacking(width, height);
   r.windows.set(id, {
     id,
     parent,
@@ -56,7 +55,29 @@ export function addWindow(
      * ancestor) maps. */
     clipList: EMPTY_REGION,
     borderClip: EMPTY_REGION,
+    backingSurface: surface,
+    backingCtx: ctx,
+    backingDirty: false,
   });
+}
+
+/** Allocate a backing OffscreenCanvas + 2D context for a window of
+ *  the given size. Width/height are clamped to >= 1 because
+ *  OffscreenCanvas constructor rejects 0 dimensions; a transient
+ *  zero-sized window (some Xt sequences create then resize) still
+ *  needs a valid backing surface so dual-writes don't crash. */
+function allocBacking(width: number, height: number): {
+  surface: OffscreenCanvas;
+  ctx: OffscreenCanvasRenderingContext2D;
+} {
+  const w = Math.max(1, Math.floor(width));
+  const h = Math.max(1, Math.floor(height));
+  const surface = new OffscreenCanvas(w, h);
+  const ctx = surface.getContext('2d');
+  if (!ctx) {
+    throw new Error(`em-x11: backing 2D context unavailable for ${w}x${h}`);
+  }
+  return { surface, ctx };
 }
 
 /** Recompute `clipList` and `borderClip` for every window in the tree.
@@ -209,26 +230,12 @@ function absBoundingRectOf(r: RendererState, win: ManagedWindow): Rect {
 /** Border-only update. Width or pixel can change independently of
  *  geometry (XSetWindowBorder vs XSetWindowBorderWidth).
  *
- *  Real X (xserver dix/window.c::ChangeWindowAttributes for CWBorderPixel,
- *  ChangeBorderWidth for CWBorderWidth) repaints only the *border ring*
- *  in the pixel-only case -- the interior is untouched. We used to wipe
- *  the entire subtree via paintWindowSubtree, which under twm's
- *  focus-follows-pointer cost xcalc all its button labels: every focus
- *  change calls XSetWindowBorder(frame, color), our wipe cleared the
- *  whole frame area (including descendants' content), but no Expose
- *  was synthesized to descendants -- so the buttons stayed blank until
- *  some other event (EnterNotify -> Xaw highlight()) re-triggered each
- *  button's redraw individually. Real X protocol forbids touching
- *  pixels outside the ring on a pixel-only change.
+ *  Pixel-only path: ring stays in the same place. The compositor
+ *  reads `borderPixel` fresh every frame, so we just markDirty.
+ *  No Expose because `clipList` is unchanged.
  *
- *  Pixel-only path: redraw the ring; nothing else.
- *
- *  Width-changed path: same outer-strip nuke as before for now.
- *  This is a rare case (twm focus doesn't trigger it; only manual
- *  XSetWindowBorderWidth and XConfigureWindow CWBorderWidth do), and
- *  proper handling needs Expose synthesis on overlapped descendants
- *  -- not the simple ring repaint -- which is left for the broader
- *  Expose-on-overpaint pass. */
+ *  Width-changed path: bounding rect grew/shrank, clipLists move.
+ *  Diff paint via snapshot/recompute. */
 export function setWindowBorder(
   r: RendererState,
   id: number,
@@ -246,15 +253,9 @@ export function setWindowBorder(
     console.log('[paint] setWindowBorder', id, 'widthChanged=', widthChanged);
   }
   if (!widthChanged) {
-    /* Color-only change: ring is in the same place, just different
-     * pixel. Repaint just the ring -- no Expose needed because
-     * `clipList` is unchanged so no client pixels are invalidated. */
-    paintWindowBorder(r, r.canvas.ctx, w);
+    r.markDirty();
     return new Map();
   }
-  /* Width changed: bounding rect grew/shrank, clipLists move. Diff
-   * paint via the snapshot/recompute pipeline so we touch only what
-   * actually changed visibility. */
   const oldClips = snapshotClips(r);
   recomputeClipsAll(r);
   return paintExposedRegions(r, oldClips);
@@ -316,6 +317,20 @@ export function setWindowBackgroundPixmap(r: RendererState, id: number, pmId: nu
  *  full new visible area and redraws content. Matches real xorg's
  *  resize path too (CopyWindow is skipped when the window's size
  *  changed). */
+/** Geometry-only update for an existing window. Preserves parent,
+ *  shape, background_pixmap, and mapped state. No-op if id is unknown.
+ *
+ *  In the backing-store model a move is just (x, y) updates plus
+ *  markDirty -- the window's pixels live in its own backing in
+ *  window-local coords, so they "move" simply because the compositor
+ *  blits the same backing at the new (ax, ay). No CopyWindow capture/
+ *  blit is needed.
+ *
+ *  A resize allocates a fresh backing and carries the overlapping
+ *  top-left rect of old pixels so in-flight content survives. Real X
+ *  preserves the (0,0)-anchored sub-rect on resize too; the rest is
+ *  freshly bg-painted by paintExposedRegions when the new clipList
+ *  area is computed. */
 export function configureWindow(
   r: RendererState,
   id: number,
@@ -332,63 +347,28 @@ export function configureWindow(
   if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
     console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
   }
-  const isMoveOnly = win.width === w && win.height === h;
-  const dx = x - win.x;
-  const dy = y - win.y;
   const oldClips = snapshotClips(r);
-
-  /* Move-only fast path: capture the old subtree pixels from the main
-   * canvas BEFORE the structural update runs. paintExposedRegions will
-   * repaint sibling / root bg over the vacated old position as part of
-   * its newClip-oldClip diff walk, so reading from the canvas after
-   * recompute gets wiped bg pixels instead of the window's content.
-   * The two-phase capture→blit mirrors mi/miwindow.c::miMoveWindow
-   * which snapshots the old source region before the clip recompute
-   * and calls pScreen->CopyWindow afterward. */
-  const oldSubtreeClip = isMoveOnly ? collectSubtreeOldClip(r, win, oldClips) : null;
-  const captured =
-    oldSubtreeClip && !isEmptyRegion(oldSubtreeClip) && (dx !== 0 || dy !== 0)
-      ? captureSubtreePixels(r, oldSubtreeClip)
-      : null;
-
   win.x = x;
   win.y = y;
-  win.width = w;
-  win.height = h;
-  recomputeClipsAll(r);
-  const exposed = paintExposedRegions(r, oldClips);
-
-  if (captured && oldSubtreeClip) {
-    /* Union of new borderClips for the moved subtree -- matches the
-     * borderClip-based old snapshot so the blit carries the border
-     * ring too. fb/fbwindow.c::fbCopyWindow intersects against the
-     * new borderClip before miCopyRegion fires. */
-    let newSubtreeBorderClip: Region = win.borderClip;
-    const visitNew = (pid: number): void => {
-      for (const child of r.windows.values()) {
-        if (child.parent === pid) {
-          if (!isEmptyRegion(child.borderClip)) {
-            newSubtreeBorderClip = unionRegion(newSubtreeBorderClip, child.borderClip);
-          }
-          visitNew(child.id);
-        }
-      }
-    };
-    visitNew(win.id);
-    blitCapturedSubtree(r, captured, oldSubtreeClip, newSubtreeBorderClip, dx, dy);
-    /* Deliberately NOT subtracting blitted from `exposed`. xorg's
-     * miMoveWindow sends Expose for the full `newClip - oldClip` even
-     * after CopyWindow has carried pixels to the destination; the
-     * client's redraw lands on top with the same pixels and the
-     * double-paint is not visible. Our earlier optimization to strip
-     * blitted pixels from the Expose region caused widgets on the
-     * moved window AND on siblings to miss repaints when our blit's
-     * `translated_old ∩ new` region didn't precisely match what the
-     * client would have drawn -- a borderDiff off-by-one left
-     * stale pixels that no Expose ever reached. */
+  if (win.width !== w || win.height !== h) {
+    const fresh = allocBacking(w, h);
+    const carryW = Math.min(win.width, w);
+    const carryH = Math.min(win.height, h);
+    if (carryW > 0 && carryH > 0) {
+      fresh.ctx.drawImage(
+        win.backingSurface as unknown as CanvasImageSource,
+        0, 0, carryW, carryH,
+        0, 0, carryW, carryH,
+      );
+    }
+    win.backingSurface = fresh.surface;
+    win.backingCtx = fresh.ctx;
+    win.backingDirty = true;
+    win.width = w;
+    win.height = h;
   }
-
-  return exposed;
+  recomputeClipsAll(r);
+  return paintExposedRegions(r, oldClips);
 }
 
 /** XReparentWindow: change a window's parent link and local origin.

@@ -58,6 +58,25 @@ export interface ManagedWindow {
    *  mirroring xserver `pWin->borderClip`. Always a superset of
    *  `clipList`; the border ring is `borderClip - clipList`. */
   borderClip: Region;
+  /** Per-window backing pixmap, content-only (width × height in
+   *  window-local coords; border lives outside and is composited
+   *  separately). Mirrors real X's per-window backing store. All
+   *  draw primitives paint into this in window-local coordinates;
+   *  the compositor (Phase B+) reads it each frame and blits to
+   *  the root canvas with stack order, clip and shape applied.
+   *
+   *  Phase A: dual-write target — all primitives write here in
+   *  parallel to the existing root-canvas path so we can A/B verify
+   *  pixel equivalence before flipping the source of truth.
+   *
+   *  Resized in `configureWindow` when width/height changes (old
+   *  pixels carried via drawImage so in-flight content survives a
+   *  resize). Released by GC when the window is destroyed. */
+  backingSurface: OffscreenCanvas;
+  backingCtx: OffscreenCanvasRenderingContext2D;
+  /** Set true on every backing write; cleared by the compositor
+   *  after a successful blit. Phase A: set but not yet consumed. */
+  backingDirty: boolean;
 }
 
 /** Callback the Host supplies so the renderer can reach into the
@@ -75,4 +94,8 @@ export interface RendererState {
   readonly windows: Map<number, ManagedWindow>;
   readonly pixmapLookup: PixmapLookup;
   stackCounter: number;
+  /** Schedule a compose at next rAF. Called by every helper that
+   *  mutates a backing surface or window-tree state that affects
+   *  visible pixels. Coalesced internally; safe to call repeatedly. */
+  markDirty(): void;
 }

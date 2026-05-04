@@ -39,6 +39,12 @@ import type { Region } from './region.js';
 import * as tree from './window-tree.js';
 import * as draw from './draw.js';
 import { findWindowAt } from './hit-test.js';
+import {
+  createCompositorState,
+  markDirty as compMarkDirty,
+  composeNow as compComposeNow,
+  type CompositorState,
+} from './compositor.js';
 
 export type { ManagedWindow, PixmapLookup, RendererState } from './types.js';
 export type { Region } from './region.js';
@@ -49,6 +55,12 @@ export class Renderer implements RendererState {
   readonly pixmapLookup: PixmapLookup;
   readonly windows = new Map<number, ManagedWindow>();
   stackCounter = 0;
+  /** Compositor scheduling state. Source-of-truth pixels live in each
+   *  ManagedWindow.backingSurface; the compositor walks the tree on
+   *  rAF and produces the root canvas. Phase B onward: every mutation
+   *  that affects visible pixels calls `markDirty` (or, for callers
+   *  that need pixels visible immediately, `composeNow`). */
+  readonly compState: CompositorState = createCompositorState();
 
   constructor(canvas: RootCanvas, pixmapLookup: PixmapLookup = () => null) {
     this.canvas = canvas;
@@ -164,5 +176,19 @@ export class Renderer implements RendererState {
 
   findWindowAt(cssX: number, cssY: number): number | null {
     return findWindowAt(this, cssX, cssY);
+  }
+
+  /* -- compositor ------------------------------------------------------- */
+
+  /** Mark the canvas as needing a re-compose. Coalesced to one
+   *  rAF-driven compose per frame regardless of how many calls land. */
+  markDirty(): void {
+    compMarkDirty(this, this.compState);
+  }
+
+  /** Force an immediate compose. Use when pixels must be on the canvas
+   *  before the call returns (debug snapshot, integration test). */
+  composeNow(): void {
+    compComposeNow(this, this.compState);
   }
 }

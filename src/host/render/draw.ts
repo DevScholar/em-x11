@@ -2,16 +2,36 @@
  * GC drawing primitives. Mirrors xserver/mi/ software rendering
  * (mifillrct.c, mipoly.c, mipolyline.c, miarc.c, miimage.c) plus the
  * window↔drawable copy paths from xserver/dix/dispatch.c (CopyArea,
- * PutImage). All ops resolve the destination drawable's clip via
- * applyWindowClip so children honour their parents' bounds even though
- * our renderer has no per-window backing pixmap.
+ * PutImage). All ops write to the destination window's per-window
+ * backing surface in window-local coordinates and mark the renderer
+ * dirty; the compositor (host/render/compositor.ts) reads each
+ * backing on rAF and produces the root canvas with stack order,
+ * clip and shape applied. Sibling occlusion and shape are NOT
+ * applied at draw time -- they're the compositor's job.
  */
 
-import type { RendererState } from './types.js';
+import type { RendererState, ManagedWindow } from './types.js';
 import type { Point } from '../../types/emscripten.js';
-import { absOrigin } from './window-tree.js';
-import { applyWindowClip, paintBackgroundRect } from './paint.js';
+import { paintBackgroundIntoBacking } from './paint.js';
 import { pixelToCssColor } from '../../runtime/canvas.js';
+
+/** Paint into the window's backing context with save/restore around
+ *  `fn`, mark the backing dirty and request a re-compose. Backing
+ *  coords are window-local (no absOrigin offset); the compositor
+ *  applies the absolute placement. Out-of-bounds writes are clipped
+ *  by the surface extents naturally. */
+function paintBacking(
+  r: RendererState,
+  win: ManagedWindow,
+  fn: (ctx: OffscreenCanvasRenderingContext2D) => void,
+): void {
+  const ctx = win.backingCtx;
+  ctx.save();
+  fn(ctx);
+  ctx.restore();
+  win.backingDirty = true;
+  r.markDirty();
+}
 
 /** XClearWindow / XClearArea: repaint a window rectangle using whatever
  *  background the window currently has (solid or tile). Unlike
@@ -29,11 +49,8 @@ export function clearArea(
   if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
     console.log('[paint] clearArea', id, '(', x, y, w, h, ') parent=', win.parent);
   }
-  const ctx = r.canvas.ctx;
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  paintBackgroundRect(r, ctx, win, x, y, w, h);
-  ctx.restore();
+  paintBackgroundIntoBacking(r, win, x, y, w, h);
+  r.markDirty();
 }
 
 export function fillRect(
@@ -47,13 +64,10 @@ export function fillRect(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.fillStyle = pixelToCssColor(color);
-  ctx.fillRect(ax + x, ay + y, w, h);
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.fillStyle = pixelToCssColor(color);
+    bctx.fillRect(x, y, w, h);
+  });
 }
 
 export function drawLine(
@@ -68,10 +82,6 @@ export function drawLine(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
   const lw = lineWidth || 1;
   /* X11 lines are Bresenham (no AA). Canvas stroke always antialiases,
    * which leaks partial-alpha into neighbouring columns/rows. With
@@ -83,7 +93,6 @@ export function drawLine(
    * sidestep AA entirely with fillRect. Diagonal lines still go
    * through stroke; they're rare in Xt/Xaw widgets. */
   if (x1 === x2 || y1 === y2) {
-    ctx.fillStyle = pixelToCssColor(color);
     let rx: number, ry: number, rw: number, rh: number;
     if (y1 === y2) {
       rx = Math.min(x1, x2);
@@ -96,16 +105,20 @@ export function drawLine(
       rx = x1 - ((lw - 1) >> 1);
       rw = lw;
     }
-    ctx.fillRect(ax + rx, ay + ry, rw, rh);
+    paintBacking(r, win, (bctx) => {
+      bctx.fillStyle = pixelToCssColor(color);
+      bctx.fillRect(rx, ry, rw, rh);
+    });
   } else {
-    ctx.strokeStyle = pixelToCssColor(color);
-    ctx.lineWidth = lw;
-    ctx.beginPath();
-    ctx.moveTo(ax + x1, ay + y1);
-    ctx.lineTo(ax + x2, ay + y2);
-    ctx.stroke();
+    paintBacking(r, win, (bctx) => {
+      bctx.strokeStyle = pixelToCssColor(color);
+      bctx.lineWidth = lw;
+      bctx.beginPath();
+      bctx.moveTo(x1, y1);
+      bctx.lineTo(x2, y2);
+      bctx.stroke();
+    });
   }
-  ctx.restore();
 }
 
 export function drawArc(
@@ -122,15 +135,12 @@ export function drawArc(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.strokeStyle = pixelToCssColor(color);
-  ctx.lineWidth = lineWidth || 1;
-  arcPath(ctx, ax + x, ay + y, w, h, angle1, angle2);
-  ctx.stroke();
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.strokeStyle = pixelToCssColor(color);
+    bctx.lineWidth = lineWidth || 1;
+    arcPath(bctx, x, y, w, h, angle1, angle2);
+    bctx.stroke();
+  });
 }
 
 export function fillArc(
@@ -146,14 +156,11 @@ export function fillArc(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.fillStyle = pixelToCssColor(color);
-  arcPath(ctx, ax + x, ay + y, w, h, angle1, angle2);
-  ctx.fill();
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.fillStyle = pixelToCssColor(color);
+    arcPath(bctx, x, y, w, h, angle1, angle2);
+    bctx.fill();
+  });
 }
 
 export function fillPolygon(
@@ -166,21 +173,18 @@ export function fillPolygon(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped || points.length < 3) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.fillStyle = pixelToCssColor(color);
-  ctx.beginPath();
   const first = points[0]!;
-  ctx.moveTo(ax + first.x, ay + first.y);
-  for (let i = 1; i < points.length; i++) {
-    const p = points[i]!;
-    ctx.lineTo(ax + p.x, ay + p.y);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.fillStyle = pixelToCssColor(color);
+    bctx.beginPath();
+    bctx.moveTo(first.x, first.y);
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i]!;
+      bctx.lineTo(p.x, p.y);
+    }
+    bctx.closePath();
+    bctx.fill();
+  });
 }
 
 export function drawPoints(
@@ -192,15 +196,12 @@ export function drawPoints(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped || points.length === 0) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.fillStyle = pixelToCssColor(color);
-  for (const p of points) {
-    ctx.fillRect(ax + p.x, ay + p.y, 1, 1);
-  }
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.fillStyle = pixelToCssColor(color);
+    for (const p of points) {
+      bctx.fillRect(p.x, p.y, 1, 1);
+    }
+  });
 }
 
 export function drawString(
@@ -216,44 +217,41 @@ export function drawString(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped || text.length === 0) return;
-  const ctx = r.canvas.ctx;
-  const { ax, ay } = absOrigin(r, win);
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.font = font;
-  ctx.textBaseline = 'alphabetic';
-  ctx.textAlign = 'left';
-  if (imageMode) {
-    const metrics = ctx.measureText(text);
-    const ascent =
-      metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent ?? 10;
-    const descent =
-      metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
-    ctx.fillStyle = pixelToCssColor(bgColor);
-    /* Round outward to integer pixel grid. measureText/font metrics are
-     * floats, and fillRect with fractional bounds applies sub-pixel AA
-     * at the edges -- partial-alpha pixels that source-over compositing
-     * cannot fully overwrite on the next paint. XawCommand's Set/Unset
-     * cycle (LCD click-invert) repaints text-bg in alternating colours;
-     * mismatched AA fringes accumulate as L-shaped residue at the
-     * rectangle's corners. Snapping to integer + ceil-on-extents makes
-     * each cycle's bg cover the previous cycle's full footprint. */
-    const bx = Math.floor(ax + x);
-    const by = Math.floor(ay + y - ascent);
-    const bx2 = Math.ceil(ax + x + metrics.width);
-    const by2 = Math.ceil(ay + y + descent);
-    ctx.fillRect(bx, by, bx2 - bx, by2 - by);
-  }
-  ctx.fillStyle = pixelToCssColor(fgColor);
-  ctx.fillText(text, ax + x, ay + y);
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.font = font;
+    bctx.textBaseline = 'alphabetic';
+    bctx.textAlign = 'left';
+    if (imageMode) {
+      const metrics = bctx.measureText(text);
+      const ascent =
+        metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent ?? 10;
+      const descent =
+        metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
+      /* Round outward to integer pixel grid. measureText/font metrics are
+       * floats, and fillRect with fractional bounds applies sub-pixel AA
+       * at the edges -- partial-alpha pixels that source-over compositing
+       * cannot fully overwrite on the next paint. XawCommand's Set/Unset
+       * cycle (LCD click-invert) repaints text-bg in alternating colours;
+       * mismatched AA fringes accumulate as L-shaped residue at the
+       * rectangle's corners. Snapping to integer + ceil-on-extents makes
+       * each cycle's bg cover the previous cycle's full footprint. */
+      const bx = Math.floor(x);
+      const by = Math.floor(y - ascent);
+      const bx2 = Math.ceil(x + metrics.width);
+      const by2 = Math.ceil(y + descent);
+      bctx.fillStyle = pixelToCssColor(bgColor);
+      bctx.fillRect(bx, by, bx2 - bx, by2 - by);
+    }
+    bctx.fillStyle = pixelToCssColor(fgColor);
+    bctx.fillText(text, x, y);
+  });
 }
 
-/** XCopyArea source half: grab an (x,y,w,h) rectangle from the window's
- *  painted area on the root canvas and paint it into `dstCtx` at
- *  (dstX,dstY). Coords are window-local on the source side. Returns
- *  silently when the window is unknown or unmapped -- match X semantics
- *  of "unpainted source = zero-filled result" by leaving dstCtx alone
+/** XCopyArea source half: grab an (x,y,w,h) rectangle from the source
+ *  window's backing surface and paint it into `dstCtx` at (dstX,dstY).
+ *  Coords are window-local on the source side. Returns silently when
+ *  the window is unknown or unmapped -- match X semantics of
+ *  "unpainted source = zero-filled result" by leaving dstCtx alone
  *  (callers that care can clear first). */
 export function blitWindowTo(
   r: RendererState,
@@ -268,11 +266,10 @@ export function blitWindowTo(
 ): void {
   const win = r.windows.get(srcId);
   if (!win || !win.mapped) return;
-  const { ax, ay } = absOrigin(r, win);
   dstCtx.drawImage(
-    r.canvas.ctx.canvas as unknown as CanvasImageSource,
-    ax + srcX,
-    ay + srcY,
+    win.backingSurface as unknown as CanvasImageSource,
+    srcX,
+    srcY,
     w,
     h,
     dstX,
@@ -282,8 +279,8 @@ export function blitWindowTo(
   );
 }
 
-/** XCopyArea destination half: draw an image source rectangle onto the
- *  root canvas clipped to the destination window. */
+/** XCopyArea destination half: draw an image source rectangle into the
+ *  destination window's backing surface at window-local (dstX,dstY). */
 export function blitImageToWindow(
   r: RendererState,
   dstId: number,
@@ -297,12 +294,9 @@ export function blitImageToWindow(
 ): void {
   const win = r.windows.get(dstId);
   if (!win || !win.mapped) return;
-  const { ax, ay } = absOrigin(r, win);
-  const ctx = r.canvas.ctx;
-  ctx.save();
-  applyWindowClip(r, ctx, win);
-  ctx.drawImage(src, srcX, srcY, w, h, ax + dstX, ay + dstY, w, h);
-  ctx.restore();
+  paintBacking(r, win, (bctx) => {
+    bctx.drawImage(src, srcX, srcY, w, h, dstX, dstY, w, h);
+  });
 }
 
 /** Build a canvas path for an X-semantics arc.

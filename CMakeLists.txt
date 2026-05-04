@@ -30,4 +30,7 @@ add_subdirectory(demos/hello)
 add_subdirectory(demos/xt-hello)
 add_subdirectory(demos/xcalc)
 add_subdirectory(demos/xeyes)
+# twm has no standalone demo page (session/ is the only harness that
+# launches it), but we still need its wasm artifact -- keep the build
+# recipe alive.
 add_subdirectory(demos/twm)
