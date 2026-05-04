@@ -115,9 +115,14 @@ export class WindowManager {
   }
 
   onSetBg(id: number, bgType: number, bgValue: number): void {
+    /* state codes from emx11_js_window_set_bg in native/src/bridges.c:
+     *   0 = None (no auto-paint, backing left as-is)
+     *   1 = Pixel (solid colour)
+     *   2 = ParentRelative (tile parent's bg with parent's tile origin)
+     * Pixmap goes through onSetBgPixmap, never here. */
     const type =
       bgType === 1 ? 'pixel'
-      : bgType === 2 ? 'pixmap'
+      : bgType === 2 ? 'parentRelative'
       : 'none';
     this.host.renderer.setWindowBackground(id, type, bgValue);
   }

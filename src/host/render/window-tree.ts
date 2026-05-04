@@ -10,11 +10,12 @@
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import { MAX_PARENT_WALK } from '../constants.js';
-import { paintWindowSubtree, snapshotClips, paintExposedRegions, paintBackgroundIntoBacking } from './paint.js';
+import { paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
 import {
   EMPTY_REGION,
   intersect as regionIntersect,
   subtract as regionSubtract,
+  union as regionUnion,
   type Region,
   type Rect,
 } from './region.js';
@@ -29,7 +30,7 @@ export function addWindow(
   height: number,
   borderWidth: number,
   borderPixel: number,
-  bgType: 'none' | 'pixel' | 'pixmap',
+  bgType: 'none' | 'pixel' | 'pixmap' | 'parentRelative',
   background: number,
 ): void {
   /* Create only stores state -- the window isn't visible until
@@ -58,6 +59,11 @@ export function addWindow(
     backingSurface: surface,
     backingCtx: ctx,
     backingDirty: false,
+    /* Whole content rect starts unpainted; every bg-fill or draw
+     * primitive subtracts its bounds from this region. */
+    unpaintedRegion: width > 0 && height > 0
+      ? [{ ax: 0, ay: 0, w: width, h: height }]
+      : EMPTY_REGION,
   });
 }
 
@@ -270,7 +276,7 @@ export function setWindowBorder(
 export function setWindowBackground(
   r: RendererState,
   id: number,
-  bgType: 'none' | 'pixel' | 'pixmap',
+  bgType: 'none' | 'pixel' | 'pixmap' | 'parentRelative',
   background: number,
 ): void {
   const w = r.windows.get(id);
@@ -350,7 +356,6 @@ export function configureWindow(
   const oldClips = snapshotClips(r);
   const oldW = win.width;
   const oldH = win.height;
-  const grew = w > oldW || h > oldH;
   win.x = x;
   win.y = y;
   if (oldW !== w || oldH !== h) {
@@ -367,42 +372,35 @@ export function configureWindow(
     win.backingSurface = fresh.surface;
     win.backingCtx = fresh.ctx;
     win.backingDirty = true;
+    /* Resize: clip unpaintedRegion to the carry-over rect (anything
+     * outside the kept top-left was discarded along with the old
+     * backing), then union in the grown strips so they're known
+     * unpainted in the fresh backing. */
+    win.unpaintedRegion = regionIntersect(
+      win.unpaintedRegion,
+      [{ ax: 0, ay: 0, w: carryW, h: carryH }],
+    );
+    if (w > oldW) {
+      win.unpaintedRegion = regionUnion(
+        win.unpaintedRegion,
+        [{ ax: oldW, ay: 0, w: w - oldW, h }],
+      );
+    }
+    if (h > oldH) {
+      win.unpaintedRegion = regionUnion(
+        win.unpaintedRegion,
+        [{ ax: 0, ay: oldH, w: oldW, h: h - oldH }],
+      );
+    }
     win.width = w;
     win.height = h;
   }
   recomputeClipsAll(r);
-  const exposed = paintExposedRegions(r, oldClips);
-  /* Resize-grew: the area beyond the old (oldW, oldH) carry box is
-   * fresh backing (transparent). paintExposedRegions's wasEmpty
-   * filter doesn't fire for self because oldClip was non-empty. We
-   * synthesise Expose explicitly here for the grown strips ∩ new
-   * clipList so the client repaints the new pixels. The bg paint
-   * into the backing is also done so the compositor blits valid bg
-   * even before the client responds. */
-  if (grew && win.mapped && win.clipList.length > 0) {
-    const { ax, ay } = absOrigin(r, win);
-    const grownAbsRects: Rect[] = [];
-    if (w > oldW) {
-      grownAbsRects.push({ ax: ax + oldW, ay, w: w - oldW, h });
-    }
-    if (h > oldH) {
-      grownAbsRects.push({ ax, ay: ay + oldH, w: oldW, h: h - oldH });
-    }
-    const grownVisible = regionIntersect(grownAbsRects, win.clipList);
-    if (grownVisible.length > 0) {
-      /* Bg paint in backing-local coords, then merge the grown region
-       * into `exposed[id]` so the Host fires Expose for it. */
-      for (const rc of grownVisible) {
-        const lx = rc.ax - ax;
-        const ly = rc.ay - ay;
-        paintBackgroundIntoBacking(r, win, lx, ly, rc.w, rc.h);
-      }
-      const prior = exposed.get(id) ?? EMPTY_REGION;
-      const merged: Region = [...prior, ...grownVisible];
-      exposed.set(id, merged);
-    }
-  }
-  return exposed;
+  /* Resize-grew is handled implicitly: the grown strips were unioned
+   * into `unpaintedRegion` above, so paintExposedRegions sees them as
+   * "newly visible AND unpainted" and emits Expose + bg paint for the
+   * grown area without any special-case branch here. */
+  return paintExposedRegions(r, oldClips);
 }
 
 /** XReparentWindow: change a window's parent link and local origin.

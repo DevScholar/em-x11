@@ -14,15 +14,48 @@ import type { RendererState, ManagedWindow } from './types.js';
 import type { Point } from '../../types/emscripten.js';
 import { paintBackgroundIntoBacking } from './paint.js';
 import { pixelToCssColor } from '../../runtime/canvas.js';
+import {
+  subtract as regionSubtract,
+  isEmpty as regionIsEmpty,
+} from './region.js';
 
-/** Paint into the window's backing context with save/restore around
- *  `fn`, mark the backing dirty and request a re-compose. Backing
- *  coords are window-local (no absOrigin offset); the compositor
- *  applies the absolute placement. Out-of-bounds writes are clipped
- *  by the surface extents naturally. */
+/** Subtract the local rect from the window's unpaintedRegion. Each
+ *  draw primitive calls this with its bounding box (clamped to the
+ *  window's content rect) so the next paintExposedRegions knows that
+ *  area now has client content -- no Expose needed when occluder
+ *  later moves away. Negative or out-of-bounds rects are normalised
+ *  to the content rect; out-of-bounds entirely is a no-op. */
+function markPainted(
+  win: ManagedWindow,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  if (regionIsEmpty(win.unpaintedRegion)) return;
+  /* Clamp to content rect so we don't accidentally subtract bogus
+   * rects. */
+  const lx = Math.max(0, Math.floor(x));
+  const ly = Math.max(0, Math.floor(y));
+  const rx = Math.min(win.width, Math.ceil(x + w));
+  const ry = Math.min(win.height, Math.ceil(y + h));
+  if (rx <= lx || ry <= ly) return;
+  win.unpaintedRegion = regionSubtract(
+    win.unpaintedRegion,
+    [{ ax: lx, ay: ly, w: rx - lx, h: ry - ly }],
+  );
+}
+
+/** Backing-write helper: invoke `fn` on the window's backing context
+ *  with save/restore around it, mark dirty, request a re-compose, and
+ *  subtract the painted bbox from the window's unpaintedRegion. */
 function paintBacking(
   r: RendererState,
   win: ManagedWindow,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
   fn: (ctx: OffscreenCanvasRenderingContext2D) => void,
 ): void {
   const ctx = win.backingCtx;
@@ -30,7 +63,22 @@ function paintBacking(
   fn(ctx);
   ctx.restore();
   win.backingDirty = true;
+  markPainted(win, bx, by, bw, bh);
   r.markDirty();
+}
+
+/** Conservative bbox of a stroked line of width `lw` between two
+ *  points. Includes ±lw/2 padding so we cover the antialiased
+ *  shoulder. */
+function strokedLineBbox(
+  x1: number, y1: number, x2: number, y2: number, lw: number,
+): { x: number; y: number; w: number; h: number } {
+  const pad = (lw + 1) >> 1;
+  const x = Math.min(x1, x2) - pad;
+  const y = Math.min(y1, y2) - pad;
+  const w = Math.abs(x2 - x1) + 2 * pad + 1;
+  const h = Math.abs(y2 - y1) + 2 * pad + 1;
+  return { x, y, w, h };
 }
 
 /** XClearWindow / XClearArea: repaint a window rectangle using whatever
@@ -64,7 +112,7 @@ export function fillRect(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  paintBacking(r, win, (bctx) => {
+  paintBacking(r, win, x, y, w, h, (bctx) => {
     bctx.fillStyle = pixelToCssColor(color);
     bctx.fillRect(x, y, w, h);
   });
@@ -105,12 +153,13 @@ export function drawLine(
       rx = x1 - ((lw - 1) >> 1);
       rw = lw;
     }
-    paintBacking(r, win, (bctx) => {
+    paintBacking(r, win, rx, ry, rw, rh, (bctx) => {
       bctx.fillStyle = pixelToCssColor(color);
       bctx.fillRect(rx, ry, rw, rh);
     });
   } else {
-    paintBacking(r, win, (bctx) => {
+    const bb = strokedLineBbox(x1, y1, x2, y2, lw);
+    paintBacking(r, win, bb.x, bb.y, bb.w, bb.h, (bctx) => {
       bctx.strokeStyle = pixelToCssColor(color);
       bctx.lineWidth = lw;
       bctx.beginPath();
@@ -135,9 +184,11 @@ export function drawArc(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  paintBacking(r, win, (bctx) => {
+  const lw = lineWidth || 1;
+  const pad = (lw + 1) >> 1;
+  paintBacking(r, win, x - pad, y - pad, w + 2 * pad, h + 2 * pad, (bctx) => {
     bctx.strokeStyle = pixelToCssColor(color);
-    bctx.lineWidth = lineWidth || 1;
+    bctx.lineWidth = lw;
     arcPath(bctx, x, y, w, h, angle1, angle2);
     bctx.stroke();
   });
@@ -156,7 +207,7 @@ export function fillArc(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  paintBacking(r, win, (bctx) => {
+  paintBacking(r, win, x, y, w, h, (bctx) => {
     bctx.fillStyle = pixelToCssColor(color);
     arcPath(bctx, x, y, w, h, angle1, angle2);
     bctx.fill();
@@ -174,7 +225,15 @@ export function fillPolygon(
   const win = r.windows.get(id);
   if (!win || !win.mapped || points.length < 3) return;
   const first = points[0]!;
-  paintBacking(r, win, (bctx) => {
+  let minX = first.x, minY = first.y, maxX = first.x, maxY = first.y;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i]!;
+    if (p.x < minX) minX = p.x;
+    else if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    else if (p.y > maxY) maxY = p.y;
+  }
+  paintBacking(r, win, minX, minY, maxX - minX + 1, maxY - minY + 1, (bctx) => {
     bctx.fillStyle = pixelToCssColor(color);
     bctx.beginPath();
     bctx.moveTo(first.x, first.y);
@@ -196,7 +255,16 @@ export function drawPoints(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped || points.length === 0) return;
-  paintBacking(r, win, (bctx) => {
+  const first = points[0]!;
+  let minX = first.x, minY = first.y, maxX = first.x, maxY = first.y;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i]!;
+    if (p.x < minX) minX = p.x;
+    else if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    else if (p.y > maxY) maxY = p.y;
+  }
+  paintBacking(r, win, minX, minY, maxX - minX + 1, maxY - minY + 1, (bctx) => {
     bctx.fillStyle = pixelToCssColor(color);
     for (const p of points) {
       bctx.fillRect(p.x, p.y, 1, 1);
@@ -217,28 +285,32 @@ export function drawString(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped || text.length === 0) return;
-  paintBacking(r, win, (bctx) => {
+  /* Pre-measure once on the backing ctx to derive the bbox (font is
+   * the same as inside the paintBacking closure). */
+  const bctxMeasure = win.backingCtx;
+  bctxMeasure.save();
+  bctxMeasure.font = font;
+  bctxMeasure.textBaseline = 'alphabetic';
+  bctxMeasure.textAlign = 'left';
+  const metrics = bctxMeasure.measureText(text);
+  bctxMeasure.restore();
+  const ascent =
+    metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent ?? 10;
+  const descent =
+    metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
+  const bx = Math.floor(x);
+  const by = Math.floor(y - ascent);
+  const bx2 = Math.ceil(x + metrics.width);
+  const by2 = Math.ceil(y + descent);
+  paintBacking(r, win, bx, by, bx2 - bx, by2 - by, (bctx) => {
     bctx.font = font;
     bctx.textBaseline = 'alphabetic';
     bctx.textAlign = 'left';
     if (imageMode) {
-      const metrics = bctx.measureText(text);
-      const ascent =
-        metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent ?? 10;
-      const descent =
-        metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent ?? 2;
       /* Round outward to integer pixel grid. measureText/font metrics are
        * floats, and fillRect with fractional bounds applies sub-pixel AA
        * at the edges -- partial-alpha pixels that source-over compositing
-       * cannot fully overwrite on the next paint. XawCommand's Set/Unset
-       * cycle (LCD click-invert) repaints text-bg in alternating colours;
-       * mismatched AA fringes accumulate as L-shaped residue at the
-       * rectangle's corners. Snapping to integer + ceil-on-extents makes
-       * each cycle's bg cover the previous cycle's full footprint. */
-      const bx = Math.floor(x);
-      const by = Math.floor(y - ascent);
-      const bx2 = Math.ceil(x + metrics.width);
-      const by2 = Math.ceil(y + descent);
+       * cannot fully overwrite on the next paint. */
       bctx.fillStyle = pixelToCssColor(bgColor);
       bctx.fillRect(bx, by, bx2 - bx, by2 - by);
     }
@@ -294,7 +366,7 @@ export function blitImageToWindow(
 ): void {
   const win = r.windows.get(dstId);
   if (!win || !win.mapped) return;
-  paintBacking(r, win, (bctx) => {
+  paintBacking(r, win, dstX, dstY, w, h, (bctx) => {
     bctx.drawImage(src, srcX, srcY, w, h, dstX, dstY, w, h);
   });
 }

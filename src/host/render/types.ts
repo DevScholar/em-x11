@@ -29,15 +29,22 @@ export interface ManagedWindow {
   borderWidth: number;
   borderPixel: number;
   /** X11 backgroundState (xserver/dix/window.c around line 1185):
-   *    'none'   -- server does not auto-paint the bg. miPaintWindow
-   *                gates on `state != None` (xserver/mi/miwindow.c:115);
-   *                we mirror that in paintBackgroundRect. xeyes' shell
-   *                lives in this state -- the application is the only
-   *                thing that paints inside.
-   *    'pixel'  -- solid fill from `background`.
-   *    'pixmap' -- tile fill from `backgroundPixmap`.
-   *  ParentRelative is currently collapsed to 'none' at the C bridge. */
-  bgType: 'none' | 'pixel' | 'pixmap';
+   *    'none'           -- server does not auto-paint the bg. miPaintWindow
+   *                        gates on `state != None` (xserver/mi/miwindow.c:115);
+   *                        we mirror that in paintBackgroundRect. xeyes' shell
+   *                        lives in this state -- the application is the only
+   *                        thing that paints inside.
+   *    'pixel'          -- solid fill from `background`.
+   *    'pixmap'         -- tile fill from `backgroundPixmap`.
+   *    'parentRelative' -- tile parent's bg into this window's backing,
+   *                        aligned to parent's tile origin. Resolved
+   *                        recursively if the parent is also
+   *                        ParentRelative. Without this, Xt widgets that
+   *                        rely on inheriting parent bg (Xaw default) end
+   *                        up with transparent backings, and the compositor
+   *                        cascades visibility all the way to root, leaking
+   *                        the canvas-bg colour through widget areas. */
+  bgType: 'none' | 'pixel' | 'pixmap' | 'parentRelative';
   background: number;
   /** When set (and bgType==='pixmap'), the window background is tiled
    *  with this pixmap's OffscreenCanvas. Tile origin is the window's
@@ -75,8 +82,23 @@ export interface ManagedWindow {
   backingSurface: OffscreenCanvas;
   backingCtx: OffscreenCanvasRenderingContext2D;
   /** Set true on every backing write; cleared by the compositor
-   *  after a successful blit. Phase A: set but not yet consumed. */
+   *  after a successful blit. */
   backingDirty: boolean;
+  /** Region of the backing (window-local coords) that has NEVER been
+   *  written to since allocation. Mirrors the "valid pixels" tracking
+   *  real X servers do for backing-store windows: the server fires
+   *  Expose only for unpainted areas that become visible, leaving
+   *  already-painted-and-then-occluded pixels alone (the compositor
+   *  re-blits them naturally).
+   *
+   *  Initial state on `addWindow`: the full content rect is unpainted.
+   *  Subtracted from on every paint op (bg fill, draw primitive,
+   *  blit). Grown back via `union` on `configureWindow` resize. The
+   *  Expose dispatcher (`paintExposedRegions`) intersects newly-
+   *  revealed clipList area with this region to decide whether the
+   *  client needs to redraw -- if it's all in painted territory, no
+   *  Expose; otherwise Expose only the unpainted portion. */
+  unpaintedRegion: Region;
 }
 
 /** Callback the Host supplies so the renderer can reach into the

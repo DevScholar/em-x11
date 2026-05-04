@@ -409,15 +409,23 @@ int XChangeWindowAttributes(Display *display, Window w,
     if (valuemask & CWBackPixmap) {
         /* X semantics (xserver/dix/window.c:1186-1216):
          *   None           -> backgroundState = None (no auto-paint)
-         *   ParentRelative -> use parent's tile (we map to None for now;
-         *                     proper impl needs parent lookup at paint
-         *                     time)
+         *   ParentRelative -> use parent's tile (bg state code 2;
+         *                     paint-time resolution of parent chain
+         *                     happens in JS host)
          *   real Pixmap    -> backgroundState = BackgroundPixmap
          * We must NOT collapse None to "use the pixel" -- doing so
          * caused xeyes' shell (default bg = None) to paint solid black
          * over the application's drawing on every Expose/raise. */
         Pixmap pm = attrs->background_pixmap;
-        if (pm == None || pm == ParentRelative) {
+        if (pm == ParentRelative) {
+            /* Distinct state: child inherits parent's bg pattern
+             * tiled with parent's tile origin. Backing-store
+             * compositor needs this to fill widget transparent
+             * regions with the parent's bg instead of cascading all
+             * the way to root through transparent backings. */
+            win->background_pixmap = 0;
+            emx11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
+        } else if (pm == None) {
             win->background_pixmap = 0;
             emx11_js_window_set_bg(w, 0, 0); /* state = None */
         } else {
@@ -452,7 +460,12 @@ int XSetWindowBackground(Display *display, Window w, unsigned long background) {
 int XSetWindowBackgroundPixmap(Display *display, Window w, Pixmap pm) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
-    if (pm == ParentRelative || pm == None) pm = 0;
+    if (pm == ParentRelative) {
+        win->background_pixmap = 0;
+        emx11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
+        return 1;
+    }
+    if (pm == None) pm = 0;
     win->background_pixmap = pm;
     emx11_js_window_set_bg_pixmap(w, pm);
     return 1;
