@@ -48,15 +48,22 @@ export function snapshotClips(r: RendererState): Map<number, ClipSnapshot> {
   return out;
 }
 
-/** For every window still in the tree: paint background into the
- *  window's backing where its `clipList` newly grew, and request a
- *  re-compose. Returns a Map of `windowId -> Region` containing each
- *  window's newly-exposed content area (in absolute canvas coords).
- *  The caller (WindowManager) feeds this into `pushExposesForRegion`
- *  so clients see one Expose per rect, mirroring xserver's
- *  `miSendExposures` (mi/miexpose.c:419) -- whose input is exactly
- *  the per-window `valdata->after.exposed` set built by
- *  `mi/mivaltree.c::miComputeClips`. */
+/** For every window still in the tree: detect newly-VISIBLE area and
+ *  paint bg into the corresponding backing region so the client's
+ *  Expose handler has a clean canvas to draw on. Returns a Map of
+ *  `windowId -> Region` for the Host's Expose dispatcher.
+ *
+ *  Backing-store semantics: only fires Expose for windows whose
+ *  clipList went from EMPTY to non-empty, i.e. windows that just
+ *  became viewable (initial map, ancestor map, etc.). For windows
+ *  that were already visible and merely had their clipList grow due
+ *  to a sibling occluder moving away, the BACKING already contains
+ *  valid content -- the compositor simply blits more of it through
+ *  the new clip, no client redraw needed.
+ *
+ *  Resize-grow is handled separately by `configureWindow`, which
+ *  knows the grown region in window-local coords and synthesises
+ *  Expose explicitly. */
 export function paintExposedRegions(
   r: RendererState,
   oldClips: Map<number, ClipSnapshot>,
@@ -65,15 +72,22 @@ export function paintExposedRegions(
   let anyChange = false;
   for (const w of r.windows.values()) {
     const old = oldClips.get(w.id) ?? { clip: EMPTY_REGION, border: EMPTY_REGION };
+    const wasEmpty = regionIsEmpty(old.clip);
     const contentExposed = regionSubtract(w.clipList, old.clip);
     if (!regionIsEmpty(contentExposed)) {
-      paintBgInRegion(r, w, contentExposed);
-      exposedByWindow.set(w.id, contentExposed);
       anyChange = true;
+      if (wasEmpty) {
+        /* Initial visibility for this window. Backing may be fresh
+         * (just allocated, or the client never drew because the
+         * window wasn't viewable yet). Lay down bg + tell the
+         * client to redraw. */
+        paintBgInRegion(r, w, contentExposed);
+        exposedByWindow.set(w.id, contentExposed);
+      }
+      /* else: revealed-from-occlusion. Backing has valid content
+       * from when the window was first painted; compositor handles
+       * it on the next rAF without client involvement. */
     }
-    /* Border ring exposure doesn't need backing paint -- the compositor
-     * draws the ring fresh every frame from borderPixel + borderClip --
-     * but we still detect changes so the compositor re-runs. */
     if (w.borderWidth > 0) {
       const borderDiff = regionSubtract(w.borderClip, old.border);
       if (borderDiff.length > 0) anyChange = true;

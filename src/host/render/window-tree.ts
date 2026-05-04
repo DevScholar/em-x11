@@ -10,7 +10,7 @@
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import { MAX_PARENT_WALK } from '../constants.js';
-import { paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
+import { paintWindowSubtree, snapshotClips, paintExposedRegions, paintBackgroundIntoBacking } from './paint.js';
 import {
   EMPTY_REGION,
   intersect as regionIntersect,
@@ -348,12 +348,15 @@ export function configureWindow(
     console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
   }
   const oldClips = snapshotClips(r);
+  const oldW = win.width;
+  const oldH = win.height;
+  const grew = w > oldW || h > oldH;
   win.x = x;
   win.y = y;
-  if (win.width !== w || win.height !== h) {
+  if (oldW !== w || oldH !== h) {
     const fresh = allocBacking(w, h);
-    const carryW = Math.min(win.width, w);
-    const carryH = Math.min(win.height, h);
+    const carryW = Math.min(oldW, w);
+    const carryH = Math.min(oldH, h);
     if (carryW > 0 && carryH > 0) {
       fresh.ctx.drawImage(
         win.backingSurface as unknown as CanvasImageSource,
@@ -368,7 +371,38 @@ export function configureWindow(
     win.height = h;
   }
   recomputeClipsAll(r);
-  return paintExposedRegions(r, oldClips);
+  const exposed = paintExposedRegions(r, oldClips);
+  /* Resize-grew: the area beyond the old (oldW, oldH) carry box is
+   * fresh backing (transparent). paintExposedRegions's wasEmpty
+   * filter doesn't fire for self because oldClip was non-empty. We
+   * synthesise Expose explicitly here for the grown strips ∩ new
+   * clipList so the client repaints the new pixels. The bg paint
+   * into the backing is also done so the compositor blits valid bg
+   * even before the client responds. */
+  if (grew && win.mapped && win.clipList.length > 0) {
+    const { ax, ay } = absOrigin(r, win);
+    const grownAbsRects: Rect[] = [];
+    if (w > oldW) {
+      grownAbsRects.push({ ax: ax + oldW, ay, w: w - oldW, h });
+    }
+    if (h > oldH) {
+      grownAbsRects.push({ ax, ay: ay + oldH, w: oldW, h: h - oldH });
+    }
+    const grownVisible = regionIntersect(grownAbsRects, win.clipList);
+    if (grownVisible.length > 0) {
+      /* Bg paint in backing-local coords, then merge the grown region
+       * into `exposed[id]` so the Host fires Expose for it. */
+      for (const rc of grownVisible) {
+        const lx = rc.ax - ax;
+        const ly = rc.ay - ay;
+        paintBackgroundIntoBacking(r, win, lx, ly, rc.w, rc.h);
+      }
+      const prior = exposed.get(id) ?? EMPTY_REGION;
+      const merged: Region = [...prior, ...grownVisible];
+      exposed.set(id, merged);
+    }
+  }
+  return exposed;
 }
 
 /** XReparentWindow: change a window's parent link and local origin.
