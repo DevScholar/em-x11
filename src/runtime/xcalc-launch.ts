@@ -9,13 +9,14 @@
  * before main() runs — without it XtGetResources finds nothing, widgets
  * realize with their compile-time defaults (0x0 Forms, stacked Commands),
  * and the calculator is unreadable. This launcher stages that file
- * explicitly via `stagedFiles`.
+ * explicitly via the Emscripten `preRun` hook.
  */
 
 // eslint-disable-next-line
 import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
-import type { Orchestrator } from '../worker/main-thread/orchestrator.js';
-import type { ClientWorkerHandle } from '../worker/main-thread/client-proxy.js';
+import type { Host } from '../host/index.js';
+import type { EmscriptenModule } from '../types/emscripten.js';
+import { stagePreRun } from './stage-files.js';
 
 export interface LaunchXcalcOptions {
   /** Build artifact directory containing xcalc.js / xcalc.wasm. */
@@ -23,17 +24,18 @@ export interface LaunchXcalcOptions {
 }
 
 export async function launchXcalc(
-  orch: Orchestrator,
+  host: Host,
   options: LaunchXcalcOptions = {},
-): Promise<ClientWorkerHandle> {
+): Promise<{ connId: number; module: EmscriptenModule }> {
   const base = options.artifactBase ?? '/build/artifacts/xcalc';
-  return orch.launchClient({
+  return host.launchClient({
     glueUrl: `${base}/xcalc.js`,
     wasmUrl: `${base}/xcalc.wasm`,
     thisProgram: 'xcalc',
-    stagedFiles: [
-      { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
+    preRun: [
+      stagePreRun([
+        { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
+      ]),
     ],
-    name: 'emx11-xcalc',
   });
 }

@@ -1,21 +1,15 @@
 /**
- * hello demo harness. Spawns the hello wasm in its own Client Worker
- * via Orchestrator.
+ * hello demo harness. Single-threaded mode: the wasm runs on the main
+ * JS thread alongside the Host. No workers, no OffscreenCanvas.
  */
 
-import { Orchestrator } from '../../src/worker/main-thread/orchestrator.js';
+import { Host } from '../../src/host/index.js';
 
-const canvas = document.createElement('canvas');
-canvas.style.display = 'block';
-canvas.style.margin = '0 auto';
-canvas.tabIndex = 0;
-document.body.appendChild(canvas);
-
-const orch = new Orchestrator({ canvas, cssWidth: 1024, cssHeight: 768 });
+const host = new Host({ width: 1024, height: 768 });
+host.install();
 
 const base = '/build/artifacts/hello';
-await orch.launchClient({
+await host.launchClient({
   glueUrl: `${base}/hello.js`,
   wasmUrl: `${base}/hello.wasm`,
-  name: 'emx11-hello',
 });

@@ -19,8 +19,9 @@
  * (`twm -f ~/.twmrc`).
  */
 
-import type { Orchestrator } from '../worker/main-thread/orchestrator.js';
-import type { ClientWorkerHandle } from '../worker/main-thread/client-proxy.js';
+import type { Host } from '../host/index.js';
+import type { EmscriptenModule } from '../types/emscripten.js';
+import { stagePreRun } from './stage-files.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';
 
@@ -129,24 +130,23 @@ export interface LaunchTwmOptions {
   artifactBase?: string;
 }
 
-/** Spawn twm in its own Client Worker. Returns once twm has armed
+/** Spawn twm in single-thread Host mode. Returns once twm has armed
  *  SubstructureRedirectMask on root, so the caller's next launchClient
  *  is guaranteed to route through twm's MapRequest intercept. Without
  *  that barrier, a racing client could map at root-local (0,0) before
  *  twm ever sees a MapRequest. */
 export async function launchTwm(
-  orch: Orchestrator,
+  host: Host,
   options: LaunchTwmOptions = {},
-): Promise<ClientWorkerHandle> {
+): Promise<{ connId: number; module: EmscriptenModule }> {
   const base = options.artifactBase ?? '/build/artifacts/twm';
-  const handle = await orch.launchClient({
+  const result = await host.launchClient({
     glueUrl: `${base}/twm.js`,
     wasmUrl: `${base}/twm.wasm`,
     thisProgram: 'twm',
     arguments: ['-f', TWMRC_PATH],
-    stagedFiles: [{ path: TWMRC_PATH, contents: TWMRC.trimStart() }],
-    name: 'emx11-twm',
+    preRun: [stagePreRun([{ path: TWMRC_PATH, contents: TWMRC.trimStart() }])],
   });
-  await orch.waitForSubstructureRedirect(orch.getRootWindow());
-  return handle;
+  await host.waitForSubstructureRedirect(host.getRootWindow());
+  return result;
 }

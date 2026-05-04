@@ -1,18 +1,12 @@
 /**
- * xcalc demo harness. Spawns xcalc inside its own Client Worker via
- * Orchestrator; app-defaults/XCalc is staged into MEMFS by launchXcalc
- * so Xt can resolve the widget geometry resources (see
- * src/runtime/xcalc-launch.ts).
+ * xcalc demo harness. Single-threaded mode: xcalc runs on the main JS
+ * thread alongside the Host. app-defaults/XCalc is staged into MEMFS
+ * via the Emscripten preRun hook (see src/runtime/xcalc-launch.ts).
  */
 
-import { Orchestrator } from '../../src/worker/main-thread/orchestrator.js';
+import { Host } from '../../src/host/index.js';
 import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
 
-const canvas = document.createElement('canvas');
-canvas.style.display = 'block';
-canvas.style.margin = '0 auto';
-canvas.tabIndex = 0;
-document.body.appendChild(canvas);
-
-const orch = new Orchestrator({ canvas, cssWidth: 800, cssHeight: 600 });
-await launchXcalc(orch);
+const host = new Host({ width: 800, height: 600 });
+host.install();
+await launchXcalc(host);
