@@ -45,6 +45,10 @@ export interface BootstrapClient {
   glueUrl: string;
   wasmUrl: string;
   arguments?: string[];
+  /** Override for argv[0]. Without this, Xt apps derive their
+   *  application name from Emscripten's default `./this.program` and
+   *  twm renders every title as "this.program". */
+  thisProgram?: string;
   /** Files the Client Worker writes into MEMFS before the factory runs.
    *  Replaces the main-thread-only `preRun` hook model used by legacy
    *  Host.launchClient. */

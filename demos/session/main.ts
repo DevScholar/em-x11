@@ -29,6 +29,7 @@ await launchTwm(orch);
 await orch.launchClient({
   glueUrl: '/build/artifacts/xeyes/xeyes.js',
   wasmUrl: '/build/artifacts/xeyes/xeyes.wasm',
+  thisProgram: 'xeyes',
   name: 'emx11-xeyes',
 });
 

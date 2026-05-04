@@ -127,6 +127,7 @@ function bootstrapOnce(ev: MessageEvent): void {
         default: (opts: {
           locateFile?: (p: string) => string;
           arguments?: string[];
+          thisProgram?: string;
           preRun?: ((mod: EmscriptenModule) => void)[];
         }) => Promise<EmscriptenModule>;
       };
@@ -138,6 +139,7 @@ function bootstrapOnce(ev: MessageEvent): void {
       const module = await factory({
         locateFile: (p) => (p.endsWith('.wasm') ? data.wasmUrl : p),
         ...(data.arguments !== undefined ? { arguments: data.arguments } : {}),
+        ...(data.thisProgram !== undefined ? { thisProgram: data.thisProgram } : {}),
         ...(preRunHooks.length > 0 ? { preRun: preRunHooks } : {}),
       });
       globalThis.__EMX11_MODULE__ = module;

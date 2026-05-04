@@ -52,6 +52,11 @@ export interface EmscriptenModule {
   /** Process argv (excluding argv[0], which Emscripten sets to ./this.program).
    *  Settable via the factory argument; read by the wasm's main(). */
   arguments?: string[] | undefined;
+  /** Override Emscripten's default argv[0] (`./this.program`). Xt apps
+   *  derive their application name / WM_CLASS / default WM_NAME from
+   *  `basename(argv[0])`, so leaving it at the default makes twm render
+   *  every window's title as "this.program". Set to e.g. "xeyes". */
+  thisProgram?: string | undefined;
   /** Hooks fired between FS init and main(). Use for staging files into
    *  MEMFS so the program sees them at startup (e.g. config files). */
   preRun?: ((mod: EmscriptenModule) => void)[] | undefined;

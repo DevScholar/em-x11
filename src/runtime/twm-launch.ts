@@ -142,6 +142,7 @@ export async function launchTwm(
   const handle = await orch.launchClient({
     glueUrl: `${base}/twm.js`,
     wasmUrl: `${base}/twm.wasm`,
+    thisProgram: 'twm',
     arguments: ['-f', TWMRC_PATH],
     stagedFiles: [{ path: TWMRC_PATH, contents: TWMRC.trimStart() }],
     name: 'emx11-twm',

@@ -17,10 +17,15 @@ export interface LoadOptions {
   glueUrl: string;
   /** URL of the .wasm binary. Usually co-located with the glue. */
   wasmUrl: string;
-  /** Argv to pass to main(), excluding argv[0]. Emscripten substitutes
-   *  ./this.program for argv[0] regardless. Used by twm to load a custom
-   *  twmrc via `-f /em-x11.twmrc` -- see launchTwm. */
+  /** Argv to pass to main(), excluding argv[0]. Set `thisProgram` to
+   *  override argv[0] itself (Emscripten otherwise hard-codes
+   *  `./this.program`, which Xt-based apps then surface as their
+   *  application name / WM_CLASS / window title). */
   arguments?: string[];
+  /** Override for argv[0]. Xt's XtAppInitialize derives the application
+   *  name from `basename(argv[0])`, so without this xeyes/xcalc/twm all
+   *  identify themselves as "this.program". */
+  thisProgram?: string;
   /** Hooks fired after MEMFS is initialised but before main() runs. The
    *  Module argument has FS available, so callers can stage files (e.g.
    *  the twmrc) into MEMFS before the program reads them. */
@@ -47,6 +52,7 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
       return resolved;
     },
     arguments: options.arguments,
+    thisProgram: options.thisProgram,
     preRun: options.preRun,
   });
 }

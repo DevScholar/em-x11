@@ -22,6 +22,10 @@ export interface SpawnClientOpts {
   wasmUrl: string;
   /** argv for the wasm's main(). */
   arguments?: string[];
+  /** Override for argv[0]. Xt-based apps (xeyes/xcalc/twm) take their
+   *  application name from `basename(argv[0])`; without this they all
+   *  identify as "this.program" in WM_CLASS / WM_NAME. */
+  thisProgram?: string;
   /** Files to write into the Client Worker's MEMFS before main() runs.
    *  Replaces the legacy preRun callback model -- functions can't cross
    *  postMessage, so staging is described as plain data. */
@@ -83,6 +87,7 @@ export function spawnClientWorker(params: {
     glueUrl: opts.glueUrl,
     wasmUrl: opts.wasmUrl,
     ...(opts.arguments !== undefined ? { arguments: opts.arguments } : {}),
+    ...(opts.thisProgram !== undefined ? { thisProgram: opts.thisProgram } : {}),
     ...(opts.stagedFiles !== undefined ? { stagedFiles: opts.stagedFiles } : {}),
     serverPort: clientPort,
     sab: sab.sab,

@@ -30,6 +30,7 @@ export async function launchXcalc(
   return orch.launchClient({
     glueUrl: `${base}/xcalc.js`,
     wasmUrl: `${base}/xcalc.wasm`,
+    thisProgram: 'xcalc',
     stagedFiles: [
       { path: '/usr/lib/X11/app-defaults/XCalc', contents: xcalcAppDefaults },
     ],
