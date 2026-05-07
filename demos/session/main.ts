@@ -16,15 +16,15 @@ import { createEmX11 } from '../../src/index.js';
 import { launchTwm } from '../../src/runtime/twm-launch.js';
 import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
 
-const em = await createEmX11({ width: 1024, height: 768 });
+const emX11 = await createEmX11({ width: 1024, height: 768 });
 
 /* twm first so its SubstructureRedirect on root lands before subsequent
  * spawns; launchTwm awaits waitForSubstructureRedirect internally. */
-await launchTwm(em);
+await launchTwm(emX11);
 
-const xeyes = em.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });
+const xeyes = emX11.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });
 await xeyes.ready;
 
-await launchXcalc(em);
+await launchXcalc(emX11);
 
 console.log('[emx11:session] booted twm + xeyes + xcalc');

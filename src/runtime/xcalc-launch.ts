@@ -8,7 +8,7 @@
  * xcalc requires /usr/lib/X11/app-defaults/XCalc staged into MEMFS
  * before main() runs — without it XtGetResources finds nothing, widgets
  * realize with their compile-time defaults (0x0 Forms, stacked Commands),
- * and the calculator is unreadable. Stage via em.fs and let the
+ * and the calculator is unreadable. Stage via emX11.fs and let the
  * spawn-time replay drop it into the new Module's MEMFS.
  */
 
@@ -23,12 +23,12 @@ export interface LaunchXcalcOptions {
 }
 
 export async function launchXcalc(
-  em: EmX11,
+  emX11: EmX11,
   options: LaunchXcalcOptions = {},
 ): Promise<Process> {
   const base = options.artifactBase ?? '/build/artifacts/xcalc';
-  em.fs.writeFile('/usr/lib/X11/app-defaults/XCalc', xcalcAppDefaults);
-  const p = em.spawn(`${base}/xcalc`, { thisProgram: 'xcalc' });
+  emX11.fs.writeFileSync('/usr/lib/X11/app-defaults/XCalc', xcalcAppDefaults);
+  const p = emX11.spawn(`${base}/xcalc`, { thisProgram: 'xcalc' });
   await p.ready;
   return p;
 }

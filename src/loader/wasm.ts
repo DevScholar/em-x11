@@ -5,12 +5,20 @@
  * a .js ES module whose default export is a factory returning a Promise
  * that resolves to the EmscriptenModule instance. The .wasm sits beside it
  * and the factory locates it relative to its own script URL.
+ *
+ * Both files are routed through Cache Storage (see ./cache.ts) so the
+ * second visit doesn't re-download. The .js glue is fetched as text
+ * and dynamically imported via a Blob URL; the .wasm is fed to
+ * Emscripten via the `instantiateWasm` factory hook so we control the
+ * bytes ourselves. Sibling assets (`--preload-file` .data blobs etc.)
+ * fall through to Emscripten's default `locateFile` resolution.
  */
 
 import type {
   EmscriptenModule,
   EmscriptenModuleFactory,
 } from '../types/emscripten.js';
+import { cachedFetchAsBlobUrl, cachedFetchBytes, type CacheMode } from './cache.js';
 
 export interface LoadOptions {
   /** URL of the emscripten-generated .js glue. */
@@ -30,26 +38,74 @@ export interface LoadOptions {
    *  Module argument has FS available, so callers can stage files (e.g.
    *  the twmrc) into MEMFS before the program reads them. */
   preRun?: ((mod: EmscriptenModule) => void)[];
+  /** Cache Storage policy for the .js + .wasm fetch. Defaults to
+   *  `'use'` (cache-first); the EmX11 facade overrides to `'bypass'`
+   *  in Vite dev mode. */
+  cacheMode?: CacheMode;
 }
 
 export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> {
-  const glueModule = (await import(/* @vite-ignore */ options.glueUrl)) as {
+  const cacheMode = options.cacheMode ?? 'use';
+
+  /* .js glue: fetch (possibly from cache), wrap in a Blob URL, import.
+   * The blob URL keeps the import side identical to a plain network
+   * load — the factory's default export is the same shape. We don't
+   * URL.revokeObjectURL after import because the imported module may
+   * still reference its own source URL internally (Emscripten records
+   * scriptDirectory from import.meta.url; revoking too early can
+   * break worker spawn for ENVIRONMENT=worker builds). The blob is
+   * tiny on the cost scale and gets reaped on tab unload. */
+  const glueBlobUrl = await cachedFetchAsBlobUrl(options.glueUrl, cacheMode);
+  const glueModule = (await import(/* @vite-ignore */ glueBlobUrl)) as {
     default: EmscriptenModuleFactory;
   };
   const factory = glueModule.default;
 
+  /* .wasm: fetch via cache, hand instantiate to Emscripten via the
+   * `instantiateWasm` hook. Emscripten will skip its own
+   * fetch+instantiateStreaming and call our hook with the imports
+   * table once it's ready. */
+  const wasmBytesPromise = cachedFetchBytes(options.wasmUrl, cacheMode);
+
   return factory({
+    instantiateWasm: (imports, success) => {
+      wasmBytesPromise
+        .then((bytes) =>
+          /* Cast: TS picks the `Module` overload of WebAssembly.instantiate
+           * over the `BufferSource` one when the input is `Uint8Array<...>`,
+           * giving us back `Instance` instead of `{instance, module}`.
+           * Pass the underlying ArrayBuffer to nudge the right overload. */
+          WebAssembly.instantiate(bytes.buffer as ArrayBuffer, imports),
+        )
+        .then(({ instance, module }) => success(instance, module))
+        .catch((err) => {
+          /* Emscripten swallows instantiateWasm rejections silently
+           * (it just keeps waiting for success() to be called).
+           * Surface the error to the console so a broken cached blob
+           * doesn't look like a hung load. */
+          console.error('em-x11 loader: instantiateWasm failed:', err);
+          throw err;
+        });
+      /* Returning {} signals to Emscripten "I'm handling instantiation
+       * asynchronously" so it doesn't fall back to its own
+       * instantiateStreaming on a missing return value. */
+      return {};
+    },
     locateFile: (path: string) => {
       if (path.endsWith('.wasm')) {
+        /* The instantiateWasm hook above already loaded the wasm; this
+         * branch shouldn't fire. Keep it pointing at the original URL
+         * as a safety net so even a regression to default loading
+         * resolves correctly. */
         return options.wasmUrl;
       }
       /* `--preload-file` produces a sibling .data blob the glue fetches
        * by its basename. Resolve it (and anything else) against the
-       * glue URL's directory so relative fetches don't fall through to
-       * the dev server's SPA fallback. */
+       * GLUE URL's directory — NOT the blob URL we imported it through.
+       * The blob URL has no useful directory; Emscripten would try to
+       * fetch `blob:.../foo.data`, which 404s. */
       const baseDir = options.glueUrl.slice(0, options.glueUrl.lastIndexOf('/') + 1);
-      const resolved = baseDir + path;
-      return resolved;
+      return baseDir + path;
     },
     arguments: options.arguments,
     thisProgram: options.thisProgram,

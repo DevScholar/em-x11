@@ -38,6 +38,19 @@ export interface CreateEmX11Options {
   /** Default stderr sink (Module `printErr`). Defaults to
    *  `console.warn`. */
   stderr?: (line: string) => void;
+  /** Cache Storage policy for `emX11.spawn`'s `.js` glue and `.wasm`
+   *  binary fetches. Default is `'use'` (cache-first) in production
+   *  and `'bypass'` in Vite dev mode (`import.meta.env.DEV`), so
+   *  artifact rebuilds are picked up immediately during development
+   *  without needing to manually clear the cache.
+   *
+   *  - `'use'`     — cache-first; populate on miss
+   *  - `'bypass'`  — never touch Cache Storage; plain fetch
+   *  - `'refresh'` — force a fetch and overwrite the cache entry
+   *
+   *  Cache lives under the name `em-x11-loader-v1`. Manual reset:
+   *  `await caches.delete('em-x11-loader-v1')` from DevTools. */
+  loaderCache?: 'use' | 'bypass' | 'refresh';
 }
 
 /* -- fs ------------------------------------------------------------------ */
@@ -51,20 +64,25 @@ export type MountSpec =
 
 export interface EmX11FS {
   /** Stage a file. Replayed into every future spawn's MEMFS during
-   *  preRun. For an already-running process, use `process.fs.writeFile`
-   *  to write into its live FS instead. */
-  writeFile(path: string, data: string | Uint8Array): void;
+   *  preRun. For an already-running process, use `process.fs.writeFileSync`
+   *  to write into its live FS instead.
+   *
+   *  Note the `Sync` suffix: this manifest is a JS-side `Map`, so
+   *  the call returns synchronously. The suffix mirrors Node's `fs`
+   *  convention where `writeFile` is async and `writeFileSync` is sync. */
+  writeFileSync(path: string, data: string | Uint8Array): void;
   /** Read a previously staged file. Returns null if not present in the
    *  staging manifest (this method does NOT reach into a running
    *  process's MEMFS). */
-  readFile(path: string): Uint8Array | null;
-  mkdir(path: string, opts?: { recursive?: boolean }): void;
-  readdir(path: string): string[];
-  exists(path: string): boolean;
-  rm(path: string, opts?: { recursive?: boolean }): void;
+  readFileSync(path: string): Uint8Array | null;
+  mkdirSync(path: string, opts?: { recursive?: boolean }): void;
+  readdirSync(path: string): string[];
+  existsSync(path: string): boolean;
+  rmSync(path: string, opts?: { recursive?: boolean }): void;
   /** Establish a mount in the staging manifest. The default mounts
    *  (`/tmp`, `/usr`, `/etc`, `/opt`, `/var`, `/home`) already exist;
-   *  callers typically only invoke this for tar archives. */
+   *  callers typically only invoke this for tar archives. Async
+   *  because tar mounts may `fetch()` their source. */
   mount(spec: MountSpec): Promise<void>;
 }
 
@@ -152,14 +170,20 @@ export interface SpawnOptions {
   /** Override the Emscripten module factory. Use this to bypass the
    *  HTTP loader entirely (test harnesses, prebundled glue). */
   factory?: EmscriptenModuleFactory;
+  /** Per-spawn override of the factory-level `loaderCache` policy.
+   *  Useful for forcing one program's bytes to be re-downloaded
+   *  (`'refresh'`) without changing the default for the rest of the
+   *  session. */
+  cacheMode?: 'use' | 'bypass' | 'refresh';
 }
 
 /** Subset of Emscripten FS exposed on Process for live-FS interaction
- *  with a running wasm. */
+ *  with a running wasm. Sync-suffixed for the same reason as EmX11FS:
+ *  these are synchronous calls, and Node's unsuffixed names are async. */
 export interface ProcessFS {
-  writeFile(path: string, data: string | Uint8Array): void;
-  readFile(path: string): Uint8Array;
-  mkdir(path: string): void;
+  writeFileSync(path: string, data: string | Uint8Array): void;
+  readFileSync(path: string): Uint8Array;
+  mkdirSync(path: string): void;
 }
 
 /** Node-style child process handle. Returned synchronously from

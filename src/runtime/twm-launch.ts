@@ -14,7 +14,7 @@
  * (xeyes is suspended on its redirected XMapWindow), so the wait would
  * never end. RandomPlacement makes twm pick a position automatically.
  *
- * Strategy: stage a twmrc into em.fs at /em-x11.twmrc, then tell twm
+ * Strategy: stage a twmrc into emX11.fs at /em-x11.twmrc, then tell twm
  * to read it via `-f`. Same mechanism people use on real Linux.
  */
 
@@ -109,21 +109,21 @@ export interface LaunchTwmOptions {
 }
 
 /** Spawn twm in single-thread mode. Returns once twm has armed
- *  SubstructureRedirectMask on root, so the caller's next em.spawn
+ *  SubstructureRedirectMask on root, so the caller's next emX11.spawn
  *  is guaranteed to route through twm's MapRequest intercept. Without
  *  that barrier, a racing client could map at root-local (0,0) before
  *  twm ever sees a MapRequest. */
 export async function launchTwm(
-  em: EmX11,
+  emX11: EmX11,
   options: LaunchTwmOptions = {},
 ): Promise<Process> {
   const base = options.artifactBase ?? '/build/artifacts/twm';
-  em.fs.writeFile(TWMRC_PATH, TWMRC.trimStart());
-  const p = em.spawn(`${base}/twm`, {
+  emX11.fs.writeFileSync(TWMRC_PATH, TWMRC.trimStart());
+  const p = emX11.spawn(`${base}/twm`, {
     thisProgram: 'twm',
     argv: ['-f', TWMRC_PATH],
   });
   await p.ready;
-  await em.display.waitForSubstructureRedirect(em.display.rootWindowId);
+  await emX11.display.waitForSubstructureRedirect(emX11.display.rootWindowId);
   return p;
 }

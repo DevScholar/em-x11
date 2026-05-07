@@ -37,11 +37,11 @@ A few things follow from that:
   owns a `<canvas>`, manages a window tree, and pushes synthesised
   events back into wasm.
 - Every X client is its own Emscripten module (`xcalc.js` +
-  `xcalc.wasm`). They are loaded with `em.spawn()` and share the host
+  `xcalc.wasm`). They are loaded with `emX11.spawn()` and share the host
   the way real X clients share an Xorg.
 - There is no global `/usr/lib/X11`. Each spawned module gets a fresh
   in-memory filesystem (Emscripten's MEMFS). em-x11 stages files into a
-  manifest (`em.fs`) at boot and replays it into every child's MEMFS
+  manifest (`emX11.fs`) at boot and replays it into every child's MEMFS
   before `main()` runs.
 
 If you keep that picture in mind, the porting work below should feel
@@ -226,7 +226,7 @@ In Emscripten land each spawned module starts with an empty MEMFS, so
 the file is not there unless you put it there. There are two layers
 to this:
 
-1. **Stage the bytes into `em.fs` once**, at boot. `em.fs` is a
+1. **Stage the bytes into `emX11.fs` once**, at boot. `emX11.fs` is a
    *manifest* maintained by the host; every spawned process replays it
    into its own MEMFS during the Emscripten `preRun` hook. Stage once,
    every child sees it.
@@ -241,9 +241,9 @@ That gives you the launcher in
 import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
 import type { EmX11 } from '../api/emx11.js';
 
-export async function launchXcalc(em: EmX11): Promise<Process> {
-  em.fs.writeFile('/usr/lib/X11/app-defaults/XCalc', xcalcAppDefaults);
-  const p = em.spawn('/build/artifacts/xcalc/xcalc', { thisProgram: 'xcalc' });
+export async function launchXcalc(emX11: EmX11): Promise<Process> {
+  emX11.fs.writeFileSync('/usr/lib/X11/app-defaults/XCalc', xcalcAppDefaults);
+  const p = emX11.spawn('/build/artifacts/xcalc/xcalc', { thisProgram: 'xcalc' });
   await p.ready;
   return p;
 }
@@ -277,12 +277,12 @@ file there makes the dev server publish a route.
 import { createEmX11 } from '../../src/index.js';
 import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
 
-const em = await createEmX11({ width: 800, height: 600 });
-await launchXcalc(em);
+const emX11 = await createEmX11({ width: 800, height: 600 });
+await launchXcalc(emX11);
 ```
 
 `createEmX11` boots the host (creates the canvas, registers DOM input
-listeners, primes `em.fs`'s default mounts at `/tmp /usr /etc /opt
+listeners, primes `emX11.fs`'s default mounts at `/tmp /usr /etc /opt
 /var /home`). `launchXcalc` does the steps from §6.
 
 ## 8. Build and run
@@ -320,7 +320,7 @@ one of the `_emx11_push_*` exports.
 - **`XtResolvePathname` returns NULL even though you staged the
   file** — `argv[0]` has to be `xcalc` (or `XCalc` for the class
   name), otherwise the `%N` substitution looks for the wrong file.
-  Pass `thisProgram: 'xcalc'` to `em.spawn`.
+  Pass `thisProgram: 'xcalc'` to `emX11.spawn`.
 - **Build fails complaining about undefined Xrender / Xft / shape
   symbols** — em-x11's static archive ships only the X11 surface
   the demos exercise. If your client pulls in Xrender, either link
@@ -329,8 +329,8 @@ one of the `_emx11_push_*` exports.
 
 ## 10. What to read next
 
-- [docs/api.md](api.md) — the full `createEmX11()` / `em.fs` /
-  `em.spawn` surface, including IDBFS persistence and tar-mount
+- [docs/api.md](api.md) — the full `createEmX11()` / `emX11.fs` /
+  `emX11.spawn` surface, including IDBFS persistence and tar-mount
   staging for clients with bigger asset trees.
 - [docs/xorg-alignment.md](xorg-alignment.md) — what em-x11
   implements vs. what is stubbed, and where the X protocol is

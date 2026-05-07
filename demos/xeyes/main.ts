@@ -5,7 +5,7 @@
 
 import { createEmX11 } from '../../src/index.js';
 
-const em = await createEmX11({ width: 1024, height: 768 });
+const emX11 = await createEmX11({ width: 1024, height: 768 });
 
-const xeyes = em.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });
+const xeyes = emX11.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });
 await xeyes.ready;

@@ -50,6 +50,19 @@ export interface EmscriptenModule {
    *  signature accepts as its argument. */
   locateFile?: (path: string, prefix: string) => string;
 
+  /** Factory-time hook that bypasses Emscripten's default
+   *  `WebAssembly.instantiateStreaming(fetch(wasmUrl))` so the caller
+   *  can supply pre-fetched bytes (cache, prefetch, custom transport).
+   *  Must call `success(instance, module?)` once instantiation is done;
+   *  the return value is ignored by Emscripten in the typical async
+   *  pattern. Returning `{}` (or any non-undefined value) tells
+   *  Emscripten "I'm handling it asynchronously, do not also try to
+   *  instantiate yourself." */
+  instantiateWasm?: (
+    imports: WebAssembly.Imports,
+    success: (instance: WebAssembly.Instance, module?: WebAssembly.Module) => void,
+  ) => unknown;
+
   /** Process argv (excluding argv[0], which Emscripten sets to ./this.program).
    *  Settable via the factory argument; read by the wasm's main(). */
   arguments?: string[] | undefined;
@@ -137,16 +150,6 @@ export interface EmX11Global {
     /** XQueryPointer log from Xaw shims (xaw_stubs.c). */
     traceQp: boolean;
   };
-  /** Public-facing surfaces wired by createEmX11; declared optional
-   *  here so transitional commits where they don't exist yet still
-   *  type-check. Concrete shape lives in src/api/types.ts. */
-  fs?: unknown;
-  display?: unknown;
-  debug?: unknown;
-  spawn?: unknown;
-  exec?: unknown;
-  dlopen?: unknown;
-  version?: string;
 }
 
 /**

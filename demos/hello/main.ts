@@ -5,7 +5,7 @@
 
 import { createEmX11 } from '../../src/index.js';
 
-const em = await createEmX11({ width: 1024, height: 768 });
+const emX11 = await createEmX11({ width: 1024, height: 768 });
 
-const hello = em.spawn('/build/artifacts/hello/hello');
+const hello = emX11.spawn('/build/artifacts/hello/hello');
 await hello.ready;

@@ -47,20 +47,20 @@ export class FSNamespace implements EmX11FS {
     }
   }
 
-  writeFile(path: string, data: string | Uint8Array): void {
+  writeFileSync(path: string, data: string | Uint8Array): void {
     const abs = normalize(path);
     this.ensureParents(abs);
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
     this.entries.set(abs, { path: abs, data: bytes });
   }
 
-  readFile(path: string): Uint8Array | null {
+  readFileSync(path: string): Uint8Array | null {
     const abs = normalize(path);
     const e = this.entries.get(abs);
     return e?.data ?? null;
   }
 
-  mkdir(path: string, opts?: { recursive?: boolean }): void {
+  mkdirSync(path: string, opts?: { recursive?: boolean }): void {
     const abs = normalize(path);
     if (opts?.recursive) {
       this.ensureParents(abs);
@@ -70,7 +70,7 @@ export class FSNamespace implements EmX11FS {
     }
   }
 
-  readdir(path: string): string[] {
+  readdirSync(path: string): string[] {
     const abs = normalize(path);
     const prefix = abs === '/' ? '/' : abs + '/';
     const names: string[] = [];
@@ -84,11 +84,11 @@ export class FSNamespace implements EmX11FS {
     return names;
   }
 
-  exists(path: string): boolean {
+  existsSync(path: string): boolean {
     return this.entries.has(normalize(path));
   }
 
-  rm(path: string, opts?: { recursive?: boolean }): void {
+  rmSync(path: string, opts?: { recursive?: boolean }): void {
     const abs = normalize(path);
     if (opts?.recursive) {
       const prefix = abs + '/';
@@ -106,7 +106,7 @@ export class FSNamespace implements EmX11FS {
       case 'idbfs':
         /* Both kinds collapse to "make sure the directory exists in
          * the manifest"; idbfs persistence is a future extension. */
-        this.mkdir(spec.target, { recursive: true });
+        this.mkdirSync(spec.target, { recursive: true });
         return;
       case 'tar': {
         const buf = await loadTarBytes(spec.source);
@@ -241,10 +241,10 @@ function extractTar(buf: Uint8Array, target: string, fs: FSNamespace): void {
     const abs = joinTarget(baseTarget, fullName);
     offset += 512;
     if (typeflag === '5') {
-      fs.mkdir(abs, { recursive: true });
+      fs.mkdirSync(abs, { recursive: true });
     } else if (typeflag === '0' || typeflag === '\0') {
       const data = buf.slice(offset, offset + size);
-      fs.writeFile(abs, data);
+      fs.writeFileSync(abs, data);
     }
     /* Skip the padded data chunk. */
     offset += Math.ceil(size / 512) * 512;

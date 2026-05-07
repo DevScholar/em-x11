@@ -22,6 +22,7 @@ import type {
   EmscriptenModule,
   EmscriptenModuleFactory,
 } from '../types/emscripten.js';
+import type { CacheMode } from '../loader/cache.js';
 import type { FSNamespace } from './fs.js';
 import type { Process, ProcessFS, SpawnOptions } from './types.js';
 
@@ -49,6 +50,7 @@ export class ProcessImpl implements Process {
     opts: SpawnOptions,
     defaultStdout: (line: string) => void,
     defaultStderr: (line: string) => void,
+    defaultCacheMode: CacheMode,
   ) {
     this.argv = opts.argv ?? [];
     this.thisProgram = opts.thisProgram ?? deriveProgName(glueUrl);
@@ -61,6 +63,7 @@ export class ProcessImpl implements Process {
     const stderr = opts.stderr ?? defaultStderr;
     const fsPreRun = fs.buildPreRun();
     const userPreRun = opts.preRun ?? [];
+    const cacheMode: CacheMode = opts.cacheMode ?? defaultCacheMode;
 
     /* Wrap launchClient so we can capture the Module, install stdio
      * routes, and resolve `ready`. The host's connection.launchClient
@@ -71,6 +74,7 @@ export class ProcessImpl implements Process {
       wasmUrl: resolvedWasm,
       arguments: this.argv,
       thisProgram: this.thisProgram,
+      cacheMode,
       preRun: [
         (mod) => {
           /* Hook print/printErr BEFORE any output appears. Emscripten
@@ -111,16 +115,16 @@ export class ProcessImpl implements Process {
 
   get fs(): ProcessFS {
     return {
-      writeFile: (path, data) => {
+      writeFileSync: (path, data) => {
         const m = this.assertModule();
         m.FS!.writeFile(path, data);
       },
-      readFile: (path) => {
+      readFileSync: (path) => {
         const m = this.assertModule();
         const data = m.FS!.readFile(path, { encoding: 'binary' });
         return data as Uint8Array;
       },
-      mkdir: (path) => {
+      mkdirSync: (path) => {
         const m = this.assertModule();
         m.FS!.mkdir(path);
       },
@@ -236,6 +240,7 @@ interface LaunchProcessOptions {
   arguments: string[];
   thisProgram: string;
   preRun: ((mod: EmscriptenModule) => void)[];
+  cacheMode: CacheMode;
   factory?: EmscriptenModuleFactory;
 }
 
@@ -253,6 +258,7 @@ async function launchProcess(
       arguments: opts.arguments,
       thisProgram: opts.thisProgram,
       preRun: opts.preRun,
+      cacheMode: opts.cacheMode,
     });
   }
   /* Factory-override path: skip the dynamic import and pass our own
