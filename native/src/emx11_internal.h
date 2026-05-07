@@ -536,6 +536,12 @@ extern char *emx11_js_get_atom_name(Atom atom);
 /* Internal pixmap accessors (implemented in pixmap.c). */
 Bool          emx11_pixmap_exists(Pixmap id);
 unsigned int  emx11_pixmap_depth(Pixmap id);
+/* Refcount hooks for window background_pixmap ownership. acquire = +1
+ * on the pixmap; release = decrement-or-destroy (mirrors XFreePixmap).
+ * window.c calls these whenever a window starts/stops referencing a
+ * pixmap as its CWBackPixmap, so the canvas outlives a client free. */
+void          emx11_pixmap_acquire(Pixmap id);
+void          emx11_pixmap_release(Display *dpy, Pixmap id);
 
 /* Parse a CSS / X11 colour name (e.g. "slategrey", "gray85",
  * "rebeccapurple") by delegating to the browser's own colour parser.

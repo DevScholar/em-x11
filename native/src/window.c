@@ -279,6 +279,12 @@ int XDestroyWindow(Display *display, Window w) {
     win->shape_bounding = NULL;
     win->shape_bounding_count = 0;
 
+    /* Drop the bg-pixmap reference this window held, if any. */
+    if (win->background_pixmap != 0) {
+        emx11_pixmap_release(display, win->background_pixmap);
+        win->background_pixmap = 0;
+    }
+
     win->in_use = false;
     emx11_js_window_destroy(w);
     return 1;
@@ -481,20 +487,24 @@ int XChangeWindowAttributes(Display *display, Window w,
          * caused xeyes' shell (default bg = None) to paint solid black
          * over the application's drawing on every Expose/raise. */
         Pixmap pm = attrs->background_pixmap;
+        Pixmap old = win->background_pixmap;
         if (pm == ParentRelative) {
-            /* Distinct state: child inherits parent's bg pattern
-             * tiled with parent's tile origin. Backing-store
-             * compositor needs this to fill widget transparent
-             * regions with the parent's bg instead of cascading all
-             * the way to root through transparent backings. */
             win->background_pixmap = 0;
             emx11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
         } else if (pm == None) {
             win->background_pixmap = 0;
             emx11_js_window_set_bg(w, 0, 0); /* state = None */
         } else {
+            /* Acquire BEFORE release: if pm == old (idempotent re-set)
+             * the refcount stays correct; and if old's only remaining
+             * reference was our window's, we don't free a canvas the
+             * caller is about to keep using. */
+            emx11_pixmap_acquire(pm);
             win->background_pixmap = pm;
             emx11_js_window_set_bg_pixmap(w, pm);
+        }
+        if (old != 0 && old != win->background_pixmap) {
+            emx11_pixmap_release(display, old);
         }
     }
     /* Ignored: CWBorderPixmap, CWCursor, ... */
@@ -508,8 +518,10 @@ int XSetWindowBackground(Display *display, Window w, unsigned long background) {
     /* Setting a solid pixel overrides any prior pixmap tile, matching
      * Xlib's documented behaviour. */
     if (win->background_pixmap != 0) {
+        Pixmap old = win->background_pixmap;
         win->background_pixmap = 0;
         emx11_js_window_set_bg_pixmap(w, 0);
+        emx11_pixmap_release(display, old);
     }
     /* Push the new pixel to the Host so the next XClearArea / Expose
      * actually paints with it. Without this, Xt's XawCommandToggle
@@ -524,14 +536,19 @@ int XSetWindowBackground(Display *display, Window w, unsigned long background) {
 int XSetWindowBackgroundPixmap(Display *display, Window w, Pixmap pm) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
+    Pixmap old = win->background_pixmap;
     if (pm == ParentRelative) {
         win->background_pixmap = 0;
         emx11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
-        return 1;
+    } else {
+        if (pm == None) pm = 0;
+        if (pm != 0) emx11_pixmap_acquire(pm);
+        win->background_pixmap = pm;
+        emx11_js_window_set_bg_pixmap(w, pm);
     }
-    if (pm == None) pm = 0;
-    win->background_pixmap = pm;
-    emx11_js_window_set_bg_pixmap(w, pm);
+    if (old != 0 && old != win->background_pixmap) {
+        emx11_pixmap_release(display, old);
+    }
     return 1;
 }
 

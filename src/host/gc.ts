@@ -376,6 +376,15 @@ export class GcManager {
     const out = img.data;
     /* format: 0=XYBitmap (depth must be 1), 2=ZPixmap. */
     if (format === 0 || depth === 1) {
+      /* Depth-1 pixmaps in this codebase store bit-as-alpha (XCopyPlane
+       * and SHAPE both read alpha to recover the bit -- see onCopyPlane
+       * and onShapeCombineMask). When the destination is a depth-1
+       * pixmap, ignore fg/bg and write 1->opaque, 0->transparent so
+       * downstream readers see the right plane. fg/bg colour expansion
+       * is for the colour-destination case (XYBitmap put directly to a
+       * window or depth-N pixmap, e.g. Xaw Label glyphs). */
+      const dstIsBitmap =
+        format === 0 && (this.pixmaps.get(dstId)?.depth ?? 0) === 1;
       const fgR = (fg >> 16) & 0xff;
       const fgG = (fg >> 8) & 0xff;
       const fgB = fg & 0xff;
@@ -388,7 +397,12 @@ export class GcManager {
           /* bitmap_bit_order LSBFirst (display.c). */
           const bit = (byte >> (x & 7)) & 1;
           const o = (y * w + x) * 4;
-          if (bit) {
+          if (dstIsBitmap) {
+            out[o] = 0;
+            out[o + 1] = 0;
+            out[o + 2] = 0;
+            out[o + 3] = bit ? 0xff : 0;
+          } else if (bit) {
             out[o] = fgR;
             out[o + 1] = fgG;
             out[o + 2] = fgB;

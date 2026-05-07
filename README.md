@@ -6,7 +6,6 @@ A WebAssembly implementation of the X11/Xlib C API that renders X windows to a b
 
 ![Xeyes Screenshot](screenshots/xeyes.png)
 
-Built on top of [X.Org](https://www.x.org/) (xorgproto, libX11, libXt, libXaw), compiled with Emscripten and composited onto Canvas via a TypeScript runtime.
 
 # Prerequisites
 

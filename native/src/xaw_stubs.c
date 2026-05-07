@@ -206,18 +206,29 @@ int XSetRegion(Display *dpy, GC gc, Region r) {
 
 /* -- Pixmap-adjacent stubs.
  * XCreatePixmap / XFreePixmap live in pixmap.c with real backing canvases;
- * XCopyArea / XCopyPlane / XPutImage live in drawing.c. The BitmapData
- * loaders below route through real XCreatePixmap so the id is valid and
- * is cleaned up by XFreePixmap, but the bitmap bits themselves are not
- * painted into the pixmap yet -- that would need XReadBitmapFileData to
- * decode the X11 bitmap file format, which nothing currently exercises. */
+ * XCopyArea / XCopyPlane / XPutImage live in drawing.c. XReadBitmapFile
+ * still no-ops (X11 bitmap file format decoder unimplemented; nothing
+ * we run reads bitmaps from disk). */
 
 Pixmap XCreatePixmapFromBitmapData(Display *dpy, Drawable d, char *data,
                                    unsigned int w, unsigned int h,
                                    unsigned long fg, unsigned long bg,
                                    unsigned int depth) {
-    (void)data; (void)fg; (void)bg;
-    return XCreatePixmap(dpy, d, w, h, depth);
+    /* Mint a real pixmap, then expand the 1-bit input into it via the
+     * XYBitmap put_image path: set bits -> fg, unset -> bg. twm uses
+     * this to bake its hilite/menu stipple into a colored tile that
+     * XSetWindowBackgroundPixmap then references; without the actual
+     * bits, the tile is a transparent canvas and the title-bar hilite
+     * paints as a black rectangle. */
+    Pixmap pm = XCreatePixmap(dpy, d, w, h, depth);
+    if (pm == None || !data || w == 0 || h == 0) return pm;
+    int bpl = (int)((w + 7u) / 8u);
+    int data_len = bpl * (int)h;
+    emx11_js_put_image(pm, 0, 0, w, h,
+                       XYBitmap, 1, bpl,
+                       (const unsigned char *)data, data_len,
+                       fg, bg);
+    return pm;
 }
 
 int XReadBitmapFileData(_Xconst char *filename, unsigned int *w,
