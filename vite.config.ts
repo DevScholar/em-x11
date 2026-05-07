@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import type { Plugin, ResolvedServerUrls } from 'vite';
 import { resolve } from 'node:path';
-import { readdirSync, statSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, existsSync, cpSync } from 'node:fs';
 
 /**
  * Auto-discovers demos/<name>/index.html entries and prints their URLs
@@ -45,11 +45,46 @@ function printDemoUrls(): Plugin {
   };
 }
 
+/**
+ * Copy build/artifacts/ → dist/build/artifacts/ at the end of `vite build`.
+ *
+ * Demos `import('/build/artifacts/<name>/<name>.js')` and Emscripten
+ * fetches the sibling `.wasm`. In dev these resolve via `server.fs.allow:
+ * ['build']`. In preview / static deploys, only `dist/` is served, so
+ * unless the artifacts are mirrored into `dist/` the URLs hit the SPA
+ * fallback (`index.html`) and dynamic-import fails with
+ * "Unexpected token '<'".
+ *
+ * Uses fs.cpSync (Node ≥ 16.7); cheap because the cmake outputs are a
+ * handful of MB total. Skips silently if the artifacts directory is
+ * missing — that just means `pnpm build:native` hasn't run yet, and
+ * the JS-only build is still useful (e.g. CI typecheck builds).
+ */
+function copyBuildArtifacts(): Plugin {
+  return {
+    name: 'emx11-copy-build-artifacts',
+    apply: 'build',
+    closeBundle() {
+      const src = resolve(__dirname, 'build/artifacts');
+      const dst = resolve(__dirname, 'dist/build/artifacts');
+      if (!existsSync(src)) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[emx11] build/artifacts/ not found; skipping dist copy. ` +
+            `Run 'pnpm build:native' first if you need a runnable preview.`,
+        );
+        return;
+      }
+      cpSync(src, dst, { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   root: '.',
   publicDir: 'public',
 
-  plugins: [printDemoUrls()],
+  plugins: [printDemoUrls(), copyBuildArtifacts()],
 
   resolve: {
     alias: {

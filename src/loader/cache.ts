@@ -31,9 +31,16 @@
  */
 
 /** Cache name. Bump the suffix when the loader's stored representation
- *  changes shape. cleanupOldCaches() purges any older `em-x11-loader-`
- *  prefixed cache it finds. */
-export const LOADER_CACHE_NAME = 'em-x11-loader-v1';
+ *  changes shape, OR when an earlier release shipped with a bug that
+ *  could have populated the cache with bad bytes. cleanupOldCaches()
+ *  purges any older `em-x11-loader-` prefixed cache it finds.
+ *
+ *  v1 → v2 bump rationale (2026-05-07): pre-v2 the assertResponseOk
+ *  guard didn't exist, so a `vite preview` against a `dist/` that
+ *  lacked `build/artifacts/` could cache the SPA fallback HTML under
+ *  the artifact URLs. v2 starts clean; cleanupOldCaches deletes any
+ *  v1 still on disk. */
+export const LOADER_CACHE_NAME = 'em-x11-loader-v2';
 
 /** Cache lookup behaviour.
  *  - `'use'`     — cache-first; fetch + populate on miss.
@@ -49,23 +56,42 @@ function cachesAvailable(): boolean {
 }
 
 /** Internal: fetch URL, optionally consulting/populating Cache Storage.
- *  Returns the bytes. Throws on non-2xx network responses. */
+ *  Returns the bytes. Throws on non-2xx network responses. Also throws
+ *  when the response Content-Type clearly contradicts the URL extension
+ *  — that catches the common "preview server SPA-fell-back to
+ *  index.html for a missing artifact URL" failure mode early, with a
+ *  clear message instead of a downstream `Unexpected token '<'`. */
 async function fetchWithCache(url: string, mode: CacheMode): Promise<Uint8Array> {
   if (mode === 'bypass' || !cachesAvailable()) {
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`em-x11 loader: fetch ${url} (HTTP ${r.status})`);
+    assertResponseOk(url, r);
     return new Uint8Array(await r.arrayBuffer());
   }
   const cache = await caches.open(LOADER_CACHE_NAME);
   if (mode === 'use') {
     const hit = await cache.match(url);
-    if (hit) return new Uint8Array(await hit.arrayBuffer());
+    if (hit) {
+      try {
+        /* Validate cache hits too, not just fresh fetches. A stale
+         * entry from an older em-x11 build could be poisoned (HTML
+         * fallback, partial body, etc.); if the stored Response now
+         * fails the same checks we apply to fresh fetches, drop it
+         * and refetch. Belt-and-braces alongside the cache-name
+         * version bump. */
+        assertResponseOk(url, hit);
+        return new Uint8Array(await hit.arrayBuffer());
+      } catch (e) {
+        console.warn(
+          `em-x11 loader: discarding stale cache entry for ${url}: ${(e as Error).message}`,
+        );
+        await cache.delete(url).catch(() => false);
+        /* fall through to network fetch below */
+      }
+    }
   }
   /* miss, or 'refresh' explicitly asked — go to network and write back. */
   const fresh = await fetch(url);
-  if (!fresh.ok) {
-    throw new Error(`em-x11 loader: fetch ${url} (HTTP ${fresh.status})`);
-  }
+  assertResponseOk(url, fresh);
   /* clone() is mandatory: cache.put consumes the body, and we still
    * need to read it ourselves. */
   try {
@@ -76,6 +102,32 @@ async function fetchWithCache(url: string, mode: CacheMode): Promise<Uint8Array>
     console.warn(`em-x11 loader: cache.put failed for ${url}:`, e);
   }
   return new Uint8Array(await fresh.arrayBuffer());
+}
+
+/** Throw a descriptive error on HTTP failure or content-type mismatch.
+ *  The `.js`/`.wasm` vs `text/html` check is the load-bearing one — it
+ *  catches SPA-fallback responses, where `vite preview` (or any other
+ *  static host configured for SPA) returns `index.html` with HTTP 200
+ *  for an unknown URL. Without this guard the failure surfaces deep
+ *  inside `WebAssembly.instantiate` or `import(blob:...)` as a cryptic
+ *  parse error. */
+function assertResponseOk(url: string, r: Response): void {
+  if (!r.ok) {
+    throw new Error(`em-x11 loader: fetch ${url} (HTTP ${r.status})`);
+  }
+  const ctype = r.headers.get('content-type') ?? '';
+  const isHtmlResponse = ctype.startsWith('text/html');
+  const expectsCode = url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.mjs');
+  if (isHtmlResponse && expectsCode) {
+    throw new Error(
+      `em-x11 loader: ${url} returned HTML instead of code. ` +
+        `This typically means the server fell back to index.html for an ` +
+        `unknown URL — verify the artifact is actually being served at ` +
+        `that path (Vite preview, for example, only serves files inside ` +
+        `dist/; cmake outputs under build/artifacts/ must be copied into ` +
+        `dist/ at build time).`,
+    );
+  }
 }
 
 /** Fetch the bytes at `url`, honouring the cache mode. */
