@@ -458,3 +458,63 @@ void emx11_push_reparent_notify(Window window, Window parent, int x, int y) {
     ev.xreparent.override_redirect = win ? win->override_redirect : False;
     emx11_event_queue_push(dpy, &ev);
 }
+
+/* Cross-connection ConfigureNotify delivery. Called by the Host on the
+ * window's *owner* module after a (typically WM-issued) XConfigureWindow
+ * / XMoveResizeWindow / XResizeWindow / XMoveWindow on the owner's
+ * shell. Mirrors emx11_push_reparent_notify:
+ *
+ *   1. Update the local EmxWindow shadow unconditionally so subsequent
+ *      drawing / hit-testing on the owner uses the correct geometry.
+ *      Without this, Tk/Xt/Xlib clients keep painting and propagating
+ *      events with their stale pre-resize size.
+ *
+ *   2. Synthesise the ConfigureNotify XEvent and push it -- mask-gated
+ *      on StructureNotifyMask on the window itself, or
+ *      SubstructureNotifyMask on the parent (mirrors dix's DeliverEvents).
+ *      Xt's Shell widget and Tk's TopLevel both select StructureNotify
+ *      on their shells, which is what triggers their re-layout pass. */
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_configure_notify(Window window, int x, int y,
+                                 int width, int height, int border_width) {
+    Display *dpy = emx11_get_display();
+    EmxWindow *win = emx11_window_find(dpy, window);
+    if (win) {
+        win->x            = x;
+        win->y            = y;
+        win->width        = (unsigned int)width;
+        win->height       = (unsigned int)height;
+        win->border_width = (unsigned int)border_width;
+    }
+
+    bool wants = false;
+    if (win && (win->event_mask & StructureNotifyMask)) wants = true;
+    if (!wants && win && win->parent != None) {
+        EmxWindow *p = emx11_window_find(dpy, win->parent);
+        if (p && (p->event_mask & SubstructureNotifyMask)) wants = true;
+    }
+    if (!wants) return;
+
+    /* Bump request serial so Tk/Xt's WaitForConfigureNotify accepts the
+     * synthetic event on the first poll. The owner did not issue the
+     * configure, so its dpy->request hasn't moved; matching what
+     * notify_js_reconfigure does for the local-issuer case. */
+    dpy->request++;
+
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xconfigure.type        = ConfigureNotify;
+    ev.xconfigure.serial      = dpy->request;
+    ev.xconfigure.send_event  = False;
+    ev.xconfigure.display     = dpy;
+    ev.xconfigure.event       = window;
+    ev.xconfigure.window      = window;
+    ev.xconfigure.x           = x;
+    ev.xconfigure.y           = y;
+    ev.xconfigure.width       = width;
+    ev.xconfigure.height      = height;
+    ev.xconfigure.border_width = border_width;
+    ev.xconfigure.above       = None;
+    ev.xconfigure.override_redirect = win ? win->override_redirect : False;
+    emx11_event_queue_push(dpy, &ev);
+}

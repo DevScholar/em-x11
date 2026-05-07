@@ -99,6 +99,21 @@ export interface ManagedWindow {
    *  client needs to redraw -- if it's all in painted territory, no
    *  Expose; otherwise Expose only the unpainted portion. */
   unpaintedRegion: Region;
+  /** X11 bit_gravity (xserver/dix/window.c::ResizeChildrenWinSize):
+   *  controls what happens to the backing pixmap on resize.
+   *    0 = ForgetGravity (X default) -- backing discarded, server
+   *        sends Expose for the entire new content rect; the client
+   *        is expected to repaint from scratch. Xt's CoreClassRec
+   *        leaves bit_gravity at this default, so Xaw widgets
+   *        (Label, Command in xcalc) live here.
+   *    1 = NorthWestGravity -- backing's top-left preserved, only
+   *        grown strips get Expose. Tk's wrapper widgets explicitly
+   *        request this.
+   *  Other gravities (NEGravity, CenterGravity, StaticGravity, ...)
+   *  would translate the preserved pixels by a gravity offset; we
+   *  don't have callers for those yet, so they fall through to the
+   *  ForgetGravity (discard) branch -- safe but not pixel-optimal. */
+  bitGravity: number;
 }
 
 /** Callback the Host supplies so the renderer can reach into the

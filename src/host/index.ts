@@ -209,8 +209,8 @@ export class Host implements EmX11Host {
   onWindowSetBgPixmap(id: number, pmId: number): void {
     this.window.onSetBgPixmap(id, pmId);
   }
-  onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void {
-    this.window.onConfigure(id, x, y, w, h);
+  onWindowConfigure(connId: number, id: number, x: number, y: number, w: number, h: number): void {
+    this.window.onConfigure(connId, id, x, y, w, h);
   }
   onWindowMap(connId: number, id: number): void { this.window.onMap(connId, id); }
   onWindowUnmap(connId: number, id: number): void { this.window.onUnmap(connId, id); }
@@ -221,6 +221,9 @@ export class Host implements EmX11Host {
   }
   onSetOverrideRedirect(id: number, flag: boolean): void {
     this.window.onSetOverrideRedirect(id, flag);
+  }
+  onWindowSetBitGravity(id: number, gravity: number): void {
+    this.window.onSetBitGravity(id, gravity);
   }
   onReparentWindow(id: number, parent: number, x: number, y: number): void {
     this.window.onReparent(id, parent, x, y);

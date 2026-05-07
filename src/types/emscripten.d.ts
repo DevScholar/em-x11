@@ -198,8 +198,10 @@ export interface EmX11Host {
   onWindowSetBg(id: number, bgType: number, bgValue: number): void;
   /** Geometry-only update for an existing window (XMoveWindow /
    *  XResizeWindow / XConfigureWindow). Leaves parent, shape, and
-   *  background_pixmap alone. */
-  onWindowConfigure(id: number, x: number, y: number, w: number, h: number): void;
+   *  background_pixmap alone. `connId` is the caller's connection so
+   *  Host can avoid double-delivering a ConfigureNotify back to the
+   *  caller when caller == owner (Tk/Xt resizing their own toplevel). */
+  onWindowConfigure(connId: number, id: number, x: number, y: number, w: number, h: number): void;
   /** XMapWindow entry. `connId` is the caller's connection so Host can
    *  enforce the SubstructureRedirect "caller == holder bypass" rule
    *  (x11protocol.txt §1592). Host internally decides whether to
@@ -214,6 +216,12 @@ export interface EmX11Host {
    *  and enforces at-most-one SubstructureRedirectMask per window
    *  (x11protocol.txt §1477). */
   onSelectInput(connId: number, id: number, mask: number): void;
+  /** XChangeWindowAttributes(CWBitGravity) mirror. Controls how the
+   *  window's backing pixmap is treated on resize: NorthWestGravity (1)
+   *  preserves the top-left, ForgetGravity (0, default) discards and
+   *  re-Exposes the entire content rect. Without this, Xaw widgets
+   *  (default ForgetGravity) doubled their labels on resize. */
+  onWindowSetBitGravity(id: number, gravity: number): void;
   /** XChangeWindowAttributes(CWOverrideRedirect) mirror. OR=True marks
    *  the window as WM-invisible for redirect purposes (popup menus,
    *  tooltips, twm's own decoration frames). */

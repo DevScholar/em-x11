@@ -338,7 +338,7 @@ extern void emx11_js_window_set_bg(Window id, int bg_type, unsigned long bg_valu
  * XConfigureWindow). Distinct from window_create so Host doesn't have
  * to re-seed parent, shape, or background_pixmap -- we only touch the
  * geometry fields. */
-extern void emx11_js_window_configure(Window id, int x, int y,
+extern void emx11_js_window_configure(int conn_id, Window id, int x, int y,
                                       unsigned int w, unsigned int h);
 extern void emx11_js_window_map(int conn_id, Window id);
 extern void emx11_js_window_unmap(int conn_id, Window id);
@@ -353,6 +353,13 @@ extern void emx11_js_select_input(int conn_id, Window id, long mask);
  * managers must not interfere" (popup menus, tooltips, twm's own
  * decoration frames) -- the Host skips redirect processing for them. */
 extern void emx11_js_set_override_redirect(Window id, int flag);
+/* XChangeWindowAttributes(CWBitGravity) mirror. Per-window gravity
+ * controls the backing-pixmap-on-resize policy: 1 (NorthWestGravity)
+ * preserves top-left, 0 (ForgetGravity, X-default) discards and
+ * triggers a full Expose for the new content rect. Without this
+ * forwarding, Xaw widgets (default ForgetGravity) doubled their text
+ * on resize. */
+extern void emx11_js_window_set_bit_gravity(Window id, int gravity);
 /* XReparentWindow -- move a window under a new parent. (x, y) is the
  * new origin in the new parent's coordinate space. Always forwarded to
  * the Host even when the caller has no local shadow of `id`, because

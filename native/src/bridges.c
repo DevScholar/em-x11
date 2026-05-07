@@ -513,9 +513,14 @@ EM_JS(void, emx11_js_window_set_bg, (unsigned int id, int bgType, unsigned int b
     if (Host) Host.onWindowSetBg(id, bgType, bgValue);
 });
 
-EM_JS(void, emx11_js_window_configure, (unsigned int id, int x, int y, int w, int h), {
+EM_JS(void, emx11_js_window_configure, (int connId, unsigned int id, int x, int y, int w, int h), {
     var e = globalThis.emX11; var Host = e && e._bridge;
-    if (Host) Host.onWindowConfigure(id, x, y, w, h);
+    if (Host) Host.onWindowConfigure(connId, id, x, y, w, h);
+});
+
+EM_JS(void, emx11_js_window_set_bit_gravity, (unsigned int id, int gravity), {
+    var e = globalThis.emX11; var Host = e && e._bridge;
+    if (Host) Host.onWindowSetBitGravity(id, gravity);
 });
 
 EM_JS(void, emx11_js_window_map, (int connId, unsigned int id), {

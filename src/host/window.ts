@@ -131,7 +131,7 @@ export class WindowManager {
     this.host.renderer.setWindowBackgroundPixmap(id, pmId);
   }
 
-  onConfigure(id: number, x: number, y: number, w: number, h: number): void {
+  onConfigure(connId: number, id: number, x: number, y: number, w: number, h: number): void {
     const exposed = this.host.renderer.configureWindow(id, x, y, w, h);
     /* Region-driven Expose: paintExposedRegions returned the per-window
      * newClip - oldClip diff (mirroring xserver miHandleValidateExposures,
@@ -141,6 +141,34 @@ export class WindowManager {
      * are NOT in the diff so the client doesn't get a redundant
      * Expose / overpaint there. */
     this.host.events.pushExposesForRegions(exposed, null);
+
+    /* Cross-connection ConfigureNotify delivery. When the caller is a
+     * WM (twm) resizing a managed client's shell, the client app's
+     * Tk / Xt layer needs to learn the new geometry to re-lay out --
+     * its own EmxWindow shadow and ConfigureNotify queue live in a
+     * different module. Mirrors the onReparent owner-ccall pattern.
+     *
+     * Skip when caller == owner (Tk/Xt resizing their own toplevel):
+     * notify_js_reconfigure already pushed the local ConfigureNotify
+     * before this bridge fires, and we'd double-deliver otherwise. */
+    const ownerConnId = this.host.connection.connOf(id);
+    if (
+      ownerConnId !== undefined &&
+      ownerConnId !== 0 &&
+      ownerConnId !== connId
+    ) {
+      const owner = this.host.connection.get(ownerConnId);
+      if (owner?.module) {
+        const attrs = this.host.renderer.attrsOf(id);
+        const borderWidth = attrs?.borderWidth ?? 0;
+        owner.module.ccall(
+          'emx11_push_configure_notify',
+          null,
+          ['number', 'number', 'number', 'number', 'number', 'number'],
+          [id, x, y, w, h, borderWidth],
+        );
+      }
+    }
   }
 
   onMap(connId: number, id: number): void {
@@ -211,6 +239,10 @@ export class WindowManager {
   onSetOverrideRedirect(id: number, flag: boolean): void {
     if (flag) this.overrideRedirect.set(id, true);
     else this.overrideRedirect.delete(id);
+  }
+
+  onSetBitGravity(id: number, gravity: number): void {
+    this.host.renderer.setWindowBitGravity(id, gravity);
   }
 
   onRaise(id: number): void {

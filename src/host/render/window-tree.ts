@@ -64,6 +64,11 @@ export function addWindow(
     unpaintedRegion: width > 0 && height > 0
       ? [{ ax: 0, ay: 0, w: width, h: height }]
       : EMPTY_REGION,
+    /* X-correct default. Xt/Xaw widgets leave it here and rely on
+     * Expose-driven full repaint; XChangeWindowAttributes(CWBitGravity)
+     * lifts to NorthWestGravity for clients that want pixel preservation
+     * (Tk wrappers). */
+    bitGravity: 0, /* ForgetGravity */
   });
 }
 
@@ -360,37 +365,68 @@ export function configureWindow(
   win.y = y;
   if (oldW !== w || oldH !== h) {
     const fresh = allocBacking(w, h);
-    const carryW = Math.min(oldW, w);
-    const carryH = Math.min(oldH, h);
-    if (carryW > 0 && carryH > 0) {
-      fresh.ctx.drawImage(
-        win.backingSurface as unknown as CanvasImageSource,
-        0, 0, carryW, carryH,
-        0, 0, carryW, carryH,
-      );
-    }
-    win.backingSurface = fresh.surface;
-    win.backingCtx = fresh.ctx;
-    win.backingDirty = true;
-    /* Resize: clip unpaintedRegion to the carry-over rect (anything
-     * outside the kept top-left was discarded along with the old
-     * backing), then union in the grown strips so they're known
-     * unpainted in the fresh backing. */
-    win.unpaintedRegion = regionIntersect(
-      win.unpaintedRegion,
-      [{ ax: 0, ay: 0, w: carryW, h: carryH }],
-    );
-    if (w > oldW) {
-      win.unpaintedRegion = regionUnion(
+    /* bit_gravity decides what happens to the old pixels:
+     *   NorthWestGravity (1)  -- carry top-left, Expose only grown strips
+     *   ForgetGravity (0) and everything else -- discard, Expose entire
+     *                           new content rect (server semantics in
+     *                           xserver/dix/window.c::ResizeChildrenWinSize).
+     *
+     * Without this distinction, Xaw Command widgets in xcalc kept their
+     * pre-resize text bitmap in the carried backing; Xt then re-laid out
+     * the label at a new x-centered position and Redisplay overlaid the
+     * fresh text on the existing one -- the "1/x1/x" doubled-label
+     * symptom. Discarding under ForgetGravity + forcing full Expose
+     * (oldClip override below) makes the widget repaint from scratch. */
+    const preserve = win.bitGravity === 1; /* NorthWestGravity */
+    if (preserve) {
+      const carryW = Math.min(oldW, w);
+      const carryH = Math.min(oldH, h);
+      if (carryW > 0 && carryH > 0) {
+        fresh.ctx.drawImage(
+          win.backingSurface as unknown as CanvasImageSource,
+          0, 0, carryW, carryH,
+          0, 0, carryW, carryH,
+        );
+      }
+      win.backingSurface = fresh.surface;
+      win.backingCtx = fresh.ctx;
+      win.backingDirty = true;
+      /* Resize: clip unpaintedRegion to the carry-over rect (anything
+       * outside the kept top-left was discarded along with the old
+       * backing), then union in the grown strips so they're known
+       * unpainted in the fresh backing. */
+      win.unpaintedRegion = regionIntersect(
         win.unpaintedRegion,
-        [{ ax: oldW, ay: 0, w: w - oldW, h }],
+        [{ ax: 0, ay: 0, w: carryW, h: carryH }],
       );
-    }
-    if (h > oldH) {
-      win.unpaintedRegion = regionUnion(
-        win.unpaintedRegion,
-        [{ ax: 0, ay: oldH, w: oldW, h: h - oldH }],
-      );
+      if (w > oldW) {
+        win.unpaintedRegion = regionUnion(
+          win.unpaintedRegion,
+          [{ ax: oldW, ay: 0, w: w - oldW, h }],
+        );
+      }
+      if (h > oldH) {
+        win.unpaintedRegion = regionUnion(
+          win.unpaintedRegion,
+          [{ ax: 0, ay: oldH, w: oldW, h: h - oldH }],
+        );
+      }
+    } else {
+      /* ForgetGravity: drop the old pixels, mark the entire new
+       * content rect unpainted. paintExposedRegions intersects this
+       * with newly-revealed clipList area to decide where to send
+       * Expose; we additionally erase the oldClip snapshot below so
+       * the entire new clipList counts as "newly revealed" even
+       * though the window's position didn't change -- mirroring the
+       * X server's "send Expose for the whole new content area"
+       * semantics for ForgetGravity. */
+      win.backingSurface = fresh.surface;
+      win.backingCtx = fresh.ctx;
+      win.backingDirty = true;
+      win.unpaintedRegion = w > 0 && h > 0
+        ? [{ ax: 0, ay: 0, w, h }]
+        : EMPTY_REGION;
+      oldClips.set(id, { clip: EMPTY_REGION, border: EMPTY_REGION });
     }
     win.width = w;
     win.height = h;

@@ -171,7 +171,7 @@ target_link_options(xcalc PRIVATE
     "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event',
         '_emx11_push_motion_event','_emx11_push_key_event',
         '_emx11_push_expose_event','_emx11_push_map_request',
-        '_emx11_push_reparent_notify']"
+        '_emx11_push_reparent_notify','_emx11_push_configure_notify']"
 )
 ```
 

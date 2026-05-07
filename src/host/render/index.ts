@@ -91,6 +91,10 @@ export class Renderer implements RendererState {
   configureWindow(id: number, x: number, y: number, w: number, h: number): Map<number, Region> {
     return tree.configureWindow(this, id, x, y, w, h);
   }
+  setWindowBitGravity(id: number, gravity: number): void {
+    const win = this.windows.get(id);
+    if (win) win.bitGravity = gravity;
+  }
   reparentWindow(id: number, parent: number, x: number, y: number): Map<number, Region> {
     return tree.reparentWindow(this, id, parent, x, y);
   }

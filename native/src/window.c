@@ -314,14 +314,59 @@ static void notify_js_reconfigure(Display *dpy, EmxWindow *win) {
      * client's queue so Tk can update its recorded geometry and mark
      * the widget for paint. Without this, Tk's TopLevel stays at
      * `geometry=1x1+0+0` after `pack` -- which is the tk-hello symptom. */
-    emx11_js_window_configure(win->id, win->x, win->y,
+    emx11_js_window_configure(dpy->conn_id, win->id, win->x, win->y,
                               win->width, win->height);
     push_configure_notify(dpy, win);
 }
 
+/* Cross-connection geometry change. The caller (typically a WM) has no
+ * local shadow for `w`, so we can't update an EmxWindow nor push a
+ * local ConfigureNotify -- the notify has to land in the *owner's*
+ * queue. Mirrors the XReparentWindow cross-conn pattern: fetch the
+ * window's current authoritative geometry from the Host, merge the
+ * caller's requested changes, then forward to Host. Host.onConfigure
+ * dispatches emx11_push_configure_notify on the owner module so the
+ * client app sees the size change and re-lays out. Without this, twm
+ * resizing xcalc / xeyes never reaches the client and the inner
+ * content stays at its pre-resize size while the WM frame visibly
+ * grows or shrinks.
+ *
+ * Returns 1 if the call was forwarded, 0 if the window is unknown to
+ * the Host. */
+static int notify_js_reconfigure_xconn(Display *dpy, Window w,
+                                       unsigned int valuemask,
+                                       const XWindowChanges *values) {
+    int a[EMX11_WIN_ATTRS_SIZE];
+    emx11_js_get_window_attrs(w, a);
+    if (!a[EMX11_WIN_ATTRS_PRESENT]) return 0;
+    int x = a[EMX11_WIN_ATTRS_X];
+    int y = a[EMX11_WIN_ATTRS_Y];
+    int width  = a[EMX11_WIN_ATTRS_WIDTH];
+    int height = a[EMX11_WIN_ATTRS_HEIGHT];
+    if (values) {
+        if (valuemask & CWX)      x      = values->x;
+        if (valuemask & CWY)      y      = values->y;
+        if (valuemask & CWWidth)  width  = values->width;
+        if (valuemask & CWHeight) height = values->height;
+    }
+    /* Bump the *caller's* request serial so the host-side ConfigureNotify
+     * synthesised on the owner uses a serial >= what the caller's Xlib
+     * would observe; not strictly required for the owner-side wait
+     * (Tk/Xt on the owner uses *its own* dpy->request), but keeps
+     * symmetry with notify_js_reconfigure. */
+    dpy->request++;
+    emx11_js_window_configure(dpy->conn_id, w, x, y,
+                              (unsigned int)width, (unsigned int)height);
+    return 1;
+}
+
 int XMoveWindow(Display *display, Window w, int x, int y) {
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win) return 0;
+    if (!win) {
+        XWindowChanges v = {0};
+        v.x = x; v.y = y;
+        return notify_js_reconfigure_xconn(display, w, CWX | CWY, &v);
+    }
     EM_ASM({
         var d = globalThis.emX11 && globalThis.emX11._debug;
         if (d && d.traceMove) {
@@ -339,7 +384,11 @@ int XMoveWindow(Display *display, Window w, int x, int y) {
 int XResizeWindow(Display *display, Window w,
                   unsigned int width, unsigned int height) {
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win) return 0;
+    if (!win) {
+        XWindowChanges v = {0};
+        v.width = (int)width; v.height = (int)height;
+        return notify_js_reconfigure_xconn(display, w, CWWidth | CWHeight, &v);
+    }
     win->width  = width;
     win->height = height;
     notify_js_reconfigure(display, win);
@@ -349,7 +398,12 @@ int XResizeWindow(Display *display, Window w,
 int XMoveResizeWindow(Display *display, Window w, int x, int y,
                       unsigned int width, unsigned int height) {
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win) return 0;
+    if (!win) {
+        XWindowChanges v = {0};
+        v.x = x; v.y = y; v.width = (int)width; v.height = (int)height;
+        return notify_js_reconfigure_xconn(display, w,
+                                           CWX | CWY | CWWidth | CWHeight, &v);
+    }
     win->x = x;
     win->y = y;
     win->width  = width;
@@ -360,8 +414,11 @@ int XMoveResizeWindow(Display *display, Window w, int x, int y,
 
 int XConfigureWindow(Display *display, Window w,
                      unsigned int valuemask, XWindowChanges *values) {
+    if (!values) return 0;
     EmxWindow *win = emx11_window_find(display, w);
-    if (!win || !values) return 0;
+    if (!win) {
+        return notify_js_reconfigure_xconn(display, w, valuemask, values);
+    }
     if (valuemask & CWX)           win->x = values->x;
     if (valuemask & CWY)           win->y = values->y;
     if (valuemask & CWWidth)       win->width  = (unsigned int)values->width;
@@ -406,6 +463,12 @@ int XChangeWindowAttributes(Display *display, Window w,
     if (valuemask & CWOverrideRedirect) {
         win->override_redirect = attrs->override_redirect;
         emx11_js_set_override_redirect(w, attrs->override_redirect ? 1 : 0);
+    }
+    if (valuemask & CWBitGravity) {
+        /* Forward to host so the renderer's configureWindow knows
+         * whether to preserve (NorthWestGravity) or discard
+         * (ForgetGravity / others) the backing on resize. */
+        emx11_js_window_set_bit_gravity(w, attrs->bit_gravity);
     }
     if (valuemask & CWBackPixmap) {
         /* X semantics (xserver/dix/window.c:1186-1216):
