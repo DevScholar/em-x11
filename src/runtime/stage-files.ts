@@ -1,8 +1,7 @@
 /**
- * MEMFS staging helper for the single-thread Host path. Mirrors the
- * worker-mode `stagedFiles` helper in src/worker/client/main.ts, but
- * built as a `preRun` hook the wasm factory can run directly. Lives in
- * runtime/ because Host launchers (twm, xcalc) are the only callers.
+ * MEMFS staging helper for the Host path. Built as a `preRun` hook
+ * the wasm factory can run directly. Lives in runtime/ because Host
+ * launchers (twm, xcalc) are the only callers.
  */
 
 import type { EmscriptenModule } from '../types/emscripten.js';

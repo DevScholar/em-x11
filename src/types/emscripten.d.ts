@@ -98,8 +98,8 @@ export interface EmX11Host {
    *  later hands out is `xidBase | (counter & xidMask)`, and ranges
    *  across connections never overlap. */
   openDisplay(): { connId: number; xidBase: number; xidMask: number };
-  /** XCloseDisplay entry. Host drops the connection and (eventually, in
-   *  Step 2) releases any windows / pixmaps / atoms it owned. */
+  /** XCloseDisplay entry. Host drops the connection and releases any
+   *  windows / pixmaps / atoms it owned. */
   closeDisplay(connId: number): void;
   /** Shared root window's XID. Every client's XOpenDisplay asks Host
    *  for this rather than creating a per-connection root; one root,

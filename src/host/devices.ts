@@ -11,8 +11,8 @@
  *     window + canvas in the constructor. Demo / wacl-tk path.
  *   - Headless / OffscreenCanvas mode: attachment is skipped; caller
  *     is expected to call pushMouseDown/Up/Move/Key + setPointer with
- *     canvas-local coordinates. Used by the worker entry in
- *     pyodide-tk that relays events from the main thread.
+ *     canvas-local coordinates. Used by the pyodide-tk entry that
+ *     relays events from the main thread.
  */
 
 import type { Host } from './index.js';
@@ -29,8 +29,8 @@ import {
 } from './constants.js';
 
 /** Plain-data shape used by both the DOM path (after rect translation)
- *  and the relay path (worker postMessage payload). All coords are
- *  canvas-local device pixels. */
+ *  and the relay path (pyodide-tk main-thread → Worker). All coords
+ *  are canvas-local device pixels. */
 export interface MouseEventData {
   x: number;
   y: number;
