@@ -94,7 +94,7 @@ export function clearArea(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  if ((globalThis as { __EMX11_TRACE_PAINT__?: boolean }).__EMX11_TRACE_PAINT__) {
+  if (globalThis.emX11?._debug?.tracePaint) {
     console.log('[paint] clearArea', id, '(', x, y, w, h, ') parent=', win.parent);
   }
   paintBackgroundIntoBacking(r, win, x, y, w, h);

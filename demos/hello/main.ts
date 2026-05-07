@@ -1,15 +1,11 @@
 /**
- * hello demo harness. Single-threaded mode: the wasm runs on the main
- * JS thread alongside the Host. No workers, no OffscreenCanvas.
+ * hello demo harness. Single-thread mode: the wasm runs on the main
+ * JS thread alongside the em-x11 host. No workers, no OffscreenCanvas.
  */
 
-import { Host } from '../../src/host/index.js';
+import { createEmX11 } from '../../src/index.js';
 
-const host = new Host({ width: 1024, height: 768 });
-host.install();
+const em = await createEmX11({ width: 1024, height: 768 });
 
-const base = '/build/artifacts/hello';
-await host.launchClient({
-  glueUrl: `${base}/hello.js`,
-  wasmUrl: `${base}/hello.wasm`,
-});
+const hello = em.spawn('/build/artifacts/hello/hello');
+await hello.ready;

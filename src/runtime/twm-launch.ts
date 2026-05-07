@@ -1,5 +1,5 @@
 /**
- * twm launcher.
+ * twm launcher — spawns twm via the public em.spawn API.
  *
  * The vendored twm in third-party/ is a verbatim X.Org tarball that gets
  * fetched at setup time and is NOT git-tracked. Patching it in-place would
@@ -14,42 +14,20 @@
  * (xeyes is suspended on its redirected XMapWindow), so the wait would
  * never end. RandomPlacement makes twm pick a position automatically.
  *
- * Strategy: stage a twmrc into MEMFS via `stagedFiles`, then tell twm
- * to read it via `-f`. Same mechanism people use on real Linux
- * (`twm -f ~/.twmrc`).
+ * Strategy: stage a twmrc into em.fs at /em-x11.twmrc, then tell twm
+ * to read it via `-f`. Same mechanism people use on real Linux.
  */
 
-import type { Host } from '../host/index.js';
-import type { EmscriptenModule } from '../types/emscripten.js';
-import { stagePreRun } from './stage-files.js';
+import type { EmX11 } from '../api/emx11.js';
+import type { Process } from '../api/types.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';
 
-/* Mirrors third-party/twm/src/system.twmrc with two em-x11 specific
- * additions:
- *
- *   - `RandomPlacement`: see the file header for why interactive placement
- *     deadlocks our browser world.
- *
- *   - `OpaqueMove`: twm defaults to OpaqueMove=FALSE, which means a
- *     window drag (f.move) draws a "rubber band" XSegment outline on the
- *     root window using GXxor and only XMoveWindow's the real frame on
- *     ButtonRelease. We can't honour GXxor on Canvas 2D (a second draw
- *     can't undo the first; see native/src/drawing.c::gc_draw_disabled),
- *     so the entire drag would be visually invisible -- the window only
- *     jumps at release, with no feedback in between. OpaqueMove flips
- *     twm to live-XMoveWindow during the drag, which our MoveWindow path
- *     does render correctly. The slight cost is more frame redraws
- *     while dragging; in a browser demo that's fine.
- *
- *   - `ShowIconManager`: twm defaults Scr->ShowIconManager=FALSE (twm.c:755)
- *     and only maps the icon manager when that flag is set (twm.c:594).
- *     For a demo where the icon manager IS the primary way to see that
- *     twm is running, we want it visible from startup. Toggling from the
- *     "Twm" menu at runtime still works.
- *
- * Kept inline (rather than as a separate asset) so the Vite build doesn't
- * have to learn about a new file type. */
+/* Mirrors third-party/twm/src/system.twmrc with three em-x11 specific
+ * additions; see prior revision history for the full justification.
+ *   RandomPlacement   — interactive placement deadlocks our browser world
+ *   OpaqueMove        — GXxor rubber-band can't be undone on Canvas 2D
+ *   ShowIconManager   — make twm visibly running from boot */
 const TWMRC = `
 NoGrabServer
 RestartPreviousState
@@ -130,23 +108,22 @@ export interface LaunchTwmOptions {
   artifactBase?: string;
 }
 
-/** Spawn twm in single-thread Host mode. Returns once twm has armed
- *  SubstructureRedirectMask on root, so the caller's next launchClient
+/** Spawn twm in single-thread mode. Returns once twm has armed
+ *  SubstructureRedirectMask on root, so the caller's next em.spawn
  *  is guaranteed to route through twm's MapRequest intercept. Without
  *  that barrier, a racing client could map at root-local (0,0) before
  *  twm ever sees a MapRequest. */
 export async function launchTwm(
-  host: Host,
+  em: EmX11,
   options: LaunchTwmOptions = {},
-): Promise<{ connId: number; module: EmscriptenModule }> {
+): Promise<Process> {
   const base = options.artifactBase ?? '/build/artifacts/twm';
-  const result = await host.launchClient({
-    glueUrl: `${base}/twm.js`,
-    wasmUrl: `${base}/twm.wasm`,
+  em.fs.writeFile(TWMRC_PATH, TWMRC.trimStart());
+  const p = em.spawn(`${base}/twm`, {
     thisProgram: 'twm',
-    arguments: ['-f', TWMRC_PATH],
-    preRun: [stagePreRun([{ path: TWMRC_PATH, contents: TWMRC.trimStart() }])],
+    argv: ['-f', TWMRC_PATH],
   });
-  await host.waitForSubstructureRedirect(host.getRootWindow());
-  return result;
+  await p.ready;
+  await em.display.waitForSubstructureRedirect(em.display.rootWindowId);
+  return p;
 }

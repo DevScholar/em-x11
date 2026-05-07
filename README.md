@@ -32,27 +32,9 @@ pnpm build
 pnpm dev
 ```
 
-# Architecture
-
-em-x11 runs as a single-threaded Host ([src/host/index.ts](src/host/index.ts))
-where wasm clients share the main JS thread with the X "server" logic.
-The Host owns the canvas and window tree, and wasm clients reach it
-directly via `globalThis.__EMX11__` bridges.
-
-Multiple wasm clients (e.g. twm + xeyes + xcalc) can run in the same
-Host concurrently without workers — the Host routes events to the
-right client via per-connection bookkeeping (see the `session` demo).
-This is the same runtime used by wacl-tk and pyodide-tk.
-
-A prior dual-mode design (multi-threaded "channel" mode with
-OffscreenCanvas workers and MessagePort RPC, specified in
-`docs/multi-wasm.md`) was removed at pre-alpha: it was never wired
-into a demo, gave no measured perf benefit, and doubled the
-maintenance cost of every bridge.
-
 # Documentation
 
-No API documentation yet — the project is still unstable.
+The JS API surface is documented in [docs/api.md](docs/api.md).
 
 # License
 

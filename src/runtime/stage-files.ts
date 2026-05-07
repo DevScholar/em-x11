@@ -32,8 +32,13 @@ export function stagePreRun(files: StagedFile[]): (mod: EmscriptenModule) => voi
       try {
         fs.mkdir(dir);
       } catch (e) {
+        /* Emscripten ErrnoError for EEXIST is errno 20; its .message
+         * is literally "FS error" so we can't rely on substring. */
+        const errno = (e as { errno?: number }).errno;
+        if (errno === 20) continue;
         const msg = (e as Error).message ?? '';
-        if (!msg.includes('exist') && !msg.includes('EEXIST')) throw e;
+        if (msg.includes('exist') || msg.includes('EEXIST')) continue;
+        throw e;
       }
     }
     for (const f of files) {

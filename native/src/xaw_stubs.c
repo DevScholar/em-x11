@@ -303,7 +303,8 @@ Bool XQueryPointer(Display *dpy, Window w, Window *root_return,
         }
     }
     EM_ASM({
-        if (globalThis.__EMX11_TRACE_QP__) {
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceQp) {
             console.log('[c-qp] conn=' + $0 + ' win=' + $1 +
                         ' root=(' + $2 + ',' + $3 + ')' +
                         ' local=(' + $4 + ',' + $5 + ')');

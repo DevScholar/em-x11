@@ -244,12 +244,12 @@ void emx11_push_button_event(int type, Window window, int x, int y,
     }
 
     /* Diagnostic trace: dump the C-side resolution so we can see what
-     * each wasm process receives. Gate on a pointer so the JS side can
-     * toggle it via globalThis.__EMX11_TRACE_C_BTN__. Gate via EM_ASM
-     * so it's free when disabled; the EM_ASM is itself ~one-line
-     * runtime cost when enabled. */
+     * each wasm process receives. Toggled via
+     * `globalThis.emX11._debug.traceCBtn` (set from DevTools). Gated
+     * inside EM_ASM so it's effectively free when disabled. */
     EM_ASM({
-        if (globalThis.__EMX11_TRACE_C_BTN__) {
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceCBtn) {
             console.log('[c-btn] conn=' + $0 + ' type=' + $1 +
                         ' hint=' + ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 +
                         ' button=' + $5 + ' state=0x' + ($6 >>> 0).toString(16) +
@@ -322,7 +322,8 @@ void emx11_push_motion_event(Window window, int x, int y,
         return;
 
     EM_ASM({
-        if (globalThis.__EMX11_TRACE_C_MOT__) {
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceCMot) {
             console.log('[c-mot] conn=' + $0 + ' rx=' + $1 + ' ry=' + $2 +
                         ' grab=' + ($3 ? 'Y' : 'N') +
                         ' target=' + ($4 >>> 0) +

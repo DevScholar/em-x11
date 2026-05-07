@@ -21,9 +21,17 @@
  * have one. See src/host/README in xserver-counterpart comments for
  * what each method's authoritative source-of-truth is.
  *
- * Host installs itself on globalThis.__EMX11__ via install(). That must
- * happen BEFORE any wasm module starts: the EM_JS bridges read the
- * global synchronously from C calls.
+ * Host installs itself on globalThis.emX11._bridge via attachToBridge().
+ * That must happen BEFORE any wasm module starts: the EM_JS bridges
+ * read `globalThis.emX11._bridge` synchronously from C calls.
+ *
+ * `globalThis.emX11` is the single namespace owned by this package;
+ * everything em-x11 puts on the global object lives under it (no
+ * scattered `__EMX11_*` globals). `_bridge` is the C-facing facade
+ * (this Host); `_caches` holds bridge-owned scratch maps; `_debug`
+ * holds runtime trace flags. Public-facing surfaces (`fs`, `spawn`,
+ * `display`, `debug`) sit unprefixed on the same object and are
+ * wired up by createEmX11() in src/api/.
  */
 
 import { RootCanvas } from '../runtime/canvas.js';
@@ -41,6 +49,7 @@ import { InputBridge } from './devices.js';
 import { GrabManager } from './grabs.js';
 import type { LoadOptions } from '../loader/wasm.js';
 import type {
+  EmX11Global,
   EmX11Host,
   EmscriptenModule,
   Point,
@@ -85,8 +94,8 @@ export class Host implements EmX11Host {
     this.atom = new AtomManager();
     this.gc = new GcManager(this);
     this.renderer = new Renderer(this.canvas, (id) => this.gc.pixmapCanvas(id));
-    /* DevTools entry points: __EMX11_TRACE_HIT__/__EMX11_TRACE_HIT_NEXT__
-     * gate hit-test logging; __EMX11_DUMP_WINDOWS__() prints every mapped
+    /* DevTools entry points: emX11._debug.traceHit / traceHitNext gate
+     * hit-test logging; em.debug.dumpWindows() prints every mapped
      * window's bbox/shape/clip state. Wired right after Renderer
      * construction so the helper can close over `this.renderer`. */
     installDumpHelper(this.renderer);
@@ -96,16 +105,36 @@ export class Host implements EmX11Host {
     this.window = new WindowManager(this);
     this.devices = new InputBridge(this);
     this.grabs = new GrabManager(this);
-    /* DevTools entry point for the grab table. Call __EMX11_DUMP_GRABS__()
-     * to see whether passive grabs got registered (e.g. by twm). */
-    (globalThis as { __EMX11_DUMP_GRABS__?: () => void }).__EMX11_DUMP_GRABS__ =
-      () => this.grabs.dump();
 
     this.window.installSharedRoot();
   }
 
-  install(): void {
-    globalThis.__EMX11__ = this;
+  /** Install this Host as the bridge facade under `globalThis.emX11._bridge`,
+   *  so EM_JS bodies in native/src/bridges.c can reach it synchronously.
+   *  Allocates the singleton if needed and never overwrites unrelated
+   *  surfaces (fs, spawn, display, debug) that createEmX11 may have
+   *  already attached.
+   *
+   *  Must be called BEFORE any wasm module starts. createEmX11() does
+   *  this for you; legacy callers that constructed Host directly should
+   *  invoke it manually. */
+  attachToBridge(): void {
+    const slot = (globalThis.emX11 ??= {} as EmX11Global);
+    slot._bridge = this;
+    if (!slot._caches) slot._caches = {};
+    if (!slot._debug) {
+      slot._debug = {
+        traceHit: false,
+        traceHitNext: false,
+        traceMotion: false,
+        traceButton: false,
+        tracePaint: false,
+        traceCBtn: false,
+        traceCMot: false,
+        traceMove: false,
+        traceQp: false,
+      };
+    }
   }
 
   launchClient(opts: LoadOptions): Promise<{ connId: number; module: EmscriptenModule }> {

@@ -100,10 +100,7 @@ export class InputBridge {
      * while a drag is in progress -- a TWM title-bar drag crosses over
      * xeyes' frame mid-drag, but Motion must still reach TWM, not xeyes. */
     const module = this.dragModule ?? (win !== null ? this.moduleForWindow(win) : null);
-    const traceFlag = (
-      globalThis as { __EMX11_TRACE_MOTION__?: boolean }
-    ).__EMX11_TRACE_MOTION__;
-    if (traceFlag) {
+    if (globalThis.emX11?._debug?.traceMotion) {
       console.log(
         `[mot] (${e.x}, ${e.y}) win=${win} drag=${this.dragModule ? 'Y' : 'N'} module=${module ? 'Y' : 'N'}`,
       );
@@ -138,9 +135,7 @@ export class InputBridge {
   private deliverButton(xType: number, e: MouseEventData): void {
     this.setPointer(e.x, e.y);
     const target = this.host.renderer.findWindowAt(e.x, e.y);
-    const traceFlag = (
-      globalThis as { __EMX11_TRACE_BUTTON__?: boolean }
-    ).__EMX11_TRACE_BUTTON__;
+    const traceFlag = !!globalThis.emX11?._debug?.traceButton;
     if (traceFlag) {
       console.log(
         `[btn] type=${xType} (${e.x}, ${e.y}) target=${target} button=${e.button} mods=0x${e.modifiers.toString(16)}`,

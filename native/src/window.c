@@ -323,7 +323,8 @@ int XMoveWindow(Display *display, Window w, int x, int y) {
     EmxWindow *win = emx11_window_find(display, w);
     if (!win) return 0;
     EM_ASM({
-        if (globalThis.__EMX11_TRACE_MOVE__) {
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceMove) {
             console.log('[c-move] conn=' + $0 + ' win=' + ($1 >>> 0) +
                         ' x=' + $2 + ' y=' + $3 +
                         ' old_x=' + $4 + ' old_y=' + $5);

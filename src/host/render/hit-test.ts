@@ -25,10 +25,11 @@
  *    not-viewable descendant of an unmapped ancestor is still rejected
  *    naturally because the loop never enters its parent's subtree.
  *
- * Tracing: set `globalThis.__EMX11_TRACE_HIT__ = true` to log each
- * hit-test walk. Useful for diagnosing "this point looks like root
- * but reports as <some widget>" symptoms (twm icon-manager / hidden
- * shells still receiving Motion).
+ * Tracing: set `globalThis.emX11._debug.traceHit = true` to log every
+ * hit-test walk. Set `traceHitNext = true` to log only the next call,
+ * then have the helper auto-clear it. Useful for diagnosing "this
+ * point looks like root but reports as <some widget>" symptoms (twm
+ * icon-manager / hidden shells still receiving Motion).
  */
 import type { RendererState, ManagedWindow } from './types.js';
 import { absOrigin } from './window-tree.js';
@@ -38,17 +39,18 @@ interface TraceCtx {
   log: string[];
 }
 
-/* Trace flags (read fresh on every call so DevTools toggling is live):
- *   __EMX11_TRACE_HIT__         -> log every findWindowAt call (spammy on Motion)
- *   __EMX11_TRACE_HIT_NEXT__    -> log the NEXT findWindowAt call only, then auto-clear
+/* Trace flags read fresh on every call so DevTools toggling is live.
+ * Both flags live under `globalThis.emX11._debug`:
+ *   traceHit       -> log every findWindowAt call (spammy on Motion)
+ *   traceHitNext   -> log the NEXT findWindowAt call only, then auto-clear
  * Use the latter from DevTools right before clicking the mystery point:
- *     __EMX11_TRACE_HIT_NEXT__ = true
+ *     emX11._debug.traceHitNext = true
  *   then move/click; the very next hit-test prints its full trace. */
 export function findWindowAt(r: RendererState, cssX: number, cssY: number): number | null {
-  const g = globalThis as { __EMX11_TRACE_HIT__?: boolean; __EMX11_TRACE_HIT_NEXT__?: boolean };
-  const oneShot = !!g.__EMX11_TRACE_HIT_NEXT__;
+  const dbg = globalThis.emX11?._debug;
+  const oneShot = !!dbg?.traceHitNext;
   const trace: TraceCtx = {
-    enabled: !!g.__EMX11_TRACE_HIT__ || oneShot,
+    enabled: !!dbg?.traceHit || oneShot,
     log: [],
   };
 
@@ -60,27 +62,30 @@ export function findWindowAt(r: RendererState, cssX: number, cssY: number): numb
     );
     for (const line of trace.log) console.log('  ' + line);
   }
-  if (oneShot) g.__EMX11_TRACE_HIT_NEXT__ = false;
+  if (oneShot && dbg) dbg.traceHitNext = false;
   return result;
 }
 
-/** DevTools-callable: dump every mapped window's bbox/shape/clipList state
- *  in z-order, no point lookup. Use to confirm whether the icon manager
- *  ID/parent is what you expect. Call as `__EMX11_DUMP_WINDOWS__()`. */
-export function installDumpHelper(r: RendererState): void {
-  (globalThis as { __EMX11_DUMP_WINDOWS__?: () => void }).__EMX11_DUMP_WINDOWS__ = () => {
-    const all = [...r.windows.values()].sort((a, b) => a.stackOrder - b.stackOrder);
-    console.log(`[dump] ${all.length} windows total`);
-    for (const w of all) {
-      const { ax, ay } = absOrigin(r, w);
-      console.log(
-        `  #${w.id} parent=${w.parent} stack=${w.stackOrder} mapped=${w.mapped}` +
-          ` bbox=(${ax},${ay},${w.width}x${w.height}+${w.borderWidth})` +
-          ` bg=${w.bgType} shape=${w.shape ? w.shape.length + 'rects' : 'none'}` +
-          ` clipList=${w.clipList.length}rects`,
-      );
-    }
-  };
+/** Print every mapped window's bbox/shape/clipList state in z-order.
+ *  Wired into `em.debug.dumpWindows()` by api/debug.ts. */
+export function dumpWindows(r: RendererState): void {
+  const all = [...r.windows.values()].sort((a, b) => a.stackOrder - b.stackOrder);
+  console.log(`[dump] ${all.length} windows total`);
+  for (const w of all) {
+    const { ax, ay } = absOrigin(r, w);
+    console.log(
+      `  #${w.id} parent=${w.parent} stack=${w.stackOrder} mapped=${w.mapped}` +
+        ` bbox=(${ax},${ay},${w.width}x${w.height}+${w.borderWidth})` +
+        ` bg=${w.bgType} shape=${w.shape ? w.shape.length + 'rects' : 'none'}` +
+        ` clipList=${w.clipList.length}rects`,
+    );
+  }
+}
+
+/** @deprecated kept while host/index.ts is migrated; api/debug.ts calls
+ *  dumpWindows() directly via the renderer reference it holds. */
+export function installDumpHelper(_r: RendererState): void {
+  /* No-op: dump is now reached via em.debug.dumpWindows(). */
 }
 
 /** Mirrors miSpriteTrace: descend the topmost-matching child at each

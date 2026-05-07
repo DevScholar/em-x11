@@ -10,6 +10,7 @@
  */
 export interface EmscriptenFS {
   writeFile(path: string, data: string | Uint8Array): void;
+  readFile(path: string, opts?: { encoding?: 'binary' | 'utf8' }): Uint8Array | string;
   mkdir(path: string): void;
 }
 
@@ -86,9 +87,72 @@ export interface Point {
 }
 
 /**
- * The em-x11 host object, installed on `globalThis` before wasm starts so
- * that C code (via EM_JS bridges in native/src/bridges.c) can reach
- * TS-side state. Populated by src/host/index.ts.
+ * The em-x11 global namespace, installed on `globalThis` before wasm
+ * starts so that C code (via EM_JS bridges in native/src/bridges.c)
+ * can reach TS-side state. Populated cooperatively:
+ *
+ *   - createEmX11() installs the public surface (fs, spawn, display,
+ *     debug, dlopen) directly on this object.
+ *   - Host.attachToBridge() (called by createEmX11) installs `_bridge`
+ *     pointing at the Host facade EM_JS reads from.
+ *
+ * Everything em-x11 puts on the global object lives under this single
+ * namespace -- no scattered `__EMX11_*` globals.
+ */
+export interface EmX11Global {
+  /** Host facade dispatched into by every EM_JS body. */
+  _bridge?: EmX11Host;
+  /** Bridge-owned scratchpads (font measure ctx, font cache, text
+   *  cache, property stash). Lazy-initialised by the bridges
+   *  themselves; the JS side only reads these for diagnostics. */
+  _caches?: {
+    measureCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    fontCache?: Map<string, { ascent: number; descent: number; maxW: number; widths: Int32Array }>;
+    textCache?: Map<string, number>;
+    propStash?: Uint8Array | null;
+  };
+  /** Runtime trace flags toggled from JS / DevTools. Read by the
+   *  hit-test walker, paint walker, input bridge, and a handful of
+   *  C-side EM_ASM gates. The bridges don't write these; only DevTools
+   *  / api/debug.ts do. All boolean; default false. */
+  _debug?: {
+    /** Log every findWindowAt call. Spammy on Motion. */
+    traceHit: boolean;
+    /** One-shot: log only the very next findWindowAt call, then the
+     *  helper auto-clears it. Use from DevTools right before clicking
+     *  the mystery point. */
+    traceHitNext: boolean;
+    /** JS-side input bridge motion log (every canvas mousemove). */
+    traceMotion: boolean;
+    /** JS-side input bridge button log (down/up). */
+    traceButton: boolean;
+    /** Renderer paint walk log (compositor + window-tree clip math). */
+    tracePaint: boolean;
+    /** C-side button event delivery log (event.c). */
+    traceCBtn: boolean;
+    /** C-side motion event delivery log (event.c). */
+    traceCMot: boolean;
+    /** XMoveWindow / XConfigureWindow log (window.c). */
+    traceMove: boolean;
+    /** XQueryPointer log from Xaw shims (xaw_stubs.c). */
+    traceQp: boolean;
+  };
+  /** Public-facing surfaces wired by createEmX11; declared optional
+   *  here so transitional commits where they don't exist yet still
+   *  type-check. Concrete shape lives in src/api/types.ts. */
+  fs?: unknown;
+  display?: unknown;
+  debug?: unknown;
+  spawn?: unknown;
+  exec?: unknown;
+  dlopen?: unknown;
+  version?: string;
+}
+
+/**
+ * The em-x11 host bridge facade, installed under `globalThis.emX11._bridge`
+ * by Host.attachToBridge(). The C side calls into this via EM_JS bodies
+ * in native/src/bridges.c.
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;
@@ -335,5 +399,5 @@ export interface EmX11Host {
 
 declare global {
   // eslint-disable-next-line no-var
-  var __EMX11__: EmX11Host | undefined;
+  var emX11: EmX11Global | undefined;
 }
