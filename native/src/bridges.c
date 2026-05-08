@@ -622,3 +622,68 @@ EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
     var e = globalThis.emX11; var Host = e && e._bridge;
     if (Host) Host.onWindowShape(id, rects);
 });
+
+/* --- GLX (libGL via emscripten LEGACY_GL_EMULATION on per-context
+ *      OffscreenCanvas; SwapBuffers blits into the X window's backing) -- */
+
+/* Allocate an OffscreenCanvas + targetId for a new GLXContext, register
+ * the canvas under the calling wasm's Module.specialHTMLTargets so
+ * emscripten_webgl_create_context (called from glx.c) resolves it.
+ * Writes the targetId into outTargetIdPtr (UTF-8, capped at outTargetIdLen
+ * including NUL); returns the GlxManager-side context id (>=1) or 0 on
+ * failure. */
+EM_JS(int, emx11_js_glx_create_context,
+      (int width, int height, int outTargetIdPtr, int outTargetIdLen),
+      {
+          var e = globalThis.emX11; var h = e && e._bridge;
+          if (!h || !h.glx) return 0;
+          var info = h.glx.createContext(width | 0, height | 0);
+          if (!info) return 0;
+          /* Module.specialHTMLTargets is exported via EXPORTED_RUNTIME_METHODS
+           * and aliases the same Array instance emscripten's findEventTarget
+           * reads through. Mutate it in place; replacing it would break
+           * the alias and findEventTarget would fall through to
+           * document.querySelector('!emx11-glx-N'), which is invalid. */
+          Module.specialHTMLTargets[info.targetId] = info.canvas;
+          stringToUTF8(info.targetId, outTargetIdPtr, outTargetIdLen);
+          return info.id | 0;
+      });
+
+/* Called once from glx.c right after the FIRST emscripten_webgl_make_context_current
+ * succeeds. emscripten's LEGACY_GL_EMULATION assumes Browser.createContext
+ * drives setup -- that path sets Browser.useWebGL=true and runs
+ * Browser.moduleContextCreatedCallbacks (containing GLImmediate.init,
+ * which queries GLctx.getParameter for MAX_*). Going through
+ * emscripten_webgl_create_context bypasses Browser, so we replicate
+ * that init manually -- but only AFTER make_context_current binds
+ * GLctx, otherwise GLImmediate.init reads `undefined.getParameter`. */
+EM_JS(void, emx11_js_glx_legacy_init_once, (void), {
+    if (typeof GLImmediate === 'undefined' || GLImmediate.initted) return;
+    if (typeof Browser === 'undefined') return;
+    Browser.useWebGL = true;
+    if (Browser.moduleContextCreatedCallbacks) {
+        Browser.moduleContextCreatedCallbacks.forEach(function(cb) { cb(); });
+    }
+});
+
+EM_JS(void, emx11_js_glx_destroy_context, (int id), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (!h || !h.glx) return;
+    var targetId = h.glx.targetIdOf(id | 0);
+    if (targetId && Module.specialHTMLTargets) {
+        delete Module.specialHTMLTargets[targetId];
+    }
+    h.glx.destroyContext(id | 0);
+});
+
+EM_JS(void, emx11_js_glx_swap_buffers, (int id, unsigned int drawable), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (!h || !h.glx) return;
+    h.glx.swapBuffers(id | 0, drawable >>> 0);
+});
+
+EM_JS(void, emx11_js_glx_resize, (int id, int width, int height), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (!h || !h.glx) return;
+    h.glx.resize(id | 0, width | 0, height | 0);
+});

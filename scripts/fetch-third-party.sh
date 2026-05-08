@@ -42,6 +42,10 @@ have patch
 # layout=data -> same mirror as app, but the artefact is data files (xbm,
 #                cursors, etc.) consumed at runtime, not compiled. The
 #                overlay only needs ORIGIN.txt.
+# layout=mesa-xdemo -> mesa-demos tarball; we extract only
+#                src/xdemos/<name>.c plus COPYING. URL points at the
+#                mesa-demos archive; tarball name is mesa-demos-<ver>.tar.xz
+#                regardless of <name>. Overlay only needs ORIGIN.txt.
 LIBS=(
     "libXt     libXt     1.3.1    https://www.x.org/releases/individual/lib   lib"
     "libXaw    libXaw    1.0.16   https://www.x.org/releases/individual/lib   lib"
@@ -52,13 +56,19 @@ LIBS=(
     "xclock    xclock    1.1.1    https://www.x.org/releases/individual/app   app"
     "xcalc     xcalc     1.1.3    https://www.x.org/releases/individual/app   app"
     "twm       twm       1.0.13.1 https://www.x.org/releases/individual/app   app"
+    "glxgears  glxgears  9.0.0    https://archive.mesa3d.org/demos            mesa-xdemo"
 )
 
 mkdir -p "$THIRD_PARTY_DIR"
 
 fetch_one() {
     local name="$1" up="$2" ver="$3" url_base="$4" layout="${5:-lib}"
-    local tarball="$up-$ver.tar.xz"
+    local tarball
+    if [ "$layout" = "mesa-xdemo" ]; then
+        tarball="mesa-demos-$ver.tar.xz"
+    else
+        tarball="$up-$ver.tar.xz"
+    fi
     local url="$url_base/$tarball"
     local dst="$THIRD_PARTY_DIR/$name"
     local overlay="$OVERLAY_DIR/$name"
@@ -86,7 +96,12 @@ fetch_one() {
 
     log "extracting"
     tar -xf "$tmp/$tarball" -C "$tmp"
-    local extracted="$tmp/$up-$ver"
+    local extracted
+    if [ "$layout" = "mesa-xdemo" ]; then
+        extracted="$tmp/mesa-demos-$ver"
+    else
+        extracted="$tmp/$up-$ver"
+    fi
     [ -d "$extracted" ] || die "expected $extracted after extract"
 
     rm -rf "$dst"
@@ -95,6 +110,7 @@ fetch_one() {
     # Upstream source files we keep verbatim. Libraries expose src/
     # and include/; apps ship a flat tree with the .c/.h files at
     # the root, so mirror the whole extracted directory in that case.
+    # mesa-xdemo extracts a single src/xdemos/<name>.c into the dst root.
     case "$layout" in
         lib)
             [ -d "$extracted/src" ]     && cp -r "$extracted/src"     "$dst/src"
@@ -104,19 +120,24 @@ fetch_one() {
         app|data)
             cp -r "$extracted/." "$dst/"
             ;;
+        mesa-xdemo)
+            local xsrc="$extracted/src/xdemos/$name.c"
+            [ -f "$xsrc" ] || die "expected $xsrc inside mesa-demos tarball"
+            cp "$xsrc" "$dst/$name.c"
+            [ -f "$extracted/COPYING" ] && cp "$extracted/COPYING" "$dst/COPYING"
+            ;;
         *)
             die "unknown layout '$layout' for $name"
             ;;
     esac
 
-    # Overlay em-x11 meta files. data layout has no build wiring so it
-    # only needs ORIGIN.txt; lib/app expect CMakeLists.txt + config.h too.
+    # Overlay em-x11 meta files. data and mesa-xdemo only need ORIGIN.txt
+    # (no per-source CMakeLists / config.h); lib/app expect all three.
     local overlay_files
-    if [ "$layout" = "data" ]; then
-        overlay_files=(ORIGIN.txt)
-    else
-        overlay_files=(CMakeLists.txt config.h ORIGIN.txt)
-    fi
+    case "$layout" in
+        data|mesa-xdemo) overlay_files=(ORIGIN.txt) ;;
+        *)               overlay_files=(CMakeLists.txt config.h ORIGIN.txt) ;;
+    esac
     for f in "${overlay_files[@]}"; do
         if [ -f "$overlay/$f" ]; then
             cp "$overlay/$f" "$dst/$f"

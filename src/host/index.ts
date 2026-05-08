@@ -47,6 +47,7 @@ import { WindowManager } from './window.js';
 import { GcManager } from './gc.js';
 import { InputBridge } from './devices.js';
 import { GrabManager } from './grabs.js';
+import { GlxManager } from './glx.js';
 import type { LoadOptions } from '../loader/wasm.js';
 import type {
   EmX11Global,
@@ -71,6 +72,7 @@ export class Host implements EmX11Host {
   readonly gc: GcManager;
   readonly devices: InputBridge;
   readonly grabs: GrabManager;
+  readonly glx: GlxManager;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -105,6 +107,7 @@ export class Host implements EmX11Host {
     this.window = new WindowManager(this);
     this.devices = new InputBridge(this);
     this.grabs = new GrabManager(this);
+    this.glx = new GlxManager(this.renderer);
 
     this.window.installSharedRoot();
   }

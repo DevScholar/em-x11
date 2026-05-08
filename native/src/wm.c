@@ -60,6 +60,13 @@ void XSetWMNormalHints(Display *dpy, Window w, XSizeHints *hints) {
                     sizeof(XSizeHints) / 4);
 }
 
+/* ICCCM-deprecated alias retained for clients (e.g. mesa-demos glxgears)
+ * still calling the pre-XSetWMNormalHints name. */
+int XSetNormalHints(Display *dpy, Window w, XSizeHints *hints) {
+    XSetWMNormalHints(dpy, w, hints);
+    return 1;
+}
+
 Status XGetWMNormalHints(Display *dpy, Window w,
                          XSizeHints *hints_return, long *supplied_return) {
     (void)dpy; (void)w; (void)hints_return;
