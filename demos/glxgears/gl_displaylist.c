@@ -25,6 +25,8 @@
 
 #include <GL/gl.h>
 
+#include <emscripten/em_js.h>
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +37,34 @@ extern void __real_glVertex3f(GLfloat x, GLfloat y, GLfloat z);
 extern void __real_glNormal3f(GLfloat x, GLfloat y, GLfloat z);
 extern void __real_glShadeModel(GLenum mode);
 extern void __real_glMaterialfv(GLenum face, GLenum pname, const GLfloat *params);
+
+/* --- frame-rate throttle (rAF-paced yield) ----------------------------- */
+
+/* Real Mesa's glXSwapBuffers blocks until the next vblank when
+ * vsync is on (the default). emscripten_sleep(0) only yields one
+ * task tick (~8ms minimum), so the wasm thread keeps redrawing
+ * faster than the browser compositor can present -- the user sees
+ * smooth 60fps but we're doing ~130 frames of rendering work per
+ * second of which half get thrown away.
+ *
+ * EM_ASYNC_JS gives us a true rAF wait: returns a Promise resolved
+ * by requestAnimationFrame, so the wasm thread Asyncify-unwinds
+ * here and only resumes when the browser is ready to paint. Net
+ * effect: glxgears matches display refresh exactly.
+ *
+ * Lives in the demo (not emx11_static) so emx11 itself stays free
+ * of EM_ASYNC_JS, which would otherwise force Asyncify unwinds on
+ * non-GL clients (e.g. wacl-tk's sync runTcl). */
+EM_ASYNC_JS(void, emx11_glx_yield_until_raf, (void), {
+    return new Promise(function(resolve) {
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(function() { resolve(); });
+        } else {
+            /* Worker fallback: a task tick is the best we can do. */
+            setTimeout(resolve, 0);
+        }
+    });
+});
 
 /* --- recorded command buffer -------------------------------------------- */
 

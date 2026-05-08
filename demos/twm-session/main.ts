@@ -34,4 +34,9 @@ await xeyes.ready;
 
 await launchXcalc(emX11);
 
-console.log('[emx11:twm-session] booted twm + xeyes + xcalc');
+const glxgears = emX11.spawn('/build/artifacts/glxgears/glxgears', {
+  thisProgram: 'glxgears',
+});
+await glxgears.ready;
+
+console.log('[emx11:twm-session] booted twm + xeyes + xcalc + glxgears');
