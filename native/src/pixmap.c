@@ -39,7 +39,6 @@ typedef struct EmxPixmap {
 } EmxPixmap;
 
 static EmxPixmap *g_pixmaps     = NULL;
-static Pixmap     g_pixmap_next = 0x30000001;
 
 static EmxPixmap *pixmap_find(Pixmap id) {
     for (EmxPixmap *p = g_pixmaps; p; p = p->next) {
@@ -50,11 +49,17 @@ static EmxPixmap *pixmap_find(Pixmap id) {
 
 Pixmap XCreatePixmap(Display *dpy, Drawable d, unsigned int width,
                      unsigned int height, unsigned int depth) {
-    (void)dpy; (void)d;
+    (void)d;
     if (width == 0 || height == 0) return None;
     EmxPixmap *p = calloc(1, sizeof(*p));
     if (!p) return None;
-    p->id     = g_pixmap_next++;
+    /* Use the per-conn xid allocator (same as XCreateWindow) so pixmap
+     * ids never collide across wasm processes. Earlier this counter was
+     * a TU-local 0x30000001++ which gave every connection the SAME id
+     * range -- twm's siconifyPm (id 30000001) got clobbered by xeyes's
+     * first pixmap on the JS-side `pixmaps` Map, so XCopyPlane drew the
+     * wrong canvas into icon-manager rows. */
+    p->id     = emx11_next_xid(dpy);
     p->width  = width;
     p->height = height;
     p->depth  = depth;

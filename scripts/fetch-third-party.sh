@@ -39,15 +39,19 @@ have patch
 # Each entry: logical-name  upstream-dir-prefix  version  url-base  layout
 # layout=lib  -> upstream has src/ + include/; we copy those (libraries).
 # layout=app  -> upstream is flat (sources at root); we mirror the whole tree.
+# layout=data -> same mirror as app, but the artefact is data files (xbm,
+#                cursors, etc.) consumed at runtime, not compiled. The
+#                overlay only needs ORIGIN.txt.
 LIBS=(
-    "libXt   libXt   1.3.1   https://www.x.org/releases/individual/lib  lib"
-    "libXaw  libXaw  1.0.16  https://www.x.org/releases/individual/lib  lib"
-    "libXmu  libXmu  1.2.1   https://www.x.org/releases/individual/lib  lib"
-    "libXpm  libXpm  3.5.17  https://www.x.org/releases/individual/lib  lib"
-    "xeyes   xeyes   1.3.1   https://www.x.org/releases/individual/app  app"
-    "xclock  xclock  1.1.1   https://www.x.org/releases/individual/app  app"
-    "xcalc   xcalc   1.1.3   https://www.x.org/releases/individual/app  app"
-    "twm     twm     1.0.13.1 https://www.x.org/releases/individual/app  app"
+    "libXt     libXt     1.3.1    https://www.x.org/releases/individual/lib   lib"
+    "libXaw    libXaw    1.0.16   https://www.x.org/releases/individual/lib   lib"
+    "libXmu    libXmu    1.2.1    https://www.x.org/releases/individual/lib   lib"
+    "libXpm    libXpm    3.5.17   https://www.x.org/releases/individual/lib   lib"
+    "xbitmaps  xbitmaps  1.1.4    https://www.x.org/releases/individual/data  data"
+    "xeyes     xeyes     1.3.1    https://www.x.org/releases/individual/app   app"
+    "xclock    xclock    1.1.1    https://www.x.org/releases/individual/app   app"
+    "xcalc     xcalc     1.1.3    https://www.x.org/releases/individual/app   app"
+    "twm       twm       1.0.13.1 https://www.x.org/releases/individual/app   app"
 )
 
 mkdir -p "$THIRD_PARTY_DIR"
@@ -97,7 +101,7 @@ fetch_one() {
             [ -d "$extracted/include" ] && cp -r "$extracted/include" "$dst/include"
             [ -f "$extracted/COPYING" ] && cp    "$extracted/COPYING" "$dst/COPYING"
             ;;
-        app)
+        app|data)
             cp -r "$extracted/." "$dst/"
             ;;
         *)
@@ -105,8 +109,15 @@ fetch_one() {
             ;;
     esac
 
-    # Overlay em-x11 meta files.
-    for f in CMakeLists.txt config.h ORIGIN.txt; do
+    # Overlay em-x11 meta files. data layout has no build wiring so it
+    # only needs ORIGIN.txt; lib/app expect CMakeLists.txt + config.h too.
+    local overlay_files
+    if [ "$layout" = "data" ]; then
+        overlay_files=(ORIGIN.txt)
+    else
+        overlay_files=(CMakeLists.txt config.h ORIGIN.txt)
+    fi
+    for f in "${overlay_files[@]}"; do
         if [ -f "$overlay/$f" ]; then
             cp "$overlay/$f" "$dst/$f"
         else

@@ -15,8 +15,15 @@
 import { createEmX11 } from '../../src/index.js';
 import { launchTwm } from '../../src/runtime/twm-launch.js';
 import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
+import { stageXbitmaps } from '../../src/runtime/xbitmaps-stage.js';
 
 const emX11 = await createEmX11({ width: 1024, height: 768 });
+
+/* Stage the shared xbm package once for the whole session: every spawn
+ * inherits MEMFS via the replay hook, so any client that resolves a
+ * bitmap-file-path resource (xcalc -> "calculator", xfd -> ..., etc.)
+ * finds the file without per-app fixups. */
+stageXbitmaps(emX11);
 
 /* twm first so its SubstructureRedirect on root lands before subsequent
  * spawns; launchTwm awaits waitForSubstructureRedirect internally. */

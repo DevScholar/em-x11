@@ -503,6 +503,24 @@ export class GcManager {
   ): void {
     pm.ctx.save();
     const lw = lineWidth || 1;
+    /* Degenerate single-point line with width > 1: real X with CapRound
+     * draws a filled disk of diameter lw centered on the point (and that
+     * is twm's CreateDotPixmap path -- XDrawLine(p,p) with line_width=h,
+     * CapRound, expects a round dot). Falling through to the axis-aligned
+     * branch below would paint a 1×lw vertical strip instead. */
+    if (x1 === x2 && y1 === y2 && lw > 1) {
+      if (pm.depth === 1 && color === 0) {
+        pm.ctx.globalCompositeOperation = 'destination-out';
+        pm.ctx.fillStyle = '#000';
+      } else {
+        pm.ctx.fillStyle = pixelToCssColor(color);
+      }
+      pm.ctx.beginPath();
+      pm.ctx.arc(x1, y1, lw / 2, 0, Math.PI * 2);
+      pm.ctx.fill();
+      pm.ctx.restore();
+      return;
+    }
     /* Axis-aligned via fillRect (sharp, no AA); diagonals fall back to
      * stroke. Mirrors Renderer.drawLine -- see notes there. */
     if (x1 === x2 || y1 === y2) {

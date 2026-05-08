@@ -28,6 +28,11 @@ export async function launchXcalc(
 ): Promise<Process> {
   const base = options.artifactBase ?? '/build/artifacts/xcalc';
   emX11.fs.writeFileSync('/usr/lib/X11/app-defaults/XCalc', xcalcAppDefaults);
+  /* `XCalc.iconPixmap: calculator` in the app-defaults pushes the
+   * string "calculator" through XmuCvtStringToBitmap, which probes
+   * /usr/include/X11/bitmaps/. The session demo stages the whole
+   * xbitmaps package up front via stageXbitmaps() so the lookup
+   * succeeds without an app-specific fixup here. */
   const p = emX11.spawn(`${base}/xcalc`, { thisProgram: 'xcalc' });
   await p.ready;
   return p;
