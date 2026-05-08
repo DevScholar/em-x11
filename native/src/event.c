@@ -518,3 +518,30 @@ void emx11_push_configure_notify(Window window, int x, int y,
     ev.xconfigure.override_redirect = win ? win->override_redirect : False;
     emx11_event_queue_push(dpy, &ev);
 }
+
+/* Cross-connection DestroyNotify dispatch. Called by the Host when a
+ * client connection closes (process exit, XCloseDisplay) so the WM
+ * watching that client's parent (typically twm holding SubstructureNotify
+ * on its frames) tears down its TwmWindow record + frame. Without this,
+ * the dead client's frame lingers as a transparent outline -- twm has
+ * no way to learn the inner window is gone otherwise.
+ *
+ * `event_window` is the parent (the observer); `window` is the dying
+ * window. Mask gate matches dix's DeliverEvents: SubstructureNotify
+ * on the parent. We don't model the StructureNotify-on-window path
+ * here because by the time this fires, the window's own owner is
+ * already gone -- nobody on this side cares. */
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_destroy_notify(Window window, Window event_window) {
+    Display *dpy = emx11_get_display();
+    EmxWindow *evw = emx11_window_find(dpy, event_window);
+    if (!evw || !(evw->event_mask & SubstructureNotifyMask)) return;
+
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xdestroywindow.type    = DestroyNotify;
+    ev.xdestroywindow.display = dpy;
+    ev.xdestroywindow.event   = event_window;
+    ev.xdestroywindow.window  = window;
+    emx11_event_queue_push(dpy, &ev);
+}

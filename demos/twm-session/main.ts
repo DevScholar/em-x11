@@ -7,6 +7,9 @@
  * xeyes / xcalc are launched so their MapRequest is intercepted by
  * twm.
  *
+ * glxgears intentionally omitted: its rAF-driven animation and
+ * per-frame logging drown out other demo signal.
+ *
  * `globalThis.emX11` is also populated by createEmX11 for console
  * debugging (`emX11.debug.dumpWindows()`, `emX11._host` for the
  * unstable internal escape hatch).
@@ -34,9 +37,4 @@ await xeyes.ready;
 
 await launchXcalc(emX11);
 
-const glxgears = emX11.spawn('/build/artifacts/glxgears/glxgears', {
-  thisProgram: 'glxgears',
-});
-await glxgears.ready;
-
-console.log('[emx11:twm-session] booted twm + xeyes + xcalc + glxgears');
+console.log('[emx11:twm-session] booted twm + xeyes + xcalc');

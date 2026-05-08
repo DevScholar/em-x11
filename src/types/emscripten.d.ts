@@ -77,6 +77,18 @@ export interface EmscriptenModule {
   /** MEMFS handle. Available inside preRun and afterwards; not on the
    *  factory-arg side. */
   FS?: EmscriptenFS;
+  /** When false, exit() / main-return runs atexit + Module.onExit before
+   *  abandoning the runtime. Emscripten defaults to true (no cleanup),
+   *  which leaves wasm-owned host resources stranded after exit(). */
+  noExitRuntime?: boolean;
+  /** Override Emscripten's `quit_` (the throw used by exit/abort).
+   *  Captured at runtime init from this slot, so must be passed in the
+   *  factory args -- setting it post-init has no effect. */
+  quit?: (status: number, toThrow: unknown) => void;
+  /** Fired by Emscripten's _proc_exit when noExitRuntime=false. Used by
+   *  ConnectionManager.launchClient to trigger window cleanup when the
+   *  client process exits without an explicit XCloseDisplay. */
+  onExit?: (status: number) => void;
 }
 
 /**

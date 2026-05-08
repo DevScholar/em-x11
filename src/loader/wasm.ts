@@ -42,6 +42,18 @@ export interface LoadOptions {
    *  `'use'` (cache-first); the EmX11 facade overrides to `'bypass'`
    *  in Vite dev mode. */
   cacheMode?: CacheMode;
+  /** Override Emscripten's `quit_` (the throw used by exit/abort).
+   *  Must be set at factory-init time -- Emscripten captures it once
+   *  during runtime bootstrap and never reads `Module.quit` again. The
+   *  callback should perform JS-side cleanup and then re-throw `toThrow`
+   *  to match default behavior. Used by ConnectionManager.launchClient
+   *  to catch wasm-internal exit() (xcalc's q-key Quit() flow) which
+   *  the post-launch onExit / ccall-throw paths both miss. */
+  quit?: (status: number, toThrow: unknown) => void;
+  /** Emscripten's `onExit` -- fires from `_proc_exit` when
+   *  `noExitRuntime: false`. Belt-and-suspenders for clean-shutdown
+   *  paths that DO reach run() (e.g. main() returning normally). */
+  onExit?: (status: number) => void;
 }
 
 export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> {
@@ -110,5 +122,16 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
     arguments: options.arguments,
     thisProgram: options.thisProgram,
     preRun: options.preRun,
+    /* Default Emscripten behavior is `noExitRuntime: true`, which makes
+     * exit()/main-return a no-op for cleanup hooks (atexit / onExit
+     * never fire). xcalc's q action calls exit(0) inside an Xt action
+     * callback, and without this flip the host never learns the wasm
+     * is gone -- xcalc's frame stays on the compositor as an inert
+     * window ("frozen"). With noExitRuntime=false, _proc_exit invokes
+     * Module.onExit (set by ConnectionManager.launchClient after binding)
+     * which routes to closeDisplay and tears down owned windows. */
+    noExitRuntime: false,
+    quit: options.quit,
+    onExit: options.onExit,
   });
 }

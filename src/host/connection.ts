@@ -113,9 +113,45 @@ export class ConnectionManager {
     }
     const pending: PendingLaunch = { connId: 0 };
     this.pendingLaunch = pending;
+
+    /* Exit-cleanup hooks. Multiple paths because Emscripten's exit
+     * machinery is unreliable under ASYNCIFY=1 with a long-running
+     * event-loop main(): apps that exit() from inside a callback can
+     * land in any of these (or, as observed for xcalc q, none of them
+     * -- the wasm just stops without invoking proc_exit at all). See
+     * memory: project_emx11_wasm_exit_gap.md.
+     *
+     * What each catches when it does work:
+     *   Module.quit     - throw site of _proc_exit; the main wasm-loop
+     *                     exit() path. Captured at runtime init, so
+     *                     MUST be passed in factory args.
+     *   Module.onExit   - _proc_exit's pre-throw callback. Fires only
+     *                     when noExitRuntime=false (also set in args).
+     *   ccall wrapper   - exit() called synchronously inside a
+     *                     JS-driven ccall (event handler). The throw
+     *                     propagates up the ccall before _proc_exit. */
+    let exitedHandled = false;
+    const handleExit = (): void => {
+      if (exitedHandled) return;
+      const cid = pending.connId;
+      if (cid === 0) {
+        exitedHandled = true;
+        return;
+      }
+      exitedHandled = true;
+      this.close(cid);
+    };
+    const factoryQuit = (_status: number, toThrow: unknown): void => {
+      handleExit();
+      throw toThrow;
+    };
+    const factoryOnExit = (): void => {
+      handleExit();
+    };
+
     let module: EmscriptenModule;
     try {
-      module = await loadWasm(opts);
+      module = await loadWasm({ ...opts, quit: factoryQuit, onExit: factoryOnExit });
     } finally {
       this.pendingLaunch = null;
     }
@@ -126,7 +162,24 @@ export class ConnectionManager {
       );
     }
     conn.module = module;
-    /* Drain Exposes that were deferred while conn.module was null.
+    const rawCcall = module.ccall.bind(module);
+    const wrappedCcall = (
+      name: string,
+      ret: string | null,
+      argTypes: string[],
+      args: unknown[],
+    ): unknown => {
+      try {
+        return rawCcall(name, ret, argTypes, args);
+      } catch (err) {
+        if (err && (err as { name?: string }).name === 'ExitStatus') {
+          handleExit();
+          return undefined;
+        }
+        throw err;
+      }
+    };
+    (module as { ccall: EmscriptenModule['ccall'] }).ccall = wrappedCcall;    /* Drain Exposes that were deferred while conn.module was null.
      * onWindowMap / onWindowConfigure parked them here; now that the
      * client's queue is reachable via ccall, push them through. The
      * client's main() has already suspended in XNextEvent's
@@ -160,6 +213,27 @@ export class ConnectionManager {
   close(connId: number): void {
     const conn = this.connections.get(connId);
     if (!conn) return;
+    /* Notify cross-conn parents (typically twm holding SubstructureNotify
+     * on its frames) BEFORE the renderer wipes our windows. Without this
+     * twm has no signal that the inner client is gone and its frame
+     * lingers on screen as a transparent outline. We push for every
+     * owned window whose parent belongs to a different conn; the C-side
+     * mask gate drops the no-op cases (parent didn't select
+     * SubstructureNotifyMask). */
+    for (const winId of conn.ownedWindows) {
+      const parent = this.host.renderer.parentOf(winId);
+      if (parent === 0 || parent === undefined) continue;
+      const parentConnId = this.windowToConn.get(parent);
+      if (parentConnId === undefined || parentConnId === connId) continue;
+      const parentConn = this.connections.get(parentConnId);
+      if (!parentConn?.module) continue;
+      parentConn.module.ccall(
+        'emx11_push_destroy_notify',
+        null,
+        ['number', 'number'],
+        [winId, parent],
+      );
+    }
     /* Drop every window this connection owned. Renderer cleans up
      * its side; windowToConn, subscriptions, and override_redirect
      * drop their entries. Pixmaps/atoms still live in their global

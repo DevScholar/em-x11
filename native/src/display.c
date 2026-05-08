@@ -10,8 +10,6 @@
 static Display g_display;
 static bool    g_display_open = false;
 
-static void emx11_atexit_cleanup(void);
-
 Display *emx11_get_display(void) {
     return &g_display;
 }
@@ -214,13 +212,6 @@ Display *XOpenDisplay(const char *display_name) {
 
     g_display_open = true;
 
-    /* Catch exit() paths that skip XCloseDisplay -- see emx11_atexit_cleanup. */
-    static bool atexit_registered = false;
-    if (!atexit_registered) {
-        atexit(emx11_atexit_cleanup);
-        atexit_registered = true;
-    }
-
     return &g_display;
 }
 
@@ -231,20 +222,6 @@ int XCloseDisplay(Display *display) {
     }
     g_display_open = false;
     return 0;
-}
-
-/* Run on exit(0) / abort(). Apps that bypass XCloseDisplay (xcalc's
- * Quit() defers XtDestroyApplicationContext, then immediately exit()s
- * before Xt's main loop drains the destroy list) would otherwise leave
- * their windows on the host's compositor as inert frames -- the user
- * sees a "frozen" window because the wasm process is gone but the host
- * has no signal to tear down. atexit fires before Emscripten's runtime
- * cleanup, so the host still has a live module to ccall back through. */
-static void emx11_atexit_cleanup(void) {
-    if (g_display_open) {
-        emx11_js_close_display(g_display.conn_id);
-        g_display_open = false;
-    }
 }
 
 int XFlush(Display *display) {
