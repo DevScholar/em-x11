@@ -26,6 +26,7 @@ import {
   X_ButtonPressMask,
   X_ButtonReleaseMask,
   X_KeyPress,
+  X_KeyPressMask,
   X_KeyRelease,
 } from './constants.js';
 
@@ -319,7 +320,17 @@ export class InputBridge {
     const ly = origin ? e.y - origin.ay : e.y;
 
     if (xType === X_ButtonPress) {
-      this.focusedWindow = deliveryWin;
+      /* Focus tracking diverges from delivery: route keys to the nearest
+       * ancestor that selected KeyPressMask, not whoever owns ButtonPress.
+       * twm grabs ButtonPress on its frame for click-to-raise; without
+       * this split, focusedWindow lands on the frame and keys go to twm
+       * even after the user clicks the inner client. xcalc happens to
+       * select KeyPressMask on the same widget Xt selects ButtonPressMask
+       * on, so this path matches the old behavior there. glxgears (no
+       * WMHints, so twm never calls XSetInputFocus on its behalf) needs
+       * this implicit press-driven focus to receive keys at all. */
+      const keySub = this.host.events.findSubscriberFor(target, X_KeyPressMask);
+      this.focusedWindow = keySub?.winId ?? deliveryWin;
       this.dragModule = module;
     }
     module.ccall(
