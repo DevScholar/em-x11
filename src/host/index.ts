@@ -190,6 +190,21 @@ export class Host implements EmX11Host {
     return absOrigin(this.renderer, win);
   }
 
+  /** Cross-connection bounding-shape lookup. Returns:
+   *    null  -- window unknown to the host
+   *    []    -- window known, but no bounding shape (rectangular)
+   *    [..]  -- the rects (window-local coords), as last set via XShape*
+   *  twm uses this so XShapeQueryExtents on a foreign client (xeyes)
+   *  reports boundingShaped=true and XShapeCombineShape can copy the
+   *  source rects onto twm's frame. Without this the WM frame stays
+   *  rectangular and clicks in the shape's hole hit the frame instead
+   *  of passing through to whatever's behind. */
+  getWindowShape(id: number): ShapeRect[] | null {
+    const win = this.renderer.windows.get(id);
+    if (!win) return null;
+    return win.shape ? win.shape.slice() : [];
+  }
+
   /* -- EmX11Host: window structure -------------------------------------- */
 
   onWindowCreate(

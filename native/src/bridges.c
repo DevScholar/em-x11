@@ -130,6 +130,49 @@ EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
     HEAP32[out + 2] = o.ay | 0;
 });
 
+/* Cross-conn shape lookup, two-call pattern (count, then fetch). Return
+ * value on the count call:
+ *    -1 -- window unknown to the host
+ *     0 -- window known, but no bounding shape (rectangular)
+ *    >0 -- count of XRectangles available
+ * Used by twm's XShapeQueryExtents / XShapeCombineShape on a foreign
+ * client (xeyes) -- without it, twm's frame stays rectangular and the
+ * shape's hole doesn't pass clicks through. */
+EM_JS(int, emx11_js_get_window_shape_count, (unsigned int id), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (!h) return -1;
+    var rects = h.getWindowShape(id >>> 0);
+    if (rects === null || rects === undefined) return -1;
+    /* Stash for the immediate-following fetch so we don't re-query. */
+    var caches = e._caches || (e._caches = {});
+    caches.shapeStash = { id: id >>> 0, rects: rects };
+    return rects.length | 0;
+});
+
+EM_JS(int, emx11_js_get_window_shape_rects, (unsigned int id, int dstPtr, int capacity), {
+    var e = globalThis.emX11;
+    var caches = e && e._caches;
+    var stashed = caches && caches.shapeStash;
+    var rects = (stashed && stashed.id === (id >>> 0)) ? stashed.rects : null;
+    if (caches) caches.shapeStash = null;
+    if (!rects) {
+        var h = e && e._bridge;
+        if (!h) return 0;
+        rects = h.getWindowShape(id >>> 0);
+        if (!rects) return 0;
+    }
+    var n = Math.min(rects.length | 0, capacity | 0);
+    var base = dstPtr >> 2;
+    for (var i = 0; i < n; i++) {
+        var r = rects[i];
+        HEAP32[base + i * 4 + 0] = r.x | 0;
+        HEAP32[base + i * 4 + 1] = r.y | 0;
+        HEAP32[base + i * 4 + 2] = r.w | 0;
+        HEAP32[base + i * 4 + 3] = r.h | 0;
+    }
+    return n;
+});
+
 /* --- passive grabs (XGrabButton / XUngrabButton) ------------------------- */
 
 EM_JS(void, emx11_js_grab_button,

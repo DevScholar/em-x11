@@ -175,13 +175,61 @@ void XShapeCombineMask(Display *dpy, Window dest, int dest_kind,
 
 void XShapeCombineShape(Display *dpy, Window dest, int dest_kind,
                        int x_off, int y_off, Window src, int src_kind, int op) {
-    /* Copy shape from another window. */
+    /* Copy shape from another window. The source may be foreign --
+     * twm calls this on its frame (local) with the client window
+     * (lives in xeyes' connection) as the source. Try the local
+     * EmxWindow table first; fall back to the host bridge so the
+     * frame actually inherits the client's shape.
+     *
+     * SHAPE spec: an unshaped window's bounding shape is its full
+     * rectangle (0,0,width,height). twm relies on this when it
+     * ShapeUnions the title_w (local, unshaped) onto the frame after
+     * ShapeSet'ing the client's shape -- without the rectangle
+     * fallback the title bar gets erased from the frame's shape and
+     * disappears from hit-testing. */
     (void)src_kind;
     EmxWindow *src_win = emx11_window_find(dpy, src);
-    if (!src_win || src_win->shape_bounding_count == 0) return;
+    if (src_win) {
+        if (src_win->shape_bounding_count > 0) {
+            XShapeCombineRectangles(dpy, dest, dest_kind, x_off, y_off,
+                                    src_win->shape_bounding,
+                                    src_win->shape_bounding_count, op,
+                                    Unsorted);
+        } else {
+            XRectangle full = { 0, 0, (unsigned short)src_win->width,
+                                (unsigned short)src_win->height };
+            XShapeCombineRectangles(dpy, dest, dest_kind, x_off, y_off,
+                                    &full, 1, op, Unsorted);
+        }
+        return;
+    }
+
+    int count = emx11_js_get_window_shape_count(src);
+    if (count < 0) return;  /* host doesn't know this window either */
+    if (count == 0) {
+        /* Foreign + unshaped: would need a size lookup to materialise the
+         * full-rect fallback. No current caller exercises this (twm only
+         * unions its own local title_w, which hits the local branch above);
+         * if a future caller needs it, plumb a getWindowAttrs round-trip
+         * here. */
+        return;
+    }
+
+    XRectangle *rects = malloc(sizeof(XRectangle) * (size_t)count);
+    if (!rects) return;
+    int *flat = malloc(sizeof(int) * 4 * (size_t)count);
+    if (!flat) { free(rects); return; }
+    int got = emx11_js_get_window_shape_rects(src, flat, count);
+    for (int i = 0; i < got; i++) {
+        rects[i].x      = (short)flat[i * 4 + 0];
+        rects[i].y      = (short)flat[i * 4 + 1];
+        rects[i].width  = (unsigned short)flat[i * 4 + 2];
+        rects[i].height = (unsigned short)flat[i * 4 + 3];
+    }
+    free(flat);
     XShapeCombineRectangles(dpy, dest, dest_kind, x_off, y_off,
-                            src_win->shape_bounding,
-                            src_win->shape_bounding_count, op, Unsorted);
+                            rects, got, op, Unsorted);
+    free(rects);
 }
 
 void XShapeCombineRegion(Display *dpy, Window dest, int dest_kind,
@@ -211,20 +259,39 @@ Status XShapeQueryExtents(Display *dpy, Window window,
                          Bool *clip_shaped,
                          int *x_clip, int *y_clip,
                          unsigned int *w_clip, unsigned int *h_clip) {
-    EmxWindow *win = emx11_window_find(dpy, window);
-    if (!win) return 0;
-
-    if (bounding_shaped) *bounding_shaped = (win->shape_bounding != NULL);
+    /* Always initialise out-pointers: twm reads boundingShaped straight
+     * into tmp_win->wShaped without checking the Status return, so a
+     * silent skip on a foreign window leaves wShaped at whatever junk
+     * was on the stack -- non-determinism in shape propagation. */
+    if (bounding_shaped) *bounding_shaped = False;
     if (x_bounding) *x_bounding = 0;
     if (y_bounding) *y_bounding = 0;
-    if (w_bounding) *w_bounding = win->width;
-    if (h_bounding) *h_bounding = win->height;
-
+    if (w_bounding) *w_bounding = 0;
+    if (h_bounding) *h_bounding = 0;
     if (clip_shaped) *clip_shaped = False;
     if (x_clip) *x_clip = 0;
     if (y_clip) *y_clip = 0;
-    if (w_clip) *w_clip = win->width;
-    if (h_clip) *h_clip = win->height;
+    if (w_clip) *w_clip = 0;
+    if (h_clip) *h_clip = 0;
+
+    EmxWindow *win = emx11_window_find(dpy, window);
+    if (win) {
+        if (bounding_shaped) *bounding_shaped = (win->shape_bounding != NULL);
+        if (w_bounding) *w_bounding = win->width;
+        if (h_bounding) *h_bounding = win->height;
+        if (w_clip) *w_clip = win->width;
+        if (h_clip) *h_clip = win->height;
+        return 1;
+    }
+
+    /* Foreign window (twm querying xeyes): consult the host so wShaped
+     * gets the right value and SetFrameShape actually runs. */
+    int count = emx11_js_get_window_shape_count(window);
+    if (count < 0) return 0;  /* host doesn't know it either */
+    if (bounding_shaped) *bounding_shaped = (count > 0);
+    /* Width/height of the shape extents are best-effort; without a host
+     * call to read window geometry here we leave them at 0. twm only
+     * uses bounding_shaped to decide propagation. */
     return 1;
 }
 

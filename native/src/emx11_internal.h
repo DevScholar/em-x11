@@ -461,6 +461,20 @@ extern void emx11_js_get_window_attrs(Window id, int *out);
  * connection (e.g. xcalc walking up into a twm frame). */
 extern void emx11_js_get_window_abs_origin(Window id, int *out);
 
+/* Cross-connection bounding-shape lookup, two-call pattern. The count
+ * call returns:
+ *    -1  -- window unknown to the host
+ *     0  -- window known but rectangular (no shape)
+ *    >0  -- number of XRectangles available
+ * The fetch call writes (x, y, w, h) int quadruples into `dst` (int[4*n])
+ * up to `capacity` rects, returning the number actually written. Used by
+ * shape.c when the destination connection doesn't own the source window
+ * (twm's XShapeQueryExtents / XShapeCombineShape on a foreign client).
+ * Without these, twm's frame stays rectangular and the shape's hole
+ * fails to pass clicks through to lower windows. */
+extern int  emx11_js_get_window_shape_count(Window id);
+extern int  emx11_js_get_window_shape_rects(Window id, int *dst, int capacity);
+
 /* -- Property bridges (Host-owned storage, dix/property.c layout).
  * Properties are keyed by (XID, atom) server-side so any client can
  * read back what any client wrote. The four entry points mirror the
