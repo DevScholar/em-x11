@@ -10,7 +10,7 @@ const demos = [
   { name: 'xcalc', description: 'Xaw-based calculator (single-thread Host mode)' },
   { name: 'twm', description: 'Tab Window Manager, running as a standalone client' },
   {
-    name: 'session',
+    name: 'twm-session',
     description:
       'twm + xeyes + xcalc together in single-thread Host mode. All ' +
       'wasm clients share the main JS thread; the Host owns the canvas ' +

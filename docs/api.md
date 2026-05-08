@@ -172,7 +172,7 @@ emX11.display.rootWindowId: number
 emX11.display.waitForSubstructureRedirect(winId, timeoutMs?): Promise<number>
 ```
 
-Compositing harnesses (`session` demo, wacl-tk, pyodide-tk) await
+Compositing harnesses (`twm-session` demo, wacl-tk, pyodide-tk) await
 `waitForSubstructureRedirect(emX11.display.rootWindowId)` between
 spawning a window manager (twm) and spawning the first managed
 client, so that the WM's `MapRequest` intercept is armed before the

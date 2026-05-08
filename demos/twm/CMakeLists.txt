@@ -1,7 +1,7 @@
 # Build recipe for the twm wasm artifact. No standalone demo harness
 # lives in this directory (a pure-twm screen is just an empty checker
-# with nothing to manage -- not a useful demo); the session demo at
-# demos/session/ is the one that boots twm alongside xeyes + xcalc.
+# with nothing to manage -- not a useful demo); the twm-session demo at
+# demos/twm-session/ is the one that boots twm alongside xeyes + xcalc.
 # Vite's auto-discovery gates on index.html so the absence here
 # correctly hides this as a demo URL.
 set(TWM_SRC_DIR "${CMAKE_SOURCE_DIR}/third-party/twm/src")

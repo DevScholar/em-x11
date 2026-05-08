@@ -1,5 +1,5 @@
 /**
- * Session harness.
+ * twm-session harness.
  *
  * Single-thread mode: twm + xeyes + xcalc all run on the main JS
  * thread alongside the em-x11 host. em.spawn is serialized — twm
@@ -34,4 +34,4 @@ await xeyes.ready;
 
 await launchXcalc(emX11);
 
-console.log('[emx11:session] booted twm + xeyes + xcalc');
+console.log('[emx11:twm-session] booted twm + xeyes + xcalc');
