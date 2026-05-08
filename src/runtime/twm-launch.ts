@@ -23,18 +23,16 @@ import type { Process } from '../api/types.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';
 
-/* Mirrors third-party/twm/src/system.twmrc with three em-x11 specific
+/* Mirrors third-party/twm/src/system.twmrc with two em-x11 specific
  * additions; see prior revision history for the full justification.
  *   RandomPlacement   — interactive placement deadlocks our browser world
- *   OpaqueMove        — GXxor rubber-band can't be undone on Canvas 2D
- *   ShowIconManager   — make twm visibly running from boot */
+ *   OpaqueMove        — GXxor rubber-band can't be undone on Canvas 2D */
 const TWMRC = `
 NoGrabServer
 RestartPreviousState
 DecorateTransients
 RandomPlacement
 OpaqueMove
-ShowIconManager
 TitleFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
 ResizeFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
 MenuFont "-adobe-helvetica-bold-r-normal--*-120-*-*-*-*-*-*"
