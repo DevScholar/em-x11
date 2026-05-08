@@ -12,6 +12,7 @@
 
 import type { Host } from './index.js';
 import { HOST_ROOT_ID, HOST_WEAVE_PIXMAP_ID } from './constants.js';
+import { cursorXidToCss } from './cursor.js';
 
 export class WindowManager {
   /** override_redirect flag per window (CWOverrideRedirect). True means
@@ -243,6 +244,16 @@ export class WindowManager {
 
   onSetBitGravity(id: number, gravity: number): void {
     this.host.renderer.setWindowBitGravity(id, gravity);
+  }
+
+  onSetCursor(id: number, cursorXid: number): void {
+    const win = this.host.renderer.windows.get(id);
+    if (!win) return;
+    win.cursor = cursorXidToCss(cursorXid);
+    /* If the pointer is currently over a window whose effective cursor
+     * just changed, refresh the canvas style now. Without this, the
+     * cursor only updates on the next Motion event. */
+    this.host.devices.refreshCanvasCursor();
   }
 
   onRaise(id: number): void {

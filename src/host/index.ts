@@ -243,6 +243,12 @@ export class Host implements EmX11Host {
   onWindowSetBitGravity(id: number, gravity: number): void {
     this.window.onSetBitGravity(id, gravity);
   }
+  onWindowSetCursor(id: number, cursor: number): void {
+    this.window.onSetCursor(id, cursor);
+  }
+  onSetGrabCursor(cursor: number): void {
+    this.devices.setGrabCursor(cursor);
+  }
   onReparentWindow(id: number, parent: number, x: number, y: number): void {
     this.window.onReparent(id, parent, x, y);
   }

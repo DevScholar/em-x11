@@ -19,6 +19,7 @@ import type { Host } from './index.js';
 import type { Point } from '../types/emscripten.js';
 import type { ModuleCcallSurface } from './connection.js';
 import { keyEventToKeysym, modifiersFromEvent } from '../runtime/keymap.js';
+import { cursorXidToCss } from './cursor.js';
 import {
   X_ButtonPress,
   X_ButtonRelease,
@@ -57,6 +58,12 @@ export class InputBridge {
    *  cleared on ButtonRelease). Used by onMouseMove to route motion events
    *  to the grab window even when the pointer is over empty canvas space. */
   private dragModule: ModuleCcallSurface | null = null;
+  /** XGrabPointer cursor override. While non-null this CSS cursor is
+   *  shown everywhere on the canvas, replacing the per-window
+   *  XDefineCursor resolution -- twm needs this so MoveCursor /
+   *  ResizeCursor stay visible during a drag even as the pointer
+   *  crosses other windows. Cleared by XUngrabPointer. */
+  private grabCursor: string | null = null;
 
   constructor(private readonly host: Host) {
     /* Default the pointer to the canvas centre so the first XQueryPointer
@@ -72,6 +79,45 @@ export class InputBridge {
 
   getPointerXY(): Point {
     return { x: this.pointerX, y: this.pointerY };
+  }
+
+  /** Re-resolve the cursor for the window currently under the pointer.
+   *  Called by WindowManager.onSetCursor so XDefineCursor takes effect
+   *  even when the pointer is not moving (twm sets several cursors at
+   *  startup before the user touches the mouse). */
+  refreshCanvasCursor(): void {
+    if (this.host.canvas.headless) return;
+    const win = this.host.renderer.findWindowAt(this.pointerX, this.pointerY);
+    this.applyCursorFor(win);
+  }
+
+  /** XGrabPointer cursor override. cursorXid=0 clears the grab and
+   *  reverts to the per-window cursor under the current pointer
+   *  position. Called from XGrabPointer / XUngrabPointer. */
+  setGrabCursor(cursorXid: number): void {
+    this.grabCursor = cursorXid === 0 ? null : cursorXidToCss(cursorXid);
+    this.refreshCanvasCursor();
+  }
+
+  /** Walk `winId`'s parent chain in the renderer tree and pick the
+   *  nearest ancestor with a non-null `cursor`. Mirrors X server cursor
+   *  inheritance (xserver/dix/cursor.c::CheckCursorConfinement walks
+   *  toward root until it finds a window with a cursor set). */
+  private applyCursorFor(winId: number | null): void {
+    if (this.host.canvas.headless) return;
+    let css = 'default';
+    if (this.grabCursor) {
+      css = this.grabCursor;
+    } else if (winId !== null) {
+      let cur = this.host.renderer.windows.get(winId);
+      while (cur) {
+        if (cur.cursor) { css = cur.cursor; break; }
+        if (cur.parent === 0) break;
+        cur = this.host.renderer.windows.get(cur.parent);
+      }
+    }
+    const el = this.host.canvas.element;
+    if (el.style.cursor !== css) el.style.cursor = css;
   }
 
   /* -- public input feed (used by both paths) ---------------------------- */
@@ -93,6 +139,7 @@ export class InputBridge {
   pushMouseMove(e: Omit<MouseEventData, 'button'>): void {
     this.setPointer(e.x, e.y);
     const win = this.host.renderer.findWindowAt(e.x, e.y);
+    this.applyCursorFor(win);
     /* X11 implicit pointer grab (x11protocol.txt §523): once a button is
      * pressed, all Motion and ButtonRelease events route to the grabbing
      * client regardless of where the pointer moves. dragModule holds the

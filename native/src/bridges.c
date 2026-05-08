@@ -606,6 +606,16 @@ EM_JS(void, emx11_js_window_set_bg_pixmap, (unsigned int id, unsigned int pmId),
     if (Host) Host.onWindowSetBgPixmap(id, pmId);
 });
 
+EM_JS(void, emx11_js_window_set_cursor, (unsigned int id, unsigned int cursor), {
+    var e = globalThis.emX11; var Host = e && e._bridge;
+    if (Host) Host.onWindowSetCursor(id, cursor);
+});
+
+EM_JS(void, emx11_js_set_grab_cursor, (unsigned int cursor), {
+    var e = globalThis.emX11; var Host = e && e._bridge;
+    if (Host) Host.onSetGrabCursor(cursor);
+});
+
 EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
     var rects = [];
     if (count > 0 && rectsPtr !== 0) {

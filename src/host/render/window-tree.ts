@@ -69,6 +69,7 @@ export function addWindow(
      * lifts to NorthWestGravity for clients that want pixel preservation
      * (Tk wrappers). */
     bitGravity: 0, /* ForgetGravity */
+    cursor: null,
   });
 }
 

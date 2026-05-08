@@ -274,10 +274,14 @@ int XSetWindowBorderPixmap(Display *dpy, Window w, Pixmap pixmap) {
     (void)dpy; (void)w; (void)pixmap; return 1;
 }
 int XDefineCursor(Display *dpy, Window w, Cursor cursor) {
-    (void)dpy; (void)w; (void)cursor; return 1;
+    (void)dpy;
+    emx11_js_window_set_cursor(w, (unsigned int)cursor);
+    return 1;
 }
 int XUndefineCursor(Display *dpy, Window w) {
-    (void)dpy; (void)w; return 1;
+    (void)dpy;
+    emx11_js_window_set_cursor(w, 0);
+    return 1;
 }
 
 /* -- Query stubs. XQueryPointer is called by Xaw's Tip widget for
@@ -662,8 +666,11 @@ int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
                  unsigned int event_mask, int pointer_mode, int keyboard_mode,
                  Window confine_to, Cursor cursor, Time t) {
     (void)dpy; (void)grab_window; (void)owner_events; (void)event_mask;
-    (void)pointer_mode; (void)keyboard_mode; (void)confine_to;
-    (void)cursor; (void)t;
+    (void)pointer_mode; (void)keyboard_mode; (void)confine_to; (void)t;
+    /* Honor the cursor argument: while a grab is active the canvas
+     * pointer should display this cursor everywhere, overriding
+     * per-window XDefineCursor. twm uses MoveCursor/ResizeCursor here. */
+    emx11_js_set_grab_cursor((unsigned int)cursor);
     return GrabSuccess;
 }
 

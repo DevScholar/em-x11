@@ -114,6 +114,12 @@ export interface ManagedWindow {
    *  don't have callers for those yet, so they fall through to the
    *  ForgetGravity (discard) branch -- safe but not pixel-optimal. */
   bitGravity: number;
+  /** XDefineCursor / XUndefineCursor state. CSS `cursor:` keyword the
+   *  pointer should display while inside this window. `null` means
+   *  "inherit from parent" (the X11 default for newly-created windows).
+   *  Resolved on every Motion via parent-chain walk in InputBridge;
+   *  see host/cursor.ts for the cursor-xid -> CSS mapping. */
+  cursor: string | null;
 }
 
 /** Callback the Host supplies so the renderer can reach into the

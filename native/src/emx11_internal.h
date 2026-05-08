@@ -370,6 +370,19 @@ extern void emx11_js_reparent_window(Window id, Window parent, int x, int y);
  * reverts to the solid background_pixel; any other id must reference a
  * live Pixmap on the JS side. */
 extern void emx11_js_window_set_bg_pixmap(Window id, Pixmap pm_id);
+/* XDefineCursor / XUndefineCursor mirror. cursor=0 means "inherit from
+ * parent" (XUndefineCursor). Font cursors are encoded as
+ * 0x70000000 | shape so the host can map shape -> CSS keyword without
+ * a separate registration call. Pixmap cursors fall through to the
+ * default arrow on the host side. */
+extern void emx11_js_window_set_cursor(Window id, unsigned int cursor);
+
+/* Active-grab cursor override (XGrabPointer's cursor argument). While
+ * a grab is active twm wants its MoveCursor / ResizeCursor displayed
+ * everywhere the pointer roams, regardless of which window is under
+ * it. cursor=0 clears the override; canvas cursor falls back to the
+ * normal per-window XDefineCursor resolution. */
+extern void emx11_js_set_grab_cursor(unsigned int cursor);
 /* XClearWindow / XClearArea entry. Lets the compositor decide whether to
  * paint with a solid colour or the window's background_pixmap without
  * the caller having to know. */

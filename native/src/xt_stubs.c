@@ -125,14 +125,27 @@ int XClipBox(Region r, XRectangle *rect_return) {
 
 /* -- Cursors -----------------------------------------------------------
  *
- * No cursor art in a browser; we just hand out unique ids so callers
- * can compare for equality and XFreeCursor releases nothing. */
+ * No cursor *art* in a browser, but we want the right CSS cursor to
+ * appear when the pointer crosses into a window that XDefineCursor'd a
+ * particular shape (twm sets XC_fleur on resize edges, XC_arrow on the
+ * title bar, XC_X_cursor on root). The trick is encoding enough info in
+ * the Cursor xid that the JS host can map it to a CSS keyword without a
+ * separate registration round-trip:
+ *
+ *   font cursors  : 0x70000000 | shape  (shape == X11/cursorfont.h
+ *                                        constant, 0..152)
+ *   pixmap cursors: g_cursor_next++ counter, no shape info -- the host
+ *                   falls back to 'default' for these. We don't have a
+ *                   client that depends on per-pixmap cursor art yet.
+ *
+ * XFreeCursor is a no-op (no resources to release). */
 
 static XID g_cursor_next = 0x20000001;
+#define EMX11_FONT_CURSOR_TAG 0x70000000u
 
 Cursor XCreateFontCursor(Display *dpy, unsigned int shape) {
-    (void)dpy; (void)shape;
-    return (Cursor)(g_cursor_next++);
+    (void)dpy;
+    return (Cursor)(EMX11_FONT_CURSOR_TAG | (shape & 0xFFFu));
 }
 
 int XFreeCursor(Display *dpy, Cursor cursor) {
@@ -568,7 +581,11 @@ int XGrabKey(Display *a, int b, unsigned int c, Window d, Bool e,
 }
 
 int XUngrabKeyboard(Display *dpy, Time t) { (void)dpy; (void)t; return 1; }
-int XUngrabPointer (Display *dpy, Time t) { (void)dpy; (void)t; return 1; }
+int XUngrabPointer (Display *dpy, Time t) {
+    (void)dpy; (void)t;
+    emx11_js_set_grab_cursor(0);
+    return 1;
+}
 
 /* -- Window manager convenience calls -------------------------------- */
 

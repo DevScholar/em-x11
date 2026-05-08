@@ -507,7 +507,14 @@ int XChangeWindowAttributes(Display *display, Window w,
             emx11_pixmap_release(display, old);
         }
     }
-    /* Ignored: CWBorderPixmap, CWCursor, ... */
+    if (valuemask & CWCursor) {
+        /* twm sets frame / icon-manager / decoration-button / root cursors
+         * via XCreateWindow + XChangeWindowAttributes(CWCursor) rather
+         * than XDefineCursor. Without this branch the title-bar arrow,
+         * frame-edge resize cursors, and root X-cursor never appear. */
+        emx11_js_window_set_cursor(w, (unsigned int)attrs->cursor);
+    }
+    /* Ignored: CWBorderPixmap, ... */
     return 1;
 }
 
