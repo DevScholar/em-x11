@@ -191,9 +191,11 @@ static void emit_crossing(Display *dpy, int type, Window w,
 }
 
 /* Update last_pointer_window, emitting Leave on the outgoing window and
- * Enter on the incoming one. Called on every motion, and on ButtonPress
+ * Enter on the incoming one. Called on every motion, on ButtonPress
  * (so the "first interaction is a click, no prior mousemove" path still
- * delivers the Enter that Tk's button bindings depend on). */
+ * delivers the Enter that Tk's button bindings depend on), and from
+ * emx11_repoll_pointer_window after a map/unmap that may have changed
+ * the topmost window under a static pointer (twm root menu pop-up). */
 static void update_pointer_window(Display *dpy, Window cur,
                                   int x_root, int y_root, unsigned int state) {
     if (cur == last_pointer_window) return;
@@ -205,6 +207,30 @@ static void update_pointer_window(Display *dpy, Window cur,
         emit_crossing(dpy, EnterNotify, cur, x_root, y_root, state);
     }
     last_pointer_window = cur;
+}
+
+/* Re-evaluate which window is under the cursor and fire any Enter/Leave
+ * pair that the change implies. Real X servers synthesize crossings
+ * whenever a map/unmap/raise/lower changes the topmost window at the
+ * sprite position (xserver/dix/events.c::CheckMotion via WindowsRestructured).
+ * Without this hook, twm's root menu pops up *under* the cursor: hit_test
+ * now resolves to the menu, but last_pointer_window is still root, so the
+ * next motion event fires Leave/Enter only after the user crosses the
+ * boundary -- twm's UpdateMenu (menus.c:512) gates every hover update on
+ * `ActiveMenu->entered`, which is set on EnterNotify, so until that fires
+ * no menu item highlights and release lands with ActiveItem=NULL.
+ *
+ * Called from window.c after XMapWindow / XUnmapWindow on this display.
+ * `state` defaults to 0 since we have no fresh modifier sample to attach;
+ * Tk and twm don't read xcrossing.state for menu logic. */
+void emx11_repoll_pointer_window(Display *dpy) {
+    if (!dpy) return;
+    int px = 0, py = 0;
+    emx11_js_pointer_xy(&px, &py);
+    int lx = 0, ly = 0;
+    EmxWindow *cur = hit_test(dpy, px, py, 0, &lx, &ly);
+    Window cur_id = cur ? cur->id : None;
+    update_pointer_window(dpy, cur_id, px, py, 0);
 }
 
 EMSCRIPTEN_KEEPALIVE

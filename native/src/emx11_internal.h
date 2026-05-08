@@ -270,6 +270,13 @@ bool         emx11_event_queue_push(Display *dpy, const XEvent *event);
 bool         emx11_event_queue_pop (Display *dpy, XEvent *out);
 unsigned int emx11_event_queue_size(const Display *dpy);
 
+/* Re-run the hit test against the cached pointer position and emit any
+ * Enter/Leave pair the change implies. Called from XMapWindow /
+ * XUnmapWindow so a window that pops up (or down) under a stationary
+ * cursor still generates the crossing real X would. Required for twm's
+ * root-menu hover, which gates on EnterNotify on the menu window. */
+void         emx11_repoll_pointer_window(Display *dpy);
+
 /* Remove the first event from the queue whose type's event-mask bit is
  * set in `mask`. Copies the event into *out and compacts the queue.
  * Returns true on hit, false if nothing matched. */
