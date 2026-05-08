@@ -665,12 +665,23 @@ int XKillClient(Display *dpy, XID resource) { (void)dpy; (void)resource; return 
 int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
                  unsigned int event_mask, int pointer_mode, int keyboard_mode,
                  Window confine_to, Cursor cursor, Time t) {
-    (void)dpy; (void)grab_window; (void)owner_events; (void)event_mask;
-    (void)pointer_mode; (void)keyboard_mode; (void)confine_to; (void)t;
+    (void)event_mask; (void)pointer_mode; (void)keyboard_mode;
+    (void)confine_to; (void)t;
     /* Honor the cursor argument: while a grab is active the canvas
      * pointer should display this cursor everywhere, overriding
      * per-window XDefineCursor. twm uses MoveCursor/ResizeCursor here. */
     emx11_js_set_grab_cursor((unsigned int)cursor);
+    /* Active grab: redirect every subsequent button/motion event to the
+     * calling client until XUngrabPointer. Required for twm's
+     * DeferExecution (menus.c:2205) -- f.iconify, f.move, f.resize,
+     * f.focus, f.delete, etc. when invoked from a root menu install
+     * an active grab on Scr->Root and expect the next button press
+     * anywhere on the screen to come back to twm so it can apply the
+     * deferred function to the clicked window. Without this, the
+     * follow-up click goes to the clicked client's queue and the
+     * menu item silently does nothing. */
+    emx11_js_grab_pointer((unsigned int)dpy->conn_id,
+                          grab_window, owner_events ? 1 : 0);
     return GrabSuccess;
 }
 

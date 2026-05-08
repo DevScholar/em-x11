@@ -197,6 +197,37 @@ EM_JS(void, emx11_js_ungrab_button,
           if (h) h.onUngrabButton(window >>> 0, button >>> 0, modifiers >>> 0);
       });
 
+/* --- active pointer grabs (XGrabPointer / XUngrabPointer) ----------------
+ *
+ * Real X servers redirect every pointer event to the grab window's client
+ * for the lifetime of an active grab (xserver/dix/events.c::ActivateGrab).
+ * Twm's DeferExecution path depends on this: f.iconify / f.move / f.resize
+ * etc. on a root menu install an active grab on Scr->Root, then expect
+ * the next button press anywhere to be delivered to twm so it can apply
+ * the deferred function to the clicked window. Without forwarding the
+ * grab to the host's input router, that second click goes through normal
+ * passive-grab + subscriber resolution, which routes it to whichever
+ * client owns the press target (the clicked app, not twm) -- the deferred
+ * function never fires and the user sees "the menu item did nothing".
+ *
+ * conn_id lets the host look up the calling Module so subsequent events
+ * route to the same wasm process that issued the grab. owner_events
+ * survives the bridge for completeness but our delivery model is
+ * effectively owner_events=True regardless (we route to grab_window's
+ * owner module; the C side then does its own context lookup on
+ * Event.xany.window). */
+EM_JS(void, emx11_js_grab_pointer,
+      (unsigned int conn_id, unsigned int window, int owner_events),
+      {
+          var e = globalThis.emX11; var h = e && e._bridge;
+          if (h) h.onGrabPointer(conn_id >>> 0, window >>> 0, owner_events !== 0);
+      });
+
+EM_JS(void, emx11_js_ungrab_pointer, (void), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h) h.onUngrabPointer();
+});
+
 /* --- input focus (XSetInputFocus) ---------------------------------------- *
  *
  * The WM uses XSetInputFocus to hand the keyboard to a client whose own

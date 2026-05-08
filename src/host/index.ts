@@ -315,6 +315,15 @@ export class Host implements EmX11Host {
   onUngrabButton(window: number, button: number, modifiers: number): void {
     this.grabs.remove(window, button, modifiers);
   }
+  /** XGrabPointer / XUngrabPointer: install or release an active
+   *  pointer grab on behalf of the calling wasm. Forwards to the input
+   *  bridge, which redirects subsequent button + motion delivery. */
+  onGrabPointer(connId: number, window: number, _ownerEvents: boolean): void {
+    this.devices.setActivePointerGrab(connId, window);
+  }
+  onUngrabPointer(): void {
+    this.devices.clearActivePointerGrab();
+  }
 
   /** XSetInputFocus from any module. The WM uses this to hand keyboard
    *  control off to a client whose own window did NOT subscribe to

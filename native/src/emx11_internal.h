@@ -605,6 +605,11 @@ extern void emx11_js_grab_button(Window window, unsigned int button,
                                  Window confine_to, Cursor cursor);
 extern void emx11_js_ungrab_button(Window window, unsigned int button,
                                    unsigned int modifiers);
+/* Active pointer grab plumbing -- see bridges.c. conn_id identifies the
+ * calling wasm so subsequent button/motion events route back to it. */
+extern void emx11_js_grab_pointer(unsigned int conn_id, Window window,
+                                  int owner_events);
+extern void emx11_js_ungrab_pointer(void);
 extern void emx11_js_set_input_focus(Window window);
 
 /* Browser clipboard bridge (see selection.c). The read path is split in

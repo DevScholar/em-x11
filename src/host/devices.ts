@@ -74,6 +74,13 @@ export class InputBridge {
    *  ResizeCursor stay visible during a drag even as the pointer
    *  crosses other windows. Cleared by XUngrabPointer. */
   private grabCursor: string | null = null;
+  /** Active pointer grab: while non-null, every button + motion event
+   *  routes to this module instead of going through passive grab /
+   *  subscriber lookup. Mirrors the xserver ActivateGrab path. Set by
+   *  the C-side XGrabPointer bridge; cleared by XUngrabPointer. */
+  private activePointerGrab:
+    | { window: number; module: ModuleCcallSurface }
+    | null = null;
 
   constructor(private readonly host: Host) {
     /* Default the pointer to the canvas centre so the first XQueryPointer
@@ -107,6 +114,23 @@ export class InputBridge {
   setGrabCursor(cursorXid: number): void {
     this.grabCursor = cursorXid === 0 ? null : cursorXidToCss(cursorXid);
     this.refreshCanvasCursor();
+  }
+
+  /** Install an active pointer grab on behalf of the wasm process
+   *  identified by `connId`. Until cleared, all button + motion events
+   *  route to that connection regardless of which window the pointer
+   *  is over. */
+  setActivePointerGrab(connId: number, window: number): void {
+    const module = this.moduleForConn(connId);
+    if (!module) return;
+    this.activePointerGrab = { window, module };
+    /* Take over any in-progress implicit drag too -- the grabbing
+     * client now owns the pointer, including release routing. */
+    this.dragModule = module;
+  }
+
+  clearActivePointerGrab(): void {
+    this.activePointerGrab = null;
   }
 
   /** Walk `winId`'s parent chain in the renderer tree and pick the
@@ -150,13 +174,20 @@ export class InputBridge {
     this.setPointer(e.x, e.y);
     const win = this.host.renderer.findWindowAt(e.x, e.y);
     this.applyCursorFor(win);
+    /* Active grab from XGrabPointer wins over the implicit ButtonPress
+     * grab and over the under-cursor module: every motion event must
+     * reach the grabbing client until XUngrabPointer. Twm relies on
+     * this for menu drag-tracking and DeferExecution cursor follow. */
     /* X11 implicit pointer grab (x11protocol.txt §523): once a button is
      * pressed, all Motion and ButtonRelease events route to the grabbing
      * client regardless of where the pointer moves. dragModule holds the
      * module that saw the ButtonPress, so route to it unconditionally
      * while a drag is in progress -- a TWM title-bar drag crosses over
      * xeyes' frame mid-drag, but Motion must still reach TWM, not xeyes. */
-    const module = this.dragModule ?? (win !== null ? this.moduleForWindow(win) : null);
+    const module =
+      this.activePointerGrab?.module ??
+      this.dragModule ??
+      (win !== null ? this.moduleForWindow(win) : null);
     if (globalThis.emX11?._debug?.traceMotion) {
       console.log(
         `[mot] (${e.x}, ${e.y}) win=${win} drag=${this.dragModule ? 'Y' : 'N'} module=${module ? 'Y' : 'N'}`,
@@ -212,6 +243,34 @@ export class InputBridge {
       );
     }
     if (target === null) return;
+
+    /* Active pointer grab from XGrabPointer: every button event goes
+     * straight to the grabbing client, bypassing passive grab lookup
+     * and subscriber propagation. Without this, twm's DeferExecution
+     * (set up after the user releases on Iconify/Move/Resize/Focus/
+     * Delete in a root menu) can't catch the user's follow-up click on
+     * a target window -- the click would otherwise route to the
+     * clicked client, leaving twm waiting forever and the menu item
+     * looking dead. */
+    if (this.activePointerGrab) {
+      const grab = this.activePointerGrab;
+      const origin = this.host.getWindowAbsOrigin(target);
+      const lx = origin ? e.x - origin.ax : e.x;
+      const ly = origin ? e.y - origin.ay : e.y;
+      if (xType === X_ButtonPress) {
+        this.dragModule = grab.module;
+        this.focusedWindow = grab.window;
+      } else if (this.dragModule === grab.module) {
+        this.dragModule = null;
+      }
+      grab.module.ccall(
+        'emx11_push_button_event',
+        null,
+        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+        [xType, target, lx, ly, e.x, e.y, e.button, e.modifiers],
+      );
+      return;
+    }
 
     /* Routing in xorg order (xserver/dix/events.c::DeliverDeviceEvents):
      *
