@@ -197,6 +197,19 @@ EM_JS(void, emx11_js_ungrab_button,
           if (h) h.onUngrabButton(window >>> 0, button >>> 0, modifiers >>> 0);
       });
 
+/* --- input focus (XSetInputFocus) ---------------------------------------- *
+ *
+ * The WM uses XSetInputFocus to hand the keyboard to a client whose own
+ * window did not subscribe to ButtonPressMask (e.g. glxgears: only
+ * Key/Expose/StructureNotify selected). Without bridging this to the host,
+ * the press-driven focus tracker stays pointed at the WM frame and key
+ * events never reach the app. None (0) / PointerRoot (1) clear the
+ * override.                                                                 */
+EM_JS(void, emx11_js_set_input_focus, (unsigned int window), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h && h.onSetInputFocus) h.onSetInputFocus(window >>> 0);
+});
+
 /* --- atom ---------------------------------------------------------------- */
 
 EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {

@@ -316,6 +316,15 @@ export class Host implements EmX11Host {
     this.grabs.remove(window, button, modifiers);
   }
 
+  /** XSetInputFocus from any module. The WM uses this to hand keyboard
+   *  control off to a client whose own window did NOT subscribe to
+   *  ButtonPressMask -- without this, our press-driven focus tracker
+   *  would still point at the WM frame and keys would never reach the
+   *  app. */
+  onSetInputFocus(window: number): void {
+    this.devices.setExplicitFocus(window);
+  }
+
 
   /* -- EmX11Host: pixmaps + drawable copies + Shape --------------------- */
 

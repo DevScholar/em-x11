@@ -137,6 +137,55 @@ Display *XOpenDisplay(const char *display_name) {
 
     g_display.next_keycode = 8;                 /* X reserves 0..7          */
 
+    /* Pre-populate the keysym table with the standard keysyms our TS-side
+     * keymap can produce (runtime/keymap.ts). Xt's translation manager
+     * calls XGetKeyboardMapping once at first key event and caches the
+     * result; any keysym we lazily allocated AFTER that snapshot is
+     * invisible to Xt forever, so apps like xcalc/glxgears would only
+     * react to whichever single keysym happened to populate the table
+     * before Xt's cache build. Tk does not cache this way, hence Tk apps
+     * worked fine. By installing the full set up front, Xt's cached
+     * keymap matches the live one for every key the TS layer can send. */
+    {
+        unsigned int kc = 8;
+
+        /* ASCII printable 0x20..0x7e -- keysym == codepoint per X11. */
+        for (KeySym ks = 0x20; ks <= 0x7e && kc < 256; ks++) {
+            g_display.keysym_table[kc++] = ks;
+        }
+
+        /* Common terminal-control keys also handled by XLookupString. */
+        static const KeySym k_specials[] = {
+            0xff0d, /* XK_Return     */
+            0xff09, /* XK_Tab        */
+            0xff08, /* XK_BackSpace  */
+            0xff1b, /* XK_Escape     */
+            0xffff, /* XK_Delete     */
+            0xff63, /* XK_Insert     */
+            0xff50, /* XK_Home       */
+            0xff57, /* XK_End        */
+            0xff55, /* XK_Page_Up    */
+            0xff56, /* XK_Page_Down  */
+            0xff51, /* XK_Left       */
+            0xff52, /* XK_Up         */
+            0xff53, /* XK_Right      */
+            0xff54, /* XK_Down       */
+            0xffe5, /* XK_Caps_Lock  */
+            0xffe1, /* XK_Shift_L    */
+            0xffe3, /* XK_Control_L  */
+            0xffe9, /* XK_Alt_L      */
+            0xffeb, /* XK_Super_L    */
+            0xffbe, 0xffbf, 0xffc0, 0xffc1, 0xffc2, 0xffc3,
+            0xffc4, 0xffc5, 0xffc6, 0xffc7, 0xffc8, 0xffc9, /* F1..F12 */
+        };
+        for (size_t i = 0; i < sizeof(k_specials)/sizeof(k_specials[0])
+                          && kc < 256; i++) {
+            g_display.keysym_table[kc++] = k_specials[i];
+        }
+
+        g_display.next_keycode = kc;
+    }
+
     emx11_init_screen(&g_display);
     g_display.screens = &g_display.screen0;
 

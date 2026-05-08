@@ -54,6 +54,15 @@ export class InputBridge {
   /** Last window that received a ButtonPress, by connection id. Key
    *  events route here until another ButtonPress moves focus. */
   private focusedWindow: number | null = null;
+  /** Bridged from any client's XSetInputFocus call. The WM (twm) issues
+   *  XSetInputFocus on the inner client window after click-to-raise to
+   *  hand keyboard control off to the app, but that call only updates
+   *  the WM's own Display struct; without this hook the host's
+   *  focusedWindow stays pointed at the WM's frame and key events keep
+   *  going to the WM. None / PointerRoot reset us to "no override".
+   *  Whenever this is non-null and resolves to a known window, it wins
+   *  over the press-driven focusedWindow. */
+  private explicitFocus: number | null = null;
   /** Module that owns the current implicit pointer grab (set on ButtonPress,
    *  cleared on ButtonRelease). Used by onMouseMove to route motion events
    *  to the grab window even when the pointer is over empty canvas space. */
@@ -162,16 +171,29 @@ export class InputBridge {
   }
 
   pushKey(xType: number, e: KeyEventData): void {
-    if (this.focusedWindow === null) return;
-    const module = this.moduleForWindow(this.focusedWindow);
+    const focus = this.explicitFocus !== null
+      ? this.explicitFocus
+      : this.focusedWindow;
+    if (focus === null) return;
+    const module = this.moduleForWindow(focus);
     if (!module) return;
     if (e.keysym === 0) return;
     module.ccall(
       'emx11_push_key_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number'],
-      [xType, this.focusedWindow, e.keysym, e.modifiers, 0, 0],
+      [xType, focus, e.keysym, e.modifiers, 0, 0],
     );
+  }
+
+  /** Bridged from XSetInputFocus on any module. None (0) / PointerRoot (1)
+   *  clear the explicit override and let press-driven focus take over. */
+  setExplicitFocus(window: number): void {
+    if (window === 0 || window === 1) {
+      this.explicitFocus = null;
+      return;
+    }
+    this.explicitFocus = window;
   }
 
   pushKeyDown(e: KeyEventData): void { this.pushKey(X_KeyPress, e); }

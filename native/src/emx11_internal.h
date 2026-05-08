@@ -598,6 +598,7 @@ extern void emx11_js_grab_button(Window window, unsigned int button,
                                  Window confine_to, Cursor cursor);
 extern void emx11_js_ungrab_button(Window window, unsigned int button,
                                    unsigned int modifiers);
+extern void emx11_js_set_input_focus(Window window);
 
 /* Browser clipboard bridge (see selection.c). The read path is split in
  * two because Asyncify can only suspend a single JS-to-C boundary: first

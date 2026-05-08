@@ -132,6 +132,10 @@ int XSetInputFocus(Display *display, Window focus, int revert_to, Time time) {
         push_focus_change(display, FocusIn,  focus,
                           NotifyNormal, NotifyNonlinear);
     }
+    /* Tell the host so cross-process key delivery routes here. The WM
+     * sets focus to a window owned by another module; only the host has
+     * the global picture needed to dispatch KeyPress to that owner. */
+    emx11_js_set_input_focus(focus);
     return 1;
 }
 
