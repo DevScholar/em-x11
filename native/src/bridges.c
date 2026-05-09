@@ -261,14 +261,33 @@ EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
 
 /* --- clipboard ----------------------------------------------------------- */
 
+/* Browser → Tk clipboard read.
+ *
+ * navigator.clipboard.readText() is async and we can't suspend C without
+ * Asyncify (see project_emx11_no_em_async_js). The host side (devices.ts)
+ * pre-stages clipboard bytes on every paste-equivalent gesture — Ctrl+V /
+ * Shift+Insert keydown awaits readText() before the keydown is dispatched
+ * to Tk; document `paste` events also fill the cache synchronously via
+ * ClipboardEvent.clipboardData. Cache lives at
+ *
+ *   globalThis.__emx11ClipboardBytes : Uint8Array | null
+ *
+ * Both halves read it synchronously. _fetch clears the cache so a stale
+ * value can't bleed into the next paste.
+ */
 EM_JS(int, emx11_js_clipboard_read_begin, (void), {
-    /* Async read still requires JSPI or Asyncify unwind; stubbed for
-     * now. Tcl's selection layer treats -1 as "empty paste". */
-    return -1;
+    var bytes = globalThis.__emx11ClipboardBytes;
+    if (!bytes) return -1;
+    return bytes.length | 0;
 });
 
 EM_JS(int, emx11_js_clipboard_read_fetch, (int dstPtr, int capacity), {
-    return 0;
+    var bytes = globalThis.__emx11ClipboardBytes;
+    if (!bytes) return 0;
+    var n = Math.min(bytes.length, capacity) | 0;
+    HEAPU8.set(bytes.subarray(0, n), dstPtr);
+    globalThis.__emx11ClipboardBytes = null;
+    return n;
 });
 
 EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {

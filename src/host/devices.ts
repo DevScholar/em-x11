@@ -473,14 +473,51 @@ export class InputBridge {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('mousedown', () => el.focus());
 
+    /* Browser → Tk clipboard staging. The C-side bridge
+     * (emx11_js_clipboard_read_begin / _fetch in native/src/bridges.c) has
+     * to answer synchronously because runTcl is sync (no Asyncify), so we
+     * pre-fill `globalThis.__emx11ClipboardBytes` ahead of every paste-
+     * equivalent gesture:
+     *
+     *   1. document `paste` events — ClipboardEvent.clipboardData is
+     *      synchronous, so any genuine paste (incl. middle-click on Linux,
+     *      menu Edit→Paste) lands here without permission prompts.
+     *   2. Ctrl+V / Shift+Insert / Cmd+V keydown — paste events don't fire
+     *      reliably on focused canvas elements, so we await
+     *      navigator.clipboard.readText() first and only push the keydown
+     *      to Tk after the cache is filled. Adds ~1ms latency in exchange
+     *      for working browser→Tk paste on bare canvases. */
+    document.addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text/plain');
+      if (typeof text === 'string') {
+        globalThis.__emx11ClipboardBytes = new TextEncoder().encode(text);
+      }
+    });
+
     window.addEventListener('keydown', (e) => {
       const hasFocus = document.activeElement === el;
       if (hasFocus) e.preventDefault();
-      this.pushKeyDown({
+      const data: KeyEventData = {
         keysym: keyEventToKeysym(e),
         modifiers: modifiersFromEvent(e),
         hasFocus,
-      });
+      };
+      if (hasFocus && isPasteCombo(e) && navigator.clipboard?.readText) {
+        /* Defer the keydown until clipboard text is staged. Tk processes
+         * the Ctrl+V on its next event-pump tick, by which point
+         * __emx11ClipboardBytes is set. We dispatch the keydown
+         * unconditionally on resolve OR reject so a denied permission
+         * doesn't swallow the keystroke. */
+        navigator.clipboard.readText().then((text) => {
+          globalThis.__emx11ClipboardBytes = new TextEncoder().encode(text);
+        }).catch(() => {
+          /* permission denied / not focused — leave cache as-is */
+        }).finally(() => {
+          this.pushKeyDown(data);
+        });
+        return;
+      }
+      this.pushKeyDown(data);
     });
     window.addEventListener('keyup', (e) => {
       const hasFocus = document.activeElement === el;
@@ -497,4 +534,19 @@ export class InputBridge {
     const rect = el.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
+}
+
+/** Ctrl+V / Cmd+V / Shift+Insert — the three combos that should trigger
+ *  a clipboard prefetch. KeyboardEvent.code is layout-independent for
+ *  the V key; modifier check uses ctrlKey OR metaKey to cover Linux/
+ *  Windows (Ctrl) and macOS (Cmd) without false positives. */
+function isPasteCombo(e: KeyboardEvent): boolean {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') return true;
+  if (e.shiftKey && !e.ctrlKey && !e.altKey && e.code === 'Insert') return true;
+  return false;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __emx11ClipboardBytes: Uint8Array | null | undefined;
 }
