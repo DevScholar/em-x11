@@ -59,7 +59,13 @@ export class TextInputOverlay {
     ta.setAttribute('autocomplete', 'off');
     ta.setAttribute('autocorrect', 'off');
     ta.setAttribute('spellcheck', 'false');
-    ta.setAttribute('aria-hidden', 'true');
+    /* Do NOT set aria-hidden=true. Chromium logs "Blocked aria-hidden
+     * on a focused element" and -- worse -- disables IME on the element
+     * after the first composition session as a defensive measure (it
+     * treats aria-hidden focused inputs as "not a real input"). The
+     * symptom is "first Chinese 词 commits, every subsequent press
+     * falls through as ASCII." Visual hiding via opacity:0 + tabindex
+     * is enough. Screen readers won't read empty content anyway. */
     ta.tabIndex = -1;
     ta.style.position = 'fixed';
     ta.style.left = '-9999px';
@@ -183,19 +189,30 @@ export class TextInputOverlay {
       /* Try e.data first (Firefox tends to fill it accurately). Fall
        * back to textarea.value (xterm.js's strategy for Chromium).
        * setTimeout 0 lets the native compositionend write hit
-       * textarea.value before we read it. */
+       * textarea.value before we read it.
+       *
+       * Wipe the textarea AFTER reading and AFTER yielding to the
+       * browser. Wiping synchronously inside the compositionend
+       * listener confuses the OS IME on Windows Chromium: the next
+       * keystroke routes as a plain Latin keydown instead of starting
+       * a new composition (the IME thinks its session is still alive
+       * but the anchor element's text was rewritten under it). The
+       * setTimeout(0) defers the wipe until after the browser has
+       * finished its compositionend bookkeeping. */
       const evData = e.data ?? '';
       const flush = () => {
         let text = evData;
         if (!text && ta.value) text = ta.value;
         ta.value = '';
+        try { ta.setSelectionRange(0, 0); } catch {}
         if (text) this.dispatchTextKey(text);
       };
-      if (evData) {
-        flush();
-      } else {
-        setTimeout(flush, 0);
-      }
+      /* Always defer: even when evData is non-empty, we still want to
+       * wipe ta.value AFTER the browser finishes its compositionend
+       * bookkeeping, otherwise the next compositionstart on Chromium
+       * Windows fires but compositionupdate never follows -- the IME
+       * session goes silent until the user clicks away. */
+      setTimeout(flush, 0);
     });
 
     /* beforeinput is our path for paste, autocomplete substitution, and
