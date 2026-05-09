@@ -29,6 +29,12 @@ bool emx11_event_queue_pop(Display *dpy, XEvent *out) {
         return false;
     }
     *out = dpy->event_queue[dpy->event_head];
+    /* Mirror the event's UTF-8 text slot into dpy->current_key_text so
+     * a subsequent Xutf8LookupString picks up exactly what JS staged
+     * for this event. Cheap no-op for non-key events. */
+    if (out->type == KeyPress || out->type == KeyRelease) {
+        emx11_xim_capture_pop_text(dpy, dpy->event_head);
+    }
     dpy->event_head = (dpy->event_head + 1) % EMX11_EVENT_QUEUE_CAPACITY;
     dpy->qlen = (int)emx11_event_queue_size(dpy);
     return true;

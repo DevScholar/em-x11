@@ -184,31 +184,20 @@ int XNoOp(Display *dpy) {
     return 1;
 }
 
-/* -- Input-method plumbing. Tk's tkUnixKey.c calls Xutf8LookupString
- *    when it has an XIC, otherwise falls back to XLookupString. We
- *    never hand out a real XIC (XCreateIC returns NULL), so this path
- *    is only hit via the stub table. Convert keycode->keysym and drop
- *    the UTF-8 text. */
-
-int Xutf8LookupString(XIC ic, XKeyPressedEvent *event,
-                      char *buffer_return, int bytes_buffer,
-                      KeySym *keysym_return, Status *status_return) {
-    (void)ic;
-    if (buffer_return && bytes_buffer > 0) buffer_return[0] = '\0';
-    KeySym sym = NoSymbol;
-    if (event) sym = XLookupKeysym(event, 0);
-    if (keysym_return) *keysym_return = sym;
-    if (status_return) *status_return = (sym == NoSymbol) ? XLookupNone
-                                                          : XLookupKeySym;
-    return 0;                                   /* zero bytes written */
-}
+/* -- Input-method plumbing.
+ *
+ * Real XIM lifecycle (XOpenIM/XCreateIC/XSetICFocus/Xutf8LookupString/...)
+ * lives in xim.c. The two registration-callback APIs below stay here as
+ * noops -- Tk uses them to register a "tell me when an XIM appears"
+ * watcher; XOpenIM already succeeds on the first call so the callback
+ * never has to fire. */
 
 Bool XRegisterIMInstantiateCallback(Display *dpy, struct _XrmHashBucketRec *rdb,
                                     char *res_name, char *res_class,
                                     XIDProc callback, XPointer client_data) {
     (void)dpy; (void)rdb; (void)res_name; (void)res_class;
     (void)callback; (void)client_data;
-    return False;                               /* no IM ever appears */
+    return False;
 }
 
 Bool XUnregisterIMInstantiateCallback(Display *dpy, struct _XrmHashBucketRec *rdb,
@@ -221,9 +210,6 @@ Bool XUnregisterIMInstantiateCallback(Display *dpy, struct _XrmHashBucketRec *rd
 
 char *XSetIMValues(XIM im, ...) {
     (void)im;
-    /* Real Xlib returns NULL on success, or the name of the first arg
-     * that couldn't be set. We never have an IM, so "success" is the
-     * conservative answer. */
     return NULL;
 }
 

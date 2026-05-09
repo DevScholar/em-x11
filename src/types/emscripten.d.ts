@@ -418,6 +418,19 @@ export interface EmX11Host {
   /** XUngrabButton -> remove a passive button grab. AnyButton / AnyModifier
    *  act as wildcards in the matching axis (xorg semantics). */
   onUngrabButton(window: number, button: number, modifiers: number): void;
+  /** XGrabPointer / XUngrabPointer: active pointer grab on behalf of
+   *  `connId`'s wasm. Subsequent button + motion events route there. */
+  onGrabPointer(connId: number, window: number, ownerEvents: boolean): void;
+  onUngrabPointer(): void;
+  /** XSetInputFocus on any module. Forwarded so press-driven focus
+   *  override can stop tracking the WM frame after a click-to-raise. */
+  onSetInputFocus(window: number): void;
+  /** XIM (xim.c): Tk's XSetICFocus / XUnsetICFocus / XSetICValues
+   *  XNSpotLocation. Host translates these into hidden-textarea focus
+   *  + position so the OS IME anchors candidate windows correctly. */
+  onXimSetFocus(window: number): void;
+  onXimClearFocus(): void;
+  onXimSetSpot(window: number, x: number, y: number): void;
 }
 
 declare global {

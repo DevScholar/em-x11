@@ -241,6 +241,29 @@ EM_JS(void, emx11_js_set_input_focus, (unsigned int window), {
     if (h && h.onSetInputFocus) h.onSetInputFocus(window >>> 0);
 });
 
+/* --- XIM (xim.c) --------------------------------------------------------- *
+ *
+ * Tk calls XSetICFocus / XSetICValues(XNSpotLocation) as it moves focus
+ * between entries / texts and drags the caret around inside them. The
+ * host translates these into "move the hidden <textarea> to this
+ * window's caret position and grab DOM focus there", which is what the
+ * OS IME actually anchors candidate windows on. See src/host/text-input.ts. */
+
+EM_JS(void, emx11_js_xim_set_focus, (unsigned int window), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h && h.onXimSetFocus) h.onXimSetFocus(window >>> 0);
+});
+
+EM_JS(void, emx11_js_xim_clear_focus, (void), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h && h.onXimClearFocus) h.onXimClearFocus();
+});
+
+EM_JS(void, emx11_js_xim_set_spot, (unsigned int window, int x, int y), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h && h.onXimSetSpot) h.onXimSetSpot(window >>> 0, x | 0, y | 0);
+});
+
 /* --- atom ---------------------------------------------------------------- */
 
 EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {

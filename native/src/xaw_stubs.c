@@ -22,6 +22,8 @@
 #include <X11/extensions/XInput2.h>
 #include <emscripten.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -350,54 +352,81 @@ int XGetFontProperty(XFontStruct *fs, Atom atom, unsigned long *value_return) {
     return False;                               /* "property not present" */
 }
 
-/* -- XIM (input method) stubs.
- * No XIM support; Xaw asks for one at widget init and falls back to
- * the non-XIM code paths when XOpenIM returns NULL. The remaining
- * functions are defensively present -- Xaw checks `if (im != NULL)`
- * in most places but the linker wants every reference resolved. */
+/* -- XIM stubs that don't deserve their own file.
+ * Real XOpenIM / XCreateIC / XSetICFocus / XSetICValues / XGetICValues
+ * / XGetIMValues / XDestroyIC / XCloseIM live in xim.c. The two helpers
+ * below stay here because they have no Tier A behaviour: XDisplayOfIM
+ * isn't called by Tk (Xaw used to ask), and XVaCreateNestedList just
+ * needs to return a non-NULL pointer so XCreateIC's varargs caller
+ * doesn't early-out. */
 
-XIM XOpenIM(Display *dpy, struct _XrmHashBucketRec *rdb,
-            char *res_name, char *res_class) {
-    (void)dpy; (void)rdb; (void)res_name; (void)res_class;
-    return NULL;
-}
-Status XCloseIM(XIM im) {
-    (void)im; return 1;
-}
 Display *XDisplayOfIM(XIM im) {
     (void)im; return NULL;
 }
-char *XGetIMValues(XIM im, ...) {
-    (void)im; return NULL;
-}
 
-XIC XCreateIC(XIM im, ...) {
-    (void)im; return NULL;
-}
-void XDestroyIC(XIC ic) {
-    (void)ic;
-}
-void XSetICFocus(XIC ic) {
-    (void)ic;
-}
-void XUnsetICFocus(XIC ic) {
-    (void)ic;
-}
-char *XGetICValues(XIC ic, ...) {
-    (void)ic; return NULL;
-}
-char *XSetICValues(XIC ic, ...) {
-    (void)ic; return NULL;
-}
+/* XVaCreateNestedList captures (name, value) pairs into a heap-allocated
+ * sentinel-terminated array. xim.c decodes it on demand when it sees the
+ * outer XNPreeditAttributes / XNStatusAttributes attribute. The first
+ * slot is a magic header so xim.c can recognise our payload (Tk passes
+ * arbitrary pointers through XCreateIC's varargs and we mustn't deref
+ * a non-list value as one).
+ *
+ * Layout: [magic][count][n1][v1][n2][v2]...[NULL]
+ * All slots are void*; names are const char*, values are stored as-is. */
+
+static const char EMX11_NESTED_LIST_MAGIC[] = "emx11-nested-list";
 
 XVaNestedList XVaCreateNestedList(int unused_dummy, ...) {
     (void)unused_dummy;
-    /* Xaw calls this to build arg lists for XCreateIC; since we
-     * never have an XIM, the returned list is never dereferenced.
-     * Return a unique non-NULL pointer so callers checking for
-     * allocation failure do not early-out. */
-    static char sentinel;
-    return (XVaNestedList)&sentinel;
+    /* Walk once to count, then again to copy. */
+    va_list ap;
+    int n = 0;
+    va_start(ap, unused_dummy);
+    for (;;) {
+        const char *name = va_arg(ap, const char *);
+        if (!name) break;
+        (void)va_arg(ap, void *);
+        n++;
+    }
+    va_end(ap);
+
+    /* +1 magic +1 count +2 per entry +1 terminator. */
+    void **buf = (void **)calloc(2 + 2 * n + 1, sizeof(void *));
+    if (!buf) return NULL;
+    buf[0] = (void *)EMX11_NESTED_LIST_MAGIC;
+    buf[1] = (void *)(uintptr_t)n;
+    int o = 2;
+    va_start(ap, unused_dummy);
+    for (int i = 0; i < n; i++) {
+        const char *name = va_arg(ap, const char *);
+        void *value      = va_arg(ap, void *);
+        buf[o++] = (void *)name;
+        buf[o++] = value;
+    }
+    va_end(ap);
+    buf[o] = NULL;
+    return (XVaNestedList)buf;
+}
+
+/* xim.c reads the captured list. Returns 1 + writes (count, name_array,
+ * value_array) when the pointer looks valid, 0 otherwise. */
+int emx11_nested_list_decode(void *list, int *count_out,
+                             const char ***names_out, void ***values_out) {
+    if (!list) return 0;
+    void **slots = (void **)list;
+    if (slots[0] != (void *)EMX11_NESTED_LIST_MAGIC) return 0;
+    int n = (int)(uintptr_t)slots[1];
+    static const char *name_buf[16];
+    static void       *val_buf[16];
+    if (n > 16) n = 16;
+    for (int i = 0; i < n; i++) {
+        name_buf[i] = (const char *)slots[2 + 2 * i + 0];
+        val_buf[i]  = slots[2 + 2 * i + 1];
+    }
+    if (count_out)  *count_out  = n;
+    if (names_out)  *names_out  = name_buf;
+    if (values_out) *values_out = val_buf;
+    return 1;
 }
 
 /* -- Display-level metadata. XDefault* are macros in upstream Xlib.h

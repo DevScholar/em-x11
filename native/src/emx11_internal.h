@@ -31,6 +31,13 @@
  * wedging F_MOVE's XMaskEvent. */
 #define EMX11_EVENT_QUEUE_CAPACITY 4096
 
+/* Per-event UTF-8 typed-text slot. One key event carries at most a
+ * single grapheme today; sized at 32 bytes leaves room for stacked
+ * combining marks and 4-byte codepoints (4 BMP-supplementary chars max).
+ * Storage cost: 32 * EMX11_EVENT_QUEUE_CAPACITY = 128 KiB per Display,
+ * which is small next to the event_queue itself. */
+#define EMX11_KEY_TEXT_SLOT        32
+
 /* ------------------------------------------------------------------------- */
 /*  GC -- opaque to clients; upstream only exposes "ext_data" (through the  */
 /*  XLIB_ILLEGAL_ACCESS define which we never set). Everything else is ours. */
@@ -255,6 +262,26 @@ struct _XDisplay {
     unsigned char             *incr_buf;
     int                        incr_len;
     int                        incr_cap;
+
+    /* XIM side-channel for typed UTF-8 (see xim.c).
+     *
+     *   pending_key_text     -- staged by JS (emx11_set_pending_key_text)
+     *                           right before each emx11_push_key_event.
+     *                           Captured into key_text_queue[tail] then
+     *                           cleared, so a KeyRelease without text
+     *                           can't inherit stale bytes.
+     *   key_text_queue       -- parallel to event_queue. Slot N holds the
+     *                           UTF-8 text that belongs to event_queue[N].
+     *   key_text_len_queue   -- byte length of slot N (excluding NUL).
+     *   current_key_text     -- text from the most-recently popped event,
+     *                           served to Xutf8LookupString. */
+    char                       pending_key_text[EMX11_KEY_TEXT_SLOT];
+    int                        pending_key_text_len;
+    char                       key_text_queue[EMX11_EVENT_QUEUE_CAPACITY]
+                                              [EMX11_KEY_TEXT_SLOT];
+    int                        key_text_len_queue[EMX11_EVENT_QUEUE_CAPACITY];
+    char                       current_key_text[EMX11_KEY_TEXT_SLOT];
+    int                        current_key_text_len;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -611,6 +638,23 @@ extern void emx11_js_grab_pointer(unsigned int conn_id, Window window,
                                   int owner_events);
 extern void emx11_js_ungrab_pointer(void);
 extern void emx11_js_set_input_focus(Window window);
+
+/* XIM bridge -- wires Tk's XSetICFocus / XSetICValues(XNSpotLocation)
+ * to the host's hidden <textarea> overlay, which is what the OS IME
+ * actually anchors its candidate window on. xim.c calls these. The host
+ * ignores spot updates whose window doesn't currently own focus -- Tk
+ * sets XNSpotLocation pre-emptively on every entry and we only want
+ * the active widget's caret position to drive the overlay. */
+extern void emx11_js_xim_set_focus(Window window);
+extern void emx11_js_xim_clear_focus(void);
+extern void emx11_js_xim_set_spot(Window window, int x, int y);
+
+/* xim.c side-channel hooks. event.c calls _capture_key_text after each
+ * KeyPress/KeyRelease push so the parallel queue stays in lockstep with
+ * event_queue; event_queue.c calls _capture_pop_text right before
+ * advancing event_head so Xutf8LookupString sees the right slot. */
+void emx11_xim_capture_key_text(Display *dpy, unsigned int slot);
+void emx11_xim_capture_pop_text(Display *dpy, unsigned int slot);
 
 /* Browser clipboard bridge (see selection.c). The read path is split in
  * two because Asyncify can only suspend a single JS-to-C boundary: first

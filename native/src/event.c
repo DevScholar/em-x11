@@ -394,7 +394,18 @@ void emx11_push_key_event(int type, Window window, unsigned int keysym,
     ev.xkey.keycode     = emx11_keysym_to_keycode(dpy, (KeySym)keysym);
     ev.xkey.same_screen = True;
     ev.xkey.time        = event_now();
-    emx11_event_queue_push(dpy, &ev);
+    /* Record the slot BEFORE push -- emx11_event_queue_push will write
+     * to dpy->event_tail then advance it. The text snapshot has to land
+     * in the same slot. */
+    unsigned int slot = dpy->event_tail;
+    if (emx11_event_queue_push(dpy, &ev)) {
+        emx11_xim_capture_key_text(dpy, slot);
+    } else {
+        /* Queue full: drop the staged text too so the next successful
+         * push doesn't claim text that belonged to the dropped event. */
+        dpy->pending_key_text[0]  = '\0';
+        dpy->pending_key_text_len = 0;
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE

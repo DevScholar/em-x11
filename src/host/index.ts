@@ -48,6 +48,7 @@ import { GcManager } from './gc.js';
 import { InputBridge } from './devices.js';
 import { GrabManager } from './grabs.js';
 import { GlxManager } from './glx.js';
+import { TextInputOverlay } from './text-input.js';
 import type { LoadOptions } from '../loader/wasm.js';
 import type {
   EmX11Global,
@@ -73,6 +74,7 @@ export class Host implements EmX11Host {
   readonly devices: InputBridge;
   readonly grabs: GrabManager;
   readonly glx: GlxManager;
+  readonly textInput: TextInputOverlay;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -108,6 +110,15 @@ export class Host implements EmX11Host {
     this.devices = new InputBridge(this);
     this.grabs = new GrabManager(this);
     this.glx = new GlxManager(this.renderer);
+    /* Hidden-textarea overlay for XIM. Constructor is a no-op in
+     * headless / OffscreenCanvas mode -- pyodide-tk worker path drives
+     * input through devices.push* directly and has no DOM. */
+    this.textInput = new TextInputOverlay(this);
+    this.devices.registerOverlay(
+      // Reach in through a typed accessor that returns the underlying
+      // <textarea> when available, null otherwise.
+      this.textInput.element,
+    );
 
     this.window.installSharedRoot();
   }
@@ -332,6 +343,24 @@ export class Host implements EmX11Host {
    *  app. */
   onSetInputFocus(window: number): void {
     this.devices.setExplicitFocus(window);
+  }
+
+  /* -- EmX11Host: XIM (xim.c) ------------------------------------------- */
+
+  /** XSetICFocus on any module. Tk fires this when its focus moves
+   *  between entries / texts. The hidden textarea overlay grabs DOM
+   *  focus and starts following the caret. */
+  onXimSetFocus(window: number): void {
+    this.textInput.setFocus(window);
+  }
+  onXimClearFocus(): void {
+    this.textInput.clearFocus();
+  }
+  /** XSetICValues(XNSpotLocation): caret moved inside the focused widget.
+   *  (window-local pixels). Overlay translates to viewport coords and
+   *  repositions itself so the OS IME candidate window stays anchored. */
+  onXimSetSpot(window: number, x: number, y: number): void {
+    this.textInput.setSpot(window, x, y);
   }
 
 

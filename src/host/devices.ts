@@ -47,6 +47,11 @@ export interface KeyEventData {
    *  document.activeElement). Worker path can pass true unconditionally
    *  since the canvas is the only interactive surface in that frame. */
   hasFocus: boolean;
+  /** Optional UTF-8 string the browser produced for this key. Plain
+   *  ASCII typing fills this from KeyboardEvent.key (length-1 char);
+   *  IME / paste / autocomplete arrive via the hidden textarea
+   *  (text-input.ts) and call pushTextKey instead. */
+  text?: string;
 }
 
 export class InputBridge {
@@ -114,6 +119,15 @@ export class InputBridge {
   setGrabCursor(cursorXid: number): void {
     this.grabCursor = cursorXid === 0 ? null : cursorXidToCss(cursorXid);
     this.refreshCanvasCursor();
+  }
+
+  /** Hidden-textarea overlay (text-input.ts) registers itself here so
+   *  the keydown path can treat focus on the overlay as equivalent to
+   *  focus on the canvas, and the synthetic-text path (pushTextKey)
+   *  knows it's safe to dispatch composed input. */
+  private overlayElement: HTMLTextAreaElement | null = null;
+  registerOverlay(el: HTMLTextAreaElement | null): void {
+    this.overlayElement = el;
   }
 
   /** Install an active pointer grab on behalf of the wasm process
@@ -209,12 +223,45 @@ export class InputBridge {
     if (focus === null) return;
     const module = this.moduleForWindow(focus);
     if (!module) return;
-    if (e.keysym === 0) return;
+    if (e.keysym === 0 && (!e.text || e.text.length === 0)) return;
+    /* Stage the typed UTF-8 (if any) so Xutf8LookupString in wasm
+     * returns it for the matching XKeyEvent. Empty string clears the
+     * slot so a KeyRelease can't inherit text from a previous KeyPress. */
+    module.ccall('emx11_set_pending_key_text', null, ['string'],
+                 [e.text ?? '']);
     module.ccall(
       'emx11_push_key_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number'],
       [xType, focus, e.keysym, e.modifiers, 0, 0],
+    );
+  }
+
+  /** Synthetic text-only KeyPress used by the hidden-textarea overlay
+   *  for IME composition results, paste, and other beforeinput sources
+   *  that don't have a useful keysym. Sends a paired KeyPress/KeyRelease
+   *  carrying the same UTF-8 bytes -- Tk's tkUnixKey.c only acts on
+   *  KeyPress, but bindings on <KeyRelease> are still legal so we keep
+   *  them paired for symmetry. */
+  pushTextKey(text: string): void {
+    if (!text) return;
+    const focus = this.explicitFocus !== null
+      ? this.explicitFocus
+      : this.focusedWindow;
+    if (focus === null) return;
+    const module = this.moduleForWindow(focus);
+    if (!module) return;
+    module.ccall('emx11_set_pending_key_text', null, ['string'], [text]);
+    module.ccall(
+      'emx11_push_key_event', null,
+      ['number', 'number', 'number', 'number', 'number', 'number'],
+      [X_KeyPress, focus, 0, 0, 0, 0],
+    );
+    module.ccall('emx11_set_pending_key_text', null, ['string'], ['']);
+    module.ccall(
+      'emx11_push_key_event', null,
+      ['number', 'number', 'number', 'number', 'number', 'number'],
+      [X_KeyRelease, focus, 0, 0, 0, 0],
     );
   }
 
@@ -471,7 +518,27 @@ export class InputBridge {
       this.pushMouseMove({ x, y, modifiers: modifiersFromEvent(e) });
     });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    el.addEventListener('mousedown', () => el.focus());
+    /* Click-to-focus. If the textarea overlay is currently armed for IME
+     * (host has called XSetICFocus on a Tk widget that wants text input),
+     * keep DOM focus on the overlay so the OS IME stays attached -- moving
+     * focus to the canvas blanks the IME and then the next click anywhere
+     * fails to bring it back (canvas isn't an editable surface). When no
+     * overlay is armed, focus the canvas as before so plain keydown
+     * routes work for non-text demos. */
+    el.addEventListener('mousedown', () => {
+      const ov = this.overlayElement;
+      if (ov && document.contains(ov) && ov.style.left !== '-9999px') {
+        try {
+          (ov.focus as (opts?: { preventScroll?: boolean }) => void)({
+            preventScroll: true,
+          });
+        } catch {
+          ov.focus();
+        }
+      } else {
+        el.focus();
+      }
+    });
 
     /* Browser → Tk clipboard staging. The C-side bridge
      * (emx11_js_clipboard_read_begin / _fetch in native/src/bridges.c) has
@@ -495,12 +562,34 @@ export class InputBridge {
     });
 
     window.addEventListener('keydown', (e) => {
-      const hasFocus = document.activeElement === el;
+      /* Focus is "ours" when the canvas OR the hidden textarea overlay
+       * holds DOM focus. The overlay is a 1px transparent textarea that
+       * the OS IME anchors candidate windows to (text-input.ts); from
+       * X's point of view we're still typing into the canvas. */
+      const active = document.activeElement;
+      const hasFocus = active === el || (this.overlayElement !== null &&
+                                         active === this.overlayElement);
+      /* Composing: KeyboardEvent during IME composition carries
+       * key='Process' / keyCode=229 / isComposing=true and contains no
+       * useful info. The composed result arrives later as a
+       * compositionend on the textarea overlay. Drop the keydown so we
+       * don't synthesise a junk KeyPress -- and DO NOT preventDefault,
+       * because Chromium/Windows treats preventDefault on a Process
+       * keydown as "client handled it" and aborts the IME composition
+       * before compositionstart can fire. */
+      if (e.isComposing || e.key === 'Process') return;
       if (hasFocus) e.preventDefault();
+      /* Single printable: carry the UTF-8 byte(s) so Xutf8LookupString
+       * returns them. event.key already reflects the keyboard layout
+       * and Shift state ('a' vs 'A'). Multi-codepoint keys (rare:
+       * "FunctionMenuItem", emoji shortcuts) drop their text -- the
+       * keysym path stays. */
+      const text = e.key.length === 1 ? e.key : '';
       const data: KeyEventData = {
         keysym: keyEventToKeysym(e),
         modifiers: modifiersFromEvent(e),
         hasFocus,
+        text,
       };
       if (hasFocus && isPasteCombo(e) && navigator.clipboard?.readText) {
         /* Defer the keydown until clipboard text is staged. Tk processes
@@ -520,12 +609,16 @@ export class InputBridge {
       this.pushKeyDown(data);
     });
     window.addEventListener('keyup', (e) => {
-      const hasFocus = document.activeElement === el;
+      const active = document.activeElement;
+      const hasFocus = active === el || (this.overlayElement !== null &&
+                                         active === this.overlayElement);
+      if (e.isComposing || e.key === 'Process') return;
       if (hasFocus) e.preventDefault();
       this.pushKeyUp({
         keysym: keyEventToKeysym(e),
         modifiers: modifiersFromEvent(e),
         hasFocus,
+        text: '',
       });
     });
   }

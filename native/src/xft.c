@@ -603,51 +603,33 @@ void XftDrawGlyphs(XftDraw *draw, _Xconst XftColor *color, XftFont *font,
 void XftDrawGlyphFontSpec(XftDraw *draw, _Xconst XftColor *color,
                           _Xconst XftGlyphFontSpec *specs, int nspec) {
     if (!draw || !specs || nspec <= 0) return;
-    /* Group consecutive specs by (font, y) and only break the run when
-     * we'd back-step. canvas.fillText is per-call so each break costs a
-     * round-trip; in tk the entire visible glyph stream typically shares
-     * a font and one y, so the run is the whole call. */
-    int i = 0;
-    while (i < nspec) {
+    /* Honor every spec's (x, y) exactly: emit one fillText per glyph.
+     *
+     * The previous implementation grouped consecutive specs into one
+     * fillText call starting at specs[i].x and let canvas advance the
+     * pen between glyphs using its own measured widths. That works only
+     * if canvas's advance per glyph matches Tk's per-glyph width to the
+     * pixel. It doesn't: Tk's widths come from `Math.ceil(measureText
+     * (ch).width)` (one ceil per char), while canvas internally uses
+     * subpixel advances. The fractional difference accumulates one extra
+     * pixel every few characters -- that's the visible "gap that grows
+     * with text" between Tk's caret position and the rendered glyphs.
+     *
+     * X11's protocol says XftDrawGlyphFontSpec places glyph G at exactly
+     * (spec.x, spec.y); the toolkit, not the renderer, decides spacing.
+     * Per-glyph emission honors that contract. fillText cost is
+     * negligible -- a typical visible run is one or two dozen calls. */
+    unsigned long fg = color ? color->pixel : 0;
+    char utf8[8];
+    for (int i = 0; i < nspec; i++) {
         XftFont *fnt = specs[i].font;
-        if (!fnt) { i++; continue; }
-        short  start_x = specs[i].x;
-        short  base_y  = specs[i].y;
-        char   small[256];
-        char  *buf  = small;
-        char  *heap = NULL;
-        int    cap  = (int)sizeof(small);
-        int    used = 0;
-        int    j = i;
-        short  next_x = start_x;
-        while (j < nspec && specs[j].font == fnt && specs[j].y == base_y) {
-            unsigned int cp = (unsigned int)specs[j].glyph;
-            /* Allow tiny back-steps from rounding (≤1px); larger jumps
-             * end the run. */
-            if (specs[j].x + 1 < next_x) break;
-            if (used + 4 >= cap) {
-                int ncap = cap * 2;
-                char *np;
-                if (heap) {
-                    np = (char *)realloc(heap, (size_t)ncap);
-                } else {
-                    np = (char *)malloc((size_t)ncap);
-                    if (np) memcpy(np, small, (size_t)used);
-                }
-                if (!np) { if (heap) free(heap); return; }
-                heap = np; buf = np; cap = ncap;
-            }
-            used += utf8_emit(cp, buf + used);
-            next_x = specs[j].x;
-            j++;
-        }
-        if (used > 0) {
-            unsigned long fg = color ? color->pixel : 0;
-            emx11_js_draw_string((Window)draw->drawable, start_x, base_y,
-                                 fnt->css, buf, used, fg, 0, 0);
-        }
-        if (heap) free(heap);
-        i = (j > i) ? j : i + 1;
+        if (!fnt) continue;
+        unsigned int cp = (unsigned int)specs[i].glyph;
+        int n = utf8_emit(cp, utf8);
+        if (n <= 0) continue;
+        emx11_js_draw_string((Window)draw->drawable,
+                             specs[i].x, specs[i].y,
+                             fnt->css, utf8, n, fg, 0, 0);
     }
 }
 
