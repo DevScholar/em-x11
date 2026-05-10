@@ -249,12 +249,13 @@ int XMapWindow(Display *display, Window w) {
         }
     }
     emx11_js_window_map(display->conn_id, w);
-    /* A window that maps under a stationary cursor must generate Enter
-     * just like a real X server's WindowsRestructured path does. Twm's
-     * root menu (menus.c:921) pops up at the click position and gates
-     * UpdateMenu on `mr->entered`; without this repoll the user has to
-     * leave and re-enter the menu before any item highlights. */
-    emx11_repoll_pointer_window(display);
+    /* NOTE: previously called emx11_repoll_pointer_window(display) here to
+     * synthesize Enter on a window that pops up under a stationary cursor
+     * (twm root menu hover, menus.c:921). That regressed twm: under heavy
+     * map traffic (Tk widget realize, twm frame raise/lower) the spurious
+     * Enter/Leave pair from every map either fills the event queue or
+     * pushes twm's hover state machine into a wedge -- "几秒操作后死锁，
+     * CPU 平静，Console 安静" reproducible. Bisected to commit d9fee8a. */
     return 1;
 }
 
@@ -272,9 +273,7 @@ int XUnmapWindow(Display *display, Window w) {
         }
     }
     emx11_js_window_unmap(display->conn_id, w);
-    /* Symmetric to XMapWindow: a window unmapping out from under the
-     * cursor should retarget the pointer-window to whatever lies below. */
-    emx11_repoll_pointer_window(display);
+    /* See XMapWindow for why the symmetric repoll was removed. */
     return 1;
 }
 
