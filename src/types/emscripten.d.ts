@@ -422,6 +422,13 @@ export interface EmX11Host {
    *  `connId`'s wasm. Subsequent button + motion events route there. */
   onGrabPointer(connId: number, window: number, ownerEvents: boolean): void;
   onUngrabPointer(): void;
+  /** Defer pointer-window repoll across one event-loop tick. C-side
+   *  XMapWindow / XUnmapWindow request this when state actually
+   *  changed; the host setTimeout(0)s a ccall back into the named
+   *  conn's `emx11_repoll_pointer_window_now` so the synthetic
+   *  crossings hit the queue only after the caller's wasm dispatch
+   *  has unwound. Coalesces bursts on the same conn. */
+  onScheduleRepoll(connId: number): void;
   /** XSetInputFocus on any module. Forwarded so press-driven focus
    *  override can stop tracking the WM frame after a click-to-raise. */
   onSetInputFocus(window: number): void;

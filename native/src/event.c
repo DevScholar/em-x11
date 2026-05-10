@@ -158,15 +158,69 @@ static Time event_now(void) {
  * "button press/release works visually but -command never fires". */
 static Window       last_pointer_window = None;
 
+/* Window-relationship classifier for crossing detail computation.
+ * Returns 1 if `descendant` is in the parent chain of `ancestor` (so
+ * `descendant` is inferior, `ancestor` is ancestor); 0 otherwise.
+ * Walks until parent==None / self / not-in-this-conn. */
+static int win_is_inferior_of(Display *dpy, Window descendant, Window ancestor) {
+    if (descendant == None || ancestor == None || descendant == ancestor) return 0;
+    EmxWindow *cur = emx11_window_find(dpy, descendant);
+    while (cur && cur->parent != None && cur->parent != cur->id) {
+        if (cur->parent == ancestor) return 1;
+        cur = emx11_window_find(dpy, cur->parent);
+    }
+    return 0;
+}
+
+/* Compute X11 crossing detail (NotifyAncestor / NotifyInferior /
+ * NotifyNonlinear) per x11protocol §10.4 for a Leave(`from`)+Enter(`to`)
+ * pair. Real X servers branch on this; twm relies on it to elide
+ * Map/Unmap-induced crossings between a frame and its hilite_w child
+ * (events.c::HandleLeaveNotify gates XUnmapWindow on
+ * `detail != NotifyInferior`). Without proper detail, twm interprets
+ * every "we mapped a child window" as "the user left the frame",
+ * unmaps the child, repoll fires the inverse pair, twm re-maps,
+ * infinite C loop wedges the tab.
+ *
+ * Returned values per X11:
+ *   pointer A→B with B inferior of A: Leave(A,Inferior), Enter(B,Ancestor)
+ *   pointer A→B with A inferior of B: Leave(A,Ancestor), Enter(B,Inferior)
+ *   otherwise (siblings / unrelated): both Nonlinear. (Virtuals on
+ *   intermediate windows are not synthesised here -- they require
+ *   per-window-on-the-path emit_crossing calls; see follow-up.) */
+static int crossing_detail(Display *dpy, int type, Window from, Window to) {
+    if (win_is_inferior_of(dpy, to, from)) {
+        return (type == LeaveNotify) ? NotifyInferior : NotifyAncestor;
+    }
+    if (win_is_inferior_of(dpy, from, to)) {
+        return (type == LeaveNotify) ? NotifyAncestor : NotifyInferior;
+    }
+    return NotifyNonlinear;
+}
+
 /* Push an EnterNotify / LeaveNotify on `w`, iff the window selects for that
  * mask. Coords are root-relative; we derive window-local ones from the
- * window's absolute origin. */
-static void emit_crossing(Display *dpy, int type, Window w,
+ * window's absolute origin. `peer` is the other end of the crossing
+ * (the window the pointer is leaving from on EnterNotify, the window
+ * it's entering on LeaveNotify) -- used to compute xcrossing.detail. */
+static void emit_crossing(Display *dpy, int type, Window w, Window peer,
                           int x_root, int y_root, unsigned int state) {
     EmxWindow *win = emx11_window_find(dpy, w);
+    bool found = (win != NULL);
+    bool mask_ok = found && (win->event_mask & ((type == EnterNotify) ? EnterWindowMask : LeaveWindowMask));
+    EM_ASM({
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d._traceBuf) {
+            d._traceBuf.push([performance.now(), 'cross', $0, $1, $2, $3, $4]);
+        }
+    }, dpy->conn_id, type, w, found ? 1 : 0, mask_ok ? 1 : 0);
     if (!win) return;
     long mask = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
     if (!(win->event_mask & mask)) return;
+
+    Window from = (type == LeaveNotify) ? w    : peer;
+    Window to   = (type == LeaveNotify) ? peer : w;
+    int detail  = crossing_detail(dpy, type, from, to);
 
     int ax = 0, ay = 0, depth;
     window_abs_origin(dpy, win, &ax, &ay, &depth);
@@ -182,7 +236,7 @@ static void emit_crossing(Display *dpy, int type, Window w,
     ev.xcrossing.x_root      = x_root;
     ev.xcrossing.y_root      = y_root;
     ev.xcrossing.mode        = NotifyNormal;
-    ev.xcrossing.detail      = NotifyNonlinear;
+    ev.xcrossing.detail      = detail;
     ev.xcrossing.same_screen = True;
     ev.xcrossing.focus       = (w == dpy->focus_window);
     ev.xcrossing.state       = state;
@@ -199,12 +253,13 @@ static void emit_crossing(Display *dpy, int type, Window w,
 static void update_pointer_window(Display *dpy, Window cur,
                                   int x_root, int y_root, unsigned int state) {
     if (cur == last_pointer_window) return;
-    if (last_pointer_window != None) {
-        emit_crossing(dpy, LeaveNotify, last_pointer_window,
+    Window prev = last_pointer_window;
+    if (prev != None) {
+        emit_crossing(dpy, LeaveNotify, prev, cur,
                       x_root, y_root, state);
     }
     if (cur != None) {
-        emit_crossing(dpy, EnterNotify, cur, x_root, y_root, state);
+        emit_crossing(dpy, EnterNotify, cur, prev, x_root, y_root, state);
     }
     last_pointer_window = cur;
 }
@@ -230,6 +285,13 @@ void emx11_repoll_pointer_window(Display *dpy) {
     int lx = 0, ly = 0;
     EmxWindow *cur = hit_test(dpy, px, py, 0, &lx, &ly);
     Window cur_id = cur ? cur->id : None;
+    EM_ASM({
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d._traceBuf) {
+            d._traceBuf.push([performance.now(), 'repoll', $0, $1, $2, $3, $4, $5]);
+        }
+    }, dpy->conn_id, px, py, cur_id, last_pointer_window,
+       (int)emx11_event_queue_size(dpy));
     update_pointer_window(dpy, cur_id, px, py, 0);
 }
 

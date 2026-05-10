@@ -41,6 +41,13 @@
 
 #include <emscripten.h>
 
+/* Forward declarations for the two non-EM_JS entries this TU exports.
+ * Pulling in emx11_internal.h would conflict with the looser
+ * `unsigned int` parameter types EM_JS uses below. */
+typedef struct _XDisplay Display;
+Display *emx11_get_display(void);
+void emx11_repoll_pointer_window(Display *dpy);
+
 /* Link anchor: this TU only contains EM_JS data symbols, which the
  * archive linker drops unless a real ref pulls the .o in. display.c
  * calls this function so emcc's post-link pass sees the JS bodies. */
@@ -227,6 +234,38 @@ EM_JS(void, emx11_js_ungrab_pointer, (void), {
     var e = globalThis.emX11; var h = e && e._bridge;
     if (h) h.onUngrabPointer();
 });
+
+/* --- deferred pointer-window repoll (XMapWindow / XUnmapWindow) ----------
+ *
+ * X protocol semantics: a state-changing map or unmap that alters the
+ * topmost window under the sprite must synthesise crossing events
+ * (xserver/dix/window.c::WindowsRestructured). Doing this synchronously
+ * inside XMapWindow's call stack -- as the immediate-mode repoll
+ * implementation did -- pushes the new crossings onto the *calling
+ * client's* event queue while it is still mid-dispatch on the original
+ * Enter/Leave that motivated the map. Twm's HandleEnterNotify maps
+ * hilite_w on entering a frame; the synchronous repoll then queues a
+ * Leave/Enter pair that twm processes inside its own next dooneevent
+ * iteration with no yield to JS. Under the right cursor geometry this
+ * self-amplifies into a tab-wedging tight loop (xeyes-frame-first 50%
+ * repro).
+ *
+ * The fix is structural: defer the repoll across a JS event-loop tick.
+ * XMapWindow / XUnmapWindow request a repoll, the bridge schedules it
+ * via setTimeout(0), and the actual emit_crossing run only fires after
+ * twm has finished dispatching its current event and yielded back to
+ * the browser via emscripten_sleep. Per-conn coalescing collapses
+ * burst maps (Tk widget realize) into one repoll.                          */
+EM_JS(void, emx11_js_schedule_repoll, (unsigned int conn_id), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h) h.onScheduleRepoll(conn_id >>> 0);
+});
+
+EMSCRIPTEN_KEEPALIVE
+void emx11_repoll_pointer_window_now(void) {
+    Display *dpy = emx11_get_display();
+    if (dpy) emx11_repoll_pointer_window(dpy);
+}
 
 /* --- input focus (XSetInputFocus) ---------------------------------------- *
  *

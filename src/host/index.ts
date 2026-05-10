@@ -336,6 +336,32 @@ export class Host implements EmX11Host {
     this.devices.clearActivePointerGrab();
   }
 
+  /** Defer-and-coalesce pointer-window repoll, scheduled by C-side
+   *  XMapWindow / XUnmapWindow on state change. Bouncing through a
+   *  setTimeout(0) breaks the synchronous map → crossing → handle →
+   *  map chain that wedged twm: the actual repoll runs only after the
+   *  caller's wasm dispatch has returned to its mainloop and yielded
+   *  via emscripten_sleep, so any twm logic chained off the new
+   *  crossing happens on a fresh dispatch tick. Per-conn coalescing
+   *  collapses a Tk widget-realize burst (N maps in one frame) into a
+   *  single repoll. */
+  private repollScheduled = new Set<number>();
+  onScheduleRepoll(connId: number): void {
+    if (this.repollScheduled.has(connId)) return;
+    this.repollScheduled.add(connId);
+    setTimeout(() => {
+      this.repollScheduled.delete(connId);
+      const conn = this.connection.get(connId);
+      const mod = conn?.module;
+      if (!mod) return;
+      try {
+        mod.ccall('emx11_repoll_pointer_window_now', null, [], []);
+      } catch {
+        /* swallow: a torn-down conn is benign here */
+      }
+    }, 0);
+  }
+
   /** XSetInputFocus from any module. The WM uses this to hand keyboard
    *  control off to a client whose own window did NOT subscribe to
    *  ButtonPressMask -- without this, our press-driven focus tracker

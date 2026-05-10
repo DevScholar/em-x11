@@ -225,10 +225,12 @@ int XMapWindow(Display *display, Window w) {
      * behaviour around HandleMapNotify line 1387's XUnmapWindow on
      * hilite_w (never mapped -> no event) and the iconmgr setup paths. */
     EmxWindow *win = emx11_window_find(display, w);
+    bool state_changed = false;
     if (win) {
         bool was_mapped = win->mapped;
         win->mapped = true;
-        if (!was_mapped) {
+        state_changed = !was_mapped;
+        if (state_changed) {
             display->request++;  /* match Tk's NextRequest() — see notify_js_reconfigure */
             push_map_notify(display, win, true);
         }
@@ -242,20 +244,29 @@ int XMapWindow(Display *display, Window w) {
          * cursors never blink and keys never route. Auto-focus the
          * first root-child wrapper to map, mirroring the "no WM,
          * server auto-focuses override-redirect window" path in real X. */
-        if (!was_mapped &&
+        if (state_changed &&
             win->parent == display->screens[0].root &&
             display->focus_window == None) {
             XSetInputFocus(display, w, RevertToParent, CurrentTime);
         }
     }
+    /* Real X server's WindowsRestructured (xserver/dix/window.c::MapWindow)
+     * only signals downstream observers when the map state actually
+     * changed. Mapping an already-mapped window is a no-op. We must mirror
+     * that: without the gate, twm's HandleEnterNotify (events.c:2068)
+     * re-issues XMapWindow(hilite_w) on every frame Enter (including the
+     * NotifyInferior re-entry from a child) and we'd schedule a repoll
+     * for nothing. The JS-side callback is left ungated -- host's
+     * renderer.mapWindow is already a no-op for already-mapped windows. */
     emx11_js_window_map(display->conn_id, w);
-    /* NOTE: previously called emx11_repoll_pointer_window(display) here to
-     * synthesize Enter on a window that pops up under a stationary cursor
-     * (twm root menu hover, menus.c:921). That regressed twm: under heavy
-     * map traffic (Tk widget realize, twm frame raise/lower) the spurious
-     * Enter/Leave pair from every map either fills the event queue or
-     * pushes twm's hover state machine into a wedge -- "几秒操作后死锁，
-     * CPU 平静，Console 安静" reproducible. Bisected to commit d9fee8a. */
+    if (state_changed) {
+        /* Defer the repoll across a JS event-loop tick rather than
+         * pushing crossings into the caller's queue synchronously.
+         * See bridges.c::emx11_js_schedule_repoll for the rationale --
+         * synchronous repoll wedged twm under self-amplifying
+         * map → crossing → handle → map chains (xeyes title-bar 50%). */
+        emx11_js_schedule_repoll(display->conn_id);
+    }
     return 1;
 }
 
@@ -264,16 +275,20 @@ int XUnmapWindow(Display *display, Window w) {
      * unmapped windows; we have to do the same or twm's destructor path
      * fires on phantom UnmapNotifies for never-mapped windows. */
     EmxWindow *win = emx11_window_find(display, w);
+    bool state_changed = false;
     if (win) {
         bool was_mapped = win->mapped;
         win->mapped = false;
-        if (was_mapped) {
+        state_changed = was_mapped;
+        if (state_changed) {
             display->request++;
             push_map_notify(display, win, false);
         }
     }
     emx11_js_window_unmap(display->conn_id, w);
-    /* See XMapWindow for why the symmetric repoll was removed. */
+    if (state_changed) {
+        emx11_js_schedule_repoll(display->conn_id);
+    }
     return 1;
 }
 
