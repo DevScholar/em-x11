@@ -47,6 +47,7 @@
 typedef struct _XDisplay Display;
 Display *emx11_get_display(void);
 void emx11_repoll_pointer_window(Display *dpy);
+void emx11_repoll_pointer_window_hint(Display *dpy, unsigned long cur_hint);
 
 /* Link anchor: this TU only contains EM_JS data symbols, which the
  * archive linker drops unless a real ref pulls the .o in. display.c
@@ -265,6 +266,12 @@ EMSCRIPTEN_KEEPALIVE
 void emx11_repoll_pointer_window_now(void) {
     Display *dpy = emx11_get_display();
     if (dpy) emx11_repoll_pointer_window(dpy);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void emx11_repoll_pointer_window_hint_now(unsigned long cur_hint) {
+    Display *dpy = emx11_get_display();
+    if (dpy) emx11_repoll_pointer_window_hint(dpy, cur_hint);
 }
 
 /* --- input focus (XSetInputFocus) ---------------------------------------- *

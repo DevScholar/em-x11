@@ -338,28 +338,51 @@ export class Host implements EmX11Host {
 
   /** Defer-and-coalesce pointer-window repoll, scheduled by C-side
    *  XMapWindow / XUnmapWindow on state change. Bouncing through a
-   *  setTimeout(0) breaks the synchronous map → crossing → handle →
-   *  map chain that wedged twm: the actual repoll runs only after the
-   *  caller's wasm dispatch has returned to its mainloop and yielded
-   *  via emscripten_sleep, so any twm logic chained off the new
-   *  crossing happens on a fresh dispatch tick. Per-conn coalescing
-   *  collapses a Tk widget-realize burst (N maps in one frame) into a
-   *  single repoll. */
+   *  microtask breaks the synchronous map → crossing → handle → map
+   *  chain that wedged twm: the actual repoll runs only after the
+   *  caller's wasm dispatch has unwound, so any logic chained off the
+   *  new crossing happens on a fresh dispatch frame. Microtask (vs
+   *  setTimeout(0)) fires before the next macrotask -- sooner than
+   *  browser-clamped setTimeout minimum -- so twm's menu pop-up case
+   *  (XMapWindow(menu) immediately followed by entering the menu loop
+   *  that gates UpdateMenu on `mr->entered`) still gets its EnterNotify
+   *  before the first UpdateMenu pass. Per-conn coalescing collapses a
+   *  Tk widget-realize burst (N maps in one frame) into a single repoll.
+   *
+   *  We resolve the window-under-pointer here on the host side and pass
+   *  it as a hint to the C side, instead of letting C re-run hit-test
+   *  via dpy->windows[]. The C-side hit_test in event.c walks by tree
+   *  depth + first-found and ignores stack order, so it picks the wrong
+   *  sibling when twm raises a decoration above its primary window
+   *  (root menu's shadow is XRaiseWindow'd before menu->w is mapped:
+   *  shadow created earlier → first-found returns shadow even though
+   *  host's stack-order-aware findWindowAt correctly puts menu on top).
+   *  emit_crossing's mask check then drops the Enter on shadow because
+   *  shadow doesn't select EnterWindowMask, twm's ActiveMenu->entered
+   *  never flips, UpdateMenu's gate at menus.c:512 spins, no item ever
+   *  highlights. Trusting the host's hit-test closes the gap. */
   private repollScheduled = new Set<number>();
   onScheduleRepoll(connId: number): void {
     if (this.repollScheduled.has(connId)) return;
     this.repollScheduled.add(connId);
-    setTimeout(() => {
+    queueMicrotask(() => {
       this.repollScheduled.delete(connId);
       const conn = this.connection.get(connId);
       const mod = conn?.module;
       if (!mod) return;
+      const { x, y } = this.devices.getPointerXY();
+      const cur = this.renderer.findWindowAt(x, y) ?? 0;
       try {
-        mod.ccall('emx11_repoll_pointer_window_now', null, [], []);
+        mod.ccall(
+          'emx11_repoll_pointer_window_hint_now',
+          null,
+          ['number'],
+          [cur],
+        );
       } catch {
         /* swallow: a torn-down conn is benign here */
       }
-    }, 0);
+    });
   }
 
   /** XSetInputFocus from any module. The WM uses this to hand keyboard

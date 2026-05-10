@@ -208,11 +208,21 @@ export class InputBridge {
       );
     }
     if (!module) return;
+    /* XMotionEvent.x/y are window-local; .x_root/.y_root are screen-
+     * absolute. Translate canvas pixels into the delivery window's coord
+     * system the same way deliverButton does -- without this twm's
+     * UpdateMenu (which uses event.y / EntryHeight to pick the hovered
+     * item) sees absolute pixels and never matches any item, so the menu
+     * pops up but never highlights. */
+    const target = win ?? 0;
+    const origin = target !== 0 ? this.host.getWindowAbsOrigin(target) : null;
+    const lx = origin ? e.x - origin.ax : e.x;
+    const ly = origin ? e.y - origin.ay : e.y;
     module.ccall(
       'emx11_push_motion_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number'],
-      [win ?? 0, e.x, e.y, e.x, e.y, e.modifiers],
+      [target, lx, ly, e.x, e.y, e.modifiers],
     );
   }
 

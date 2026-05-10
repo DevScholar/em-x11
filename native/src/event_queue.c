@@ -7,28 +7,14 @@
 
 #include "emx11_internal.h"
 
-#include <emscripten.h>
-
 bool emx11_event_queue_push(Display *dpy, const XEvent *event) {
     unsigned int next_tail = (dpy->event_tail + 1) % EMX11_EVENT_QUEUE_CAPACITY;
     if (next_tail == dpy->event_head) {
-        EM_ASM({
-            var d = globalThis.emX11 && globalThis.emX11._debug;
-            if (d && d._traceBuf) {
-                d._traceBuf.push([performance.now(), 'qfull', $0, $1]);
-            }
-        }, dpy->conn_id, event->type);
         return false;
     }
     dpy->event_queue[dpy->event_tail] = *event;
     dpy->event_tail = next_tail;
     dpy->qlen = (int)emx11_event_queue_size(dpy);
-    EM_ASM({
-        var d = globalThis.emX11 && globalThis.emX11._debug;
-        if (d && d._traceBuf) {
-            d._traceBuf.push([performance.now(), 'qpush', $0, $1, $2]);
-        }
-    }, dpy->conn_id, event->type, dpy->qlen);
     return true;
 }
 
@@ -45,12 +31,6 @@ bool emx11_event_queue_pop(Display *dpy, XEvent *out) {
     }
     dpy->event_head = (dpy->event_head + 1) % EMX11_EVENT_QUEUE_CAPACITY;
     dpy->qlen = (int)emx11_event_queue_size(dpy);
-    EM_ASM({
-        var d = globalThis.emX11 && globalThis.emX11._debug;
-        if (d && d._traceBuf) {
-            d._traceBuf.push([performance.now(), 'qpop', $0, $1, $2]);
-        }
-    }, dpy->conn_id, out->type, dpy->qlen);
     return true;
 }
 

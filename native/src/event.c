@@ -206,14 +206,6 @@ static int crossing_detail(Display *dpy, int type, Window from, Window to) {
 static void emit_crossing(Display *dpy, int type, Window w, Window peer,
                           int x_root, int y_root, unsigned int state) {
     EmxWindow *win = emx11_window_find(dpy, w);
-    bool found = (win != NULL);
-    bool mask_ok = found && (win->event_mask & ((type == EnterNotify) ? EnterWindowMask : LeaveWindowMask));
-    EM_ASM({
-        var d = globalThis.emX11 && globalThis.emX11._debug;
-        if (d && d._traceBuf) {
-            d._traceBuf.push([performance.now(), 'cross', $0, $1, $2, $3, $4]);
-        }
-    }, dpy->conn_id, type, w, found ? 1 : 0, mask_ok ? 1 : 0);
     if (!win) return;
     long mask = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
     if (!(win->event_mask & mask)) return;
@@ -285,14 +277,24 @@ void emx11_repoll_pointer_window(Display *dpy) {
     int lx = 0, ly = 0;
     EmxWindow *cur = hit_test(dpy, px, py, 0, &lx, &ly);
     Window cur_id = cur ? cur->id : None;
-    EM_ASM({
-        var d = globalThis.emX11 && globalThis.emX11._debug;
-        if (d && d._traceBuf) {
-            d._traceBuf.push([performance.now(), 'repoll', $0, $1, $2, $3, $4, $5]);
-        }
-    }, dpy->conn_id, px, py, cur_id, last_pointer_window,
-       (int)emx11_event_queue_size(dpy));
     update_pointer_window(dpy, cur_id, px, py, 0);
+}
+
+/* Variant called from the host's deferred-repoll path with a cur_id the
+ * host already resolved via its (stacking-aware) findWindowAt. The C-side
+ * hit_test in this file walks dpy->windows[] by tree-depth + first-found,
+ * which gives wrong answers for sibling top-levels whose stack order was
+ * changed (twm root menu's shadow XRaiseWindow'd before the menu itself
+ * is mapped: shadow created first → first-found returns shadow, but host's
+ * stackOrder correctly puts menu on top). Trusting the host avoids that
+ * divergence. cur_hint may name a window owned by another connection or
+ * may be 0 (None); both are valid -- emit_crossing's mask check handles
+ * the foreign / unowned cases by no-op'ing. */
+void emx11_repoll_pointer_window_hint(Display *dpy, Window cur_hint) {
+    if (!dpy) return;
+    int px = 0, py = 0;
+    emx11_js_pointer_xy(&px, &py);
+    update_pointer_window(dpy, cur_hint, px, py, 0);
 }
 
 EMSCRIPTEN_KEEPALIVE
