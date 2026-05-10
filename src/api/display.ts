@@ -29,6 +29,7 @@ export class DisplayNamespace implements EmX11Display {
     keyUp: (e: InjectKeyEvent) =>
       this.host.devices.pushKeyUp({ ...e, hasFocus: e.hasFocus ?? true }),
     setPointer: (x: number, y: number) => this.host.devices.setPointer(x, y),
+    textKey: (text: string) => this.host.devices.pushTextKey(text),
   };
 
   get canvas(): HTMLCanvasElement | OffscreenCanvas {

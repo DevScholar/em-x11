@@ -77,6 +77,14 @@ export class EmX11 {
     this._host = new Host(hostOptions);
     this._host.attachToBridge();
 
+    /* Worker-mode hosts plug a remote in here so XSetICFocus /
+     * Tk_SetCaretPos cross over to a DOM textarea on the main thread.
+     * Direct (DOM-side) hosts leave this null and TextInputOverlay
+     * uses its own textarea. */
+    if (options.textInputRemote) {
+      this._host.textInput.setRemote(options.textInputRemote);
+    }
+
     this._fs = new FSNamespace();
     this.fs = this._fs;
     this.display = new DisplayNamespace(this._host);

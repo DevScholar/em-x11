@@ -44,23 +44,60 @@ export interface Connection {
   ownedWindows: Set<number>;
 }
 
+/** Subset of the Pyodide main Module used to marshal `string` arguments
+ *  into wasm memory before calling a side-module export. Side-module
+ *  exports are bare wasm functions: emcc's cwrap string handling lives
+ *  on the main Module, not on the side module, so callers that want to
+ *  pass strings have to alloc + UTF-8-encode + free themselves. */
+export interface SideModuleStringMarshaller {
+  _malloc(size: number): number;
+  _free(ptr: number): void;
+  stringToUTF8(str: string, ptr: number, max: number): void;
+  lengthBytesUTF8(str: string): number;
+}
+
 /** Build a ModuleCcallSurface from a Pyodide-loaded side module's
  *  exports (typically `pyodide._module.LDSO.loadedLibsByName[soPath].exports`).
- *  The host's ccalls are all numbers-in / void-or-number-out, so we
- *  just call the export with the args and return the value; no string
- *  marshalling needed. */
+ *  Numeric / pointer args pass through directly. `string` argTypes are
+ *  marshalled via `marshaller`'s _malloc + stringToUTF8 (and freed
+ *  after the call). Without this, the JS string would be coerced to
+ *  NaN/0 by the wasm function entry, silently dropping the bytes
+ *  (e.g. emx11_set_pending_key_text getting NULL on every keypress). */
 export function makeSideModuleSurface(
   exports: Record<string, (...args: unknown[]) => unknown>,
+  marshaller?: SideModuleStringMarshaller,
 ): ModuleCcallSurface {
   return {
-    ccall(name, _ret, _argTypes, args) {
+    ccall(name, _ret, argTypes, args) {
       const fn = exports[name];
       if (typeof fn !== 'function') {
         throw new Error(
           `em-x11: side-module export '${name}' not found (have ${Object.keys(exports).filter((k) => k.startsWith('emx11')).join(', ')})`,
         );
       }
-      return fn(...args);
+      const allocated: number[] = [];
+      const marshalled = args.map((arg, i) => {
+        if (argTypes[i] !== 'string') return arg;
+        if (arg === null || arg === undefined) return 0;
+        if (!marshaller) {
+          throw new Error(
+            `em-x11: side-module ccall '${name}' has string arg but no marshaller was supplied to makeSideModuleSurface`,
+          );
+        }
+        const s = String(arg);
+        const len = marshaller.lengthBytesUTF8(s) + 1;
+        const ptr = marshaller._malloc(len);
+        marshaller.stringToUTF8(s, ptr, len);
+        allocated.push(ptr);
+        return ptr;
+      });
+      try {
+        return fn(...marshalled);
+      } finally {
+        if (marshaller) {
+          for (const ptr of allocated) marshaller._free(ptr);
+        }
+      }
     },
   };
 }

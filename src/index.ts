@@ -38,4 +38,13 @@ export type {
   Process,
   ProcessFS,
   SpawnOptions,
+  TextInputRemoteHandle,
 } from './api/types.js';
+
+export {
+  createDomTextInputBridge,
+} from './host/text-input.js';
+export type {
+  DomTextInputBridge,
+  DomTextInputBridgeOptions,
+} from './host/text-input.js';

@@ -51,6 +51,31 @@ export interface CreateEmX11Options {
    *  Cache lives under the name `em-x11-loader-v1`. Manual reset:
    *  `await caches.delete('em-x11-loader-v1')` from DevTools. */
   loaderCache?: 'use' | 'bypass' | 'refresh';
+  /** Plug a transport into the XIM textarea overlay. Set this in
+   *  worker-mode hosts (pyodide-tk) so XSetICFocus / Tk_SetCaretPos
+   *  reach a DOM textarea on the main thread. The host computes
+   *  window-tree absolute caret pixels and passes them to
+   *  `positionHint` so the remote can position the textarea without
+   *  shadowing the X window tree.
+   *
+   *  Pair with `createDomTextInputBridge` on the main thread. Leave
+   *  unset for the in-process path -- TextInputOverlay then creates
+   *  its own textarea automatically. */
+  textInputRemote?: TextInputRemoteHandle;
+}
+
+/** Worker-side handle the host calls when XSetICFocus / Tk_SetCaretPos
+ *  fires. The implementation typically posts a message to the main
+ *  thread, where createDomTextInputBridge applies it to a real
+ *  textarea. */
+export interface TextInputRemoteHandle {
+  setFocus(window: number): void;
+  clearFocus(): void;
+  setSpot(window: number, x: number, y: number): void;
+  /** Root-relative absolute caret pixel position computed by the host.
+   *  The remote uses this to position its textarea so the OS IME
+   *  candidate window anchors near the X widget caret. */
+  positionHint(absX: number, absY: number): void;
 }
 
 /* -- fs ------------------------------------------------------------------ */
@@ -99,6 +124,12 @@ export interface InjectKeyEvent {
   keysym: number;
   modifiers: number;
   hasFocus?: boolean;
+  /** UTF-8 string the browser produced for this key. Plain ASCII typing
+   *  fills this from KeyboardEvent.key (length-1 char); non-printable
+   *  keys, modifiers, and IME 'Process' events leave it empty.
+   *  Forwarded into emx11_set_pending_key_text so Xutf8LookupString
+   *  returns the typed bytes for Tk's tkUnixKey.c handler. */
+  text?: string;
 }
 
 export interface EmX11Display {
@@ -121,6 +152,11 @@ export interface EmX11Display {
     keyDown(e: InjectKeyEvent): void;
     keyUp(e: InjectKeyEvent): void;
     setPointer(x: number, y: number): void;
+    /** Synthetic text-only KeyPress, paired with a KeyRelease. Used
+     *  for IME composition results and clipboard paste -- anything
+     *  carrying text but no useful keysym. Worker-mode hosts forward
+     *  composition results from the main-thread textarea bridge here. */
+    textKey(text: string): void;
   };
 }
 
