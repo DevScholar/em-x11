@@ -22,25 +22,20 @@
  *     stores native Response objects (zero ser/de), and is tightly
  *     scoped to the URLs we fetch ourselves.
  *
- * Invalidation: the cache name embeds a version (`em-x11-loader-v1`).
- * Bumping the version constant orphans every old cache; a one-shot
- * `cleanupOldCaches()` at boot deletes them. For deploy-time content
+ * Invalidation: the cache name is a single constant (`em-x11-loader`).
+ * Editing it orphans every old cache; a one-shot `cleanupOldCaches()`
+ * at boot deletes any stale `em-x11-loader-*` siblings. For deploy-time
+ * content
  * changes under stable URLs, callers pass `'refresh'` to force a
  * write-through. For dev-mode iteration, the default mode is
  * `'bypass'` (set by EmX11 from `import.meta.env.DEV`).
  */
 
-/** Cache name. Bump the suffix when the loader's stored representation
- *  changes shape, OR when an earlier release shipped with a bug that
- *  could have populated the cache with bad bytes. cleanupOldCaches()
- *  purges any older `em-x11-loader-` prefixed cache it finds.
- *
- *  v1 → v2 bump rationale (2026-05-07): pre-v2 the assertResponseOk
- *  guard didn't exist, so a `vite preview` against a `dist/` that
- *  lacked `build/artifacts/` could cache the SPA fallback HTML under
- *  the artifact URLs. v2 starts clean; cleanupOldCaches deletes any
- *  v1 still on disk. */
-export const LOADER_CACHE_NAME = 'em-x11-loader-v2';
+/** Cache name. Pre-alpha — no versioning yet. cleanupOldCaches() purges
+ *  any older `em-x11-loader-` prefixed cache that doesn't match this
+ *  exact name, so re-introducing a suffix later (or one-off invalidation
+ *  for a poisoned-cache bug) is just a string edit. */
+export const LOADER_CACHE_NAME = 'em-x11-loader';
 
 /** Cache lookup behaviour.
  *  - `'use'`     — cache-first; fetch + populate on miss.

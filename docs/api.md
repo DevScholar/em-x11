@@ -241,7 +241,7 @@ Without an adapter `emX11.dlopen()` throws.
 on the second visit those bytes don't have to come from the network.
 em-x11 routes both fetches through the
 [Cache Storage API](https://developer.mozilla.org/docs/Web/API/Cache),
-keyed by URL, under the cache name `em-x11-loader-v1`.
+keyed by URL, under the cache name `em-x11-loader`.
 
 | Mode      | Behaviour |
 |-----------|-----------|
@@ -249,12 +249,13 @@ keyed by URL, under the cache name `em-x11-loader-v1`.
 | `'bypass'`  | Skip Cache Storage; plain `fetch`. **Default in Vite dev mode** (`import.meta.env.DEV`) so artifact rebuilds are picked up immediately. |
 | `'refresh'` | Force a fresh fetch and overwrite the cache entry. Use after deploying new artifacts. |
 
-The cache name is versioned (`-v1`); when em-x11 bumps the loader
-ABI the version changes and stale caches from older releases are
-deleted at boot. Manual invalidation is one DevTools line:
+Pre-alpha: the cache name is a single constant. When it eventually
+needs a suffix (loader ABI bump, or a one-off poisoned-cache flush),
+`cleanupOldCaches()` purges any stale `em-x11-loader-*` siblings at
+boot. Manual invalidation is one DevTools line:
 
 ```js
-await caches.delete('em-x11-loader-v1');
+await caches.delete('em-x11-loader');
 ```
 
 If `globalThis.caches` is unavailable (Cache Storage requires a

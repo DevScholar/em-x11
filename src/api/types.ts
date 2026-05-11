@@ -48,8 +48,8 @@ export interface CreateEmX11Options {
    *  - `'bypass'`  — never touch Cache Storage; plain fetch
    *  - `'refresh'` — force a fetch and overwrite the cache entry
    *
-   *  Cache lives under the name `em-x11-loader-v1`. Manual reset:
-   *  `await caches.delete('em-x11-loader-v1')` from DevTools. */
+   *  Cache lives under the name `em-x11-loader`. Manual reset:
+   *  `await caches.delete('em-x11-loader')` from DevTools. */
   loaderCache?: 'use' | 'bypass' | 'refresh';
   /** Plug a transport into the XIM textarea overlay. Set this in
    *  worker-mode hosts (pyodide-tk) so XSetICFocus / Tk_SetCaretPos
