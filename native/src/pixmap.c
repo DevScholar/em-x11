@@ -51,6 +51,14 @@ Pixmap XCreatePixmap(Display *dpy, Drawable d, unsigned int width,
                      unsigned int height, unsigned int depth) {
     (void)d;
     if (width == 0 || height == 0) return None;
+    /* Mirror the host-side OffscreenCanvas cap (src/host/gc.ts:
+     * MAX_PIXMAP_EDGE = 4096). Without this gate the C struct still
+     * gets refcount=1 and a valid id, but the JS side silently refuses
+     * to allocate the canvas -- subsequent XCopyArea / XCopyPlane to
+     * that id no-op with no error path back to the caller. Fail in C
+     * so XFillRectangle on a None Drawable is the only downstream
+     * symptom the caller has to handle. */
+    if (width > 4096 || height > 4096) return None;
     EmxPixmap *p = calloc(1, sizeof(*p));
     if (!p) return None;
     /* Use the per-conn xid allocator (same as XCreateWindow) so pixmap

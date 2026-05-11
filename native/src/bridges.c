@@ -621,16 +621,30 @@ EM_JS(void, emx11_js_get_property_meta, (unsigned int w, unsigned int atom, unsi
     HEAP32[base + 5] = r2.data.length | 0;
     /* Stash the data for an immediate-following get_property_data call
      * (cheap two-hop avoids re-fetch). Lives under emX11._caches with
-     * the rest of the bridge-owned scratch state. */
+     * the rest of the bridge-owned scratch state. Key by (w, atom, reqType,
+     * longOffset, longLength) so a re-entrant peekProperty (e.g. via
+     * internAtom or another bridge that runs between the meta and the data
+     * call) can't smuggle a different property's bytes into our reply. */
     var caches2 = e._caches || (e._caches = {});
-    caches2.propStash = r2.data;
+    caches2.propStash = {
+        w: w >>> 0, atom: atom >>> 0, reqType: reqType >>> 0,
+        longOffset: longOffset | 0, longLength: longLength | 0,
+        data: r2.data,
+    };
 });
 
 EM_JS(void, emx11_js_get_property_data, (unsigned int w, unsigned int atom, unsigned int reqType, int longOffset, int longLength, int deleteFlag, int dstPtr, int capacity), {
     var e0 = globalThis.emX11;
     var caches0 = e0 && e0._caches;
-    var data = caches0 ? caches0.propStash : null;
+    var stash = caches0 ? caches0.propStash : null;
     if (caches0) caches0.propStash = null;
+    var data = (stash &&
+                stash.w === (w >>> 0) &&
+                stash.atom === (atom >>> 0) &&
+                stash.reqType === (reqType >>> 0) &&
+                stash.longOffset === (longOffset | 0) &&
+                stash.longLength === (longLength | 0))
+        ? stash.data : null;
     if (data && data.length > 0) {
         /* Use cached from preceding PeekMeta. */
         var n = Math.min(data.length, capacity | 0);
@@ -641,7 +655,7 @@ EM_JS(void, emx11_js_get_property_data, (unsigned int w, unsigned int atom, unsi
         }
         return;
     }
-    var e = globalThis.emX11; var Host2 = e && e._bridge;
+    var e2 = globalThis.emX11; var Host2 = e2 && e2._bridge;
     if (!Host2) return;
     var r3 = Host2.peekProperty(w >>> 0, atom >>> 0, reqType >>> 0,
                                 longOffset | 0, longLength | 0, deleteFlag !== 0);

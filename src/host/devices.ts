@@ -86,6 +86,14 @@ export class InputBridge {
   private activePointerGrab:
     | { window: number; module: ModuleCcallSurface }
     | null = null;
+  /** DOM listeners attached by attachDom(), recorded so dispose() can
+   *  remove them. Without this, recreating a Host (HMR, multi-canvas
+   *  test harness) leaks the previous Host through closure refs. */
+  private domListeners: Array<{
+    target: EventTarget;
+    type: string;
+    handler: EventListener;
+  }> = [];
 
   constructor(private readonly host: Host) {
     /* Default the pointer to the canvas centre so the first XQueryPointer
@@ -500,6 +508,10 @@ export class InputBridge {
 
   private attachDom(): void {
     const el = this.host.canvas.element;
+    const on = <K extends EventTarget>(target: K, type: string, handler: EventListener): void => {
+      target.addEventListener(type, handler);
+      this.domListeners.push({ target, type, handler });
+    };
 
     /* Track the last-seen pointer position at the host level so polling
      * callers (XQueryPointer; xeyes uses this every 50ms via an Xt timer)
@@ -508,26 +520,30 @@ export class InputBridge {
      * outside the canvas (over browser chrome, over another page region)
      * still updates the cached position -- pupils that track the mouse
      * off-canvas look better than pupils that freeze on exit. */
-    window.addEventListener('mousemove', (e) => {
+    on(window, 'mousemove', (ev) => {
+      const e = ev as MouseEvent;
       const rect = el.getBoundingClientRect();
       this.setPointer(e.clientX - rect.left, e.clientY - rect.top);
     });
 
-    el.addEventListener('mousedown', (e) => {
+    on(el, 'mousedown', (ev) => {
+      const e = ev as MouseEvent;
       const { x, y } = this.cssPoint(e, el);
       this.pushMouseDown({ x, y, button: e.button + 1, modifiers: modifiersFromEvent(e) });
     });
     // Listen on window so a ButtonRelease outside the canvas (pointer moved
     // off during a drag) still reaches the grab window via the C-side grab.
-    window.addEventListener('mouseup', (e) => {
+    on(window, 'mouseup', (ev) => {
+      const e = ev as MouseEvent;
       const { x, y } = this.cssPoint(e, el);
       this.pushMouseUp({ x, y, button: e.button + 1, modifiers: modifiersFromEvent(e) });
     });
-    el.addEventListener('mousemove', (e) => {
+    on(el, 'mousemove', (ev) => {
+      const e = ev as MouseEvent;
       const { x, y } = this.cssPoint(e, el);
       this.pushMouseMove({ x, y, modifiers: modifiersFromEvent(e) });
     });
-    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    on(el, 'contextmenu', (e) => e.preventDefault());
     /* Click-to-focus. If the textarea overlay is currently armed for IME
      * (host has called XSetICFocus on a Tk widget that wants text input),
      * keep DOM focus on the overlay so the OS IME stays attached -- moving
@@ -535,7 +551,7 @@ export class InputBridge {
      * fails to bring it back (canvas isn't an editable surface). When no
      * overlay is armed, focus the canvas as before so plain keydown
      * routes work for non-text demos. */
-    el.addEventListener('mousedown', () => {
+    on(el, 'mousedown', () => {
       const ov = this.overlayElement;
       if (ov && document.contains(ov) && ov.style.left !== '-9999px') {
         try {
@@ -564,14 +580,16 @@ export class InputBridge {
      *      navigator.clipboard.readText() first and only push the keydown
      *      to Tk after the cache is filled. Adds ~1ms latency in exchange
      *      for working browser→Tk paste on bare canvases. */
-    document.addEventListener('paste', (e) => {
+    on(document, 'paste', (ev) => {
+      const e = ev as ClipboardEvent;
       const text = e.clipboardData?.getData('text/plain');
       if (typeof text === 'string') {
         globalThis.__emx11ClipboardBytes = new TextEncoder().encode(text);
       }
     });
 
-    window.addEventListener('keydown', (e) => {
+    on(window, 'keydown', (ev) => {
+      const e = ev as KeyboardEvent;
       /* Focus is "ours" when the canvas OR the hidden textarea overlay
        * holds DOM focus. The overlay is a 1px transparent textarea that
        * the OS IME anchors candidate windows to (text-input.ts); from
@@ -618,7 +636,8 @@ export class InputBridge {
       }
       this.pushKeyDown(data);
     });
-    window.addEventListener('keyup', (e) => {
+    on(window, 'keyup', (ev) => {
+      const e = ev as KeyboardEvent;
       const active = document.activeElement;
       const hasFocus = active === el || (this.overlayElement !== null &&
                                          active === this.overlayElement);
@@ -631,6 +650,17 @@ export class InputBridge {
         text: '',
       });
     });
+  }
+
+  /** Detach every DOM listener attachDom() registered. Idempotent;
+   *  callers (HMR teardown, multi-Host test harnesses) invoke after
+   *  the owning Host is no longer used so the listener closures stop
+   *  pinning the previous `this`. */
+  dispose(): void {
+    for (const { target, type, handler } of this.domListeners) {
+      target.removeEventListener(type, handler);
+    }
+    this.domListeners = [];
   }
 
   private cssPoint(e: MouseEvent, el: HTMLCanvasElement): { x: number; y: number } {

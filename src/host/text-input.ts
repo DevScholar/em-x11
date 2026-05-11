@@ -58,6 +58,10 @@ export class TextInputOverlay {
    *  client calls XSetICValues(XNSpotLocation) at least once. */
   private spot: { window: number; x: number; y: number } | null = null;
   private remote: TextInputRemote | null = null;
+  /** Window/scroll listeners attached in direct mode, kept so dispose()
+   *  can detach them when the owning Host is torn down. Without this,
+   *  the closures pin `this` (and thus the previous Host) past teardown. */
+  private moveHandler: (() => void) | null = null;
 
   /** Public accessor so InputBridge can recognise the overlay as a
    *  legitimate focus surface (document.activeElement === overlay
@@ -79,8 +83,22 @@ export class TextInputOverlay {
     });
     /* Reposition on viewport reshape so candidate window stays anchored. */
     const onMove = (): void => this.applyPosition();
+    this.moveHandler = onMove;
     window.addEventListener('resize', onMove);
     window.addEventListener('scroll', onMove, true);
+  }
+
+  /** Tear down DOM state owned by this overlay: detach the resize/scroll
+   *  listeners and remove the hidden textarea from the document. Safe
+   *  to call in remote/headless mode (no-op when there's no element).
+   *  Idempotent. */
+  dispose(): void {
+    if (this.moveHandler) {
+      window.removeEventListener('resize', this.moveHandler);
+      window.removeEventListener('scroll', this.moveHandler, true);
+      this.moveHandler = null;
+    }
+    if (this.el && this.el.parentNode) this.el.remove();
   }
 
   /** Remote-mode hook. When set, setFocus/setSpot/clearFocus forward

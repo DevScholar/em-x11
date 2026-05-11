@@ -189,6 +189,17 @@ export class ConnectionManager {
     let module: EmscriptenModule;
     try {
       module = await loadWasm({ ...opts, quit: factoryQuit, onExit: factoryOnExit });
+    } catch (err) {
+      /* loadWasm rejected after wasm main() already called XOpenDisplay:
+       * a Connection + possibly deferred Exposes were inserted during
+       * the await. Without cleanup, the orphan Connection lingers
+       * forever and a later bindModule(undefined) — which picks the
+       * "most-recently-opened" conn — would land on this dead slot. */
+      if (pending.connId !== 0) {
+        this.pendingExposes.delete(pending.connId);
+        this.close(pending.connId);
+      }
+      throw err;
     } finally {
       this.pendingLaunch = null;
     }
@@ -274,7 +285,23 @@ export class ConnectionManager {
     /* Drop every window this connection owned. Renderer cleans up
      * its side; windowToConn, subscriptions, and override_redirect
      * drop their entries. Pixmaps/atoms still live in their global
-     * tables -- a future sweep will collect those too. */
+     * tables -- a future sweep will collect those too.
+     *
+     * Reparent foreign children first: a WM (twm) reparenting a client
+     * into a frame this conn owns leaves the foreign client with
+     * parent === <our id>. Without rehoming, destroyWindow leaves the
+     * child's renderer entry pointing at a parent that no longer exists,
+     * absOrigin walks into a None, and hover/clicks hit at root-relative
+     * coords. Move them to root so they remain reachable until their
+     * own conn issues XDestroyWindow / XCloseDisplay. */
+    const rootId = this.host.window.getRootWindow();
+    const ownedSet = conn.ownedWindows;
+    for (const [childId, win] of this.host.renderer.windows) {
+      if (!ownedSet.has(win.parent)) continue;
+      const childConn = this.windowToConn.get(childId);
+      if (childConn === undefined || childConn === connId) continue;
+      this.host.renderer.reparentWindow(childId, rootId, win.x, win.y);
+    }
     for (const winId of conn.ownedWindows) {
       this.host.renderer.destroyWindow(winId);
       this.windowToConn.delete(winId);

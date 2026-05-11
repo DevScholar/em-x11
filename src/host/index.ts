@@ -37,7 +37,6 @@
 import { RootCanvas } from '../runtime/canvas.js';
 import type { RootCanvasOptions } from '../runtime/canvas.js';
 import { Renderer } from './render/index.js';
-import { installDumpHelper } from './render/hit-test.js';
 import { absOrigin } from './render/window-tree.js';
 import { AtomManager } from './atom.js';
 import { PropertyManager } from './property.js';
@@ -98,11 +97,6 @@ export class Host implements EmX11Host {
     this.atom = new AtomManager();
     this.gc = new GcManager(this);
     this.renderer = new Renderer(this.canvas, (id) => this.gc.pixmapCanvas(id));
-    /* DevTools entry points: emX11._debug.traceHit / traceHitNext gate
-     * hit-test logging; em.debug.dumpWindows() prints every mapped
-     * window's bbox/shape/clip state. Wired right after Renderer
-     * construction so the helper can close over `this.renderer`. */
-    installDumpHelper(this.renderer);
     this.property = new PropertyManager(this);
     this.events = new EventDispatcher(this);
     this.connection = new ConnectionManager(this);
@@ -121,6 +115,17 @@ export class Host implements EmX11Host {
     );
 
     this.window.installSharedRoot();
+  }
+
+  /** Tear down DOM state owned by this Host (DOM listeners on
+   *  window/document/canvas, the hidden IME textarea). Safe to call
+   *  on a headless / remote-mode Host (downstream dispose() are
+   *  no-ops there). Idempotent. Use when reloading a Host (HMR,
+   *  multi-canvas test harness) so previous-instance closures stop
+   *  pinning the prior `this`. */
+  dispose(): void {
+    this.devices.dispose();
+    this.textInput.dispose();
   }
 
   /** Install this Host as the bridge facade under `globalThis.emX11._bridge`,

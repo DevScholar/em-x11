@@ -210,9 +210,16 @@ static void emit_crossing(Display *dpy, int type, Window w, Window peer,
     long mask = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
     if (!(win->event_mask & mask)) return;
 
-    Window from = (type == LeaveNotify) ? w    : peer;
-    Window to   = (type == LeaveNotify) ? peer : w;
-    int detail  = crossing_detail(dpy, type, from, to);
+    /* crossing_detail wants (from, to) as the pointer's actual travel
+     * direction. On LeaveNotify the pointer moved away from `w` toward
+     * `peer`; on EnterNotify it moved from `peer` onto `w`. update_pointer_window
+     * passes (cur, prev) for Leave and (cur, prev) for Enter (i.e. the
+     * caller's `peer` plays opposite roles in the two callsites), so
+     * disentangle here based on which crossing this is. */
+    bool is_leave = (type == LeaveNotify);
+    Window from   = is_leave ? w    : peer;
+    Window to     = is_leave ? peer : w;
+    int detail    = crossing_detail(dpy, type, from, to);
 
     int ax = 0, ay = 0, depth;
     window_abs_origin(dpy, win, &ax, &ay, &depth);

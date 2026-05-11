@@ -126,7 +126,11 @@ Window XCreateSimpleWindow(Display *display, Window parent,
                             * background pixel; that fixes state to
                             * BackgroundPixel (= 1). XCreateWindow uses
                             * the bridge directly when CWBackPixel is
-                            * absent so it can pass state=None (= 0). */
+                            * absent so it can pass state=None (= 0).
+                            * Note: XCreateSimpleWindow's contract does
+                            * not allow `background == None`, so a
+                            * caller passing 0 here gets a black-pixel
+                            * window, not a None-state one. */
                            1, background);
     return w->id;
 }
@@ -639,7 +643,7 @@ Status XGetWindowAttributes(Display *display, Window w,
     attrs_return->all_event_masks  = 0;
     attrs_return->your_event_mask  = 0;
     attrs_return->do_not_propagate_mask = 0;
-    attrs_return->override_redirect = a[6] ? True : False;
+    attrs_return->override_redirect = a[EMX11_WIN_ATTRS_OVERRIDE_RED] ? True : False;
     attrs_return->screen           = &display->screens[0];
     return 1;
 }
