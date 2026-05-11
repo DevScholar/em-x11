@@ -227,9 +227,28 @@ int XClearArea(Display *display, Window w,
 int XCopyArea(Display *dpy, Drawable src, Drawable dst, GC gc,
               int src_x, int src_y, unsigned int width, unsigned int height,
               int dst_x, int dst_y) {
-    (void)dpy; (void)gc;
+    (void)gc;
     if (width == 0 || height == 0) return 1;
     emx11_js_copy_area(src, dst, src_x, src_y, width, height, dst_x, dst_y);
+    /* X11 spec: CopyArea on a Window destination must emit either
+     * GraphicsExpose (per obscured-source region) or NoExpose (source
+     * fully available). em-x11 keeps every window's pixels in a backing
+     * surface, so the source is always fully available -- always push
+     * NoExpose. Required: Tk's TkScrollWindow (tkUnixDraw.c) waits in a
+     * tight Tcl_ServiceEvent loop for this event after every scroll;
+     * without it the Text widget hangs forever on any insert that
+     * shifts existing rows (e.g. inserting a newline mid-buffer).
+     * Pixmap destinations don't generate events per the protocol. */
+    if (emx11_window_find(dpy, dst) != NULL) {
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.xnoexpose.type        = NoExpose;
+        ev.xnoexpose.display     = dpy;
+        ev.xnoexpose.drawable    = dst;
+        ev.xnoexpose.major_code  = 62;  /* X_CopyArea */
+        ev.xnoexpose.minor_code  = 0;
+        emx11_event_queue_push(dpy, &ev);
+    }
     return 1;
 }
 
