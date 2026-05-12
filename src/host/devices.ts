@@ -551,9 +551,19 @@ export class InputBridge {
      * fails to bring it back (canvas isn't an editable surface). When no
      * overlay is armed, focus the canvas as before so plain keydown
      * routes work for non-text demos. */
-    on(el, 'mousedown', () => {
+    on(el, 'mousedown', (ev) => {
       const ov = this.overlayElement;
-      if (ov && document.contains(ov) && ov.style.left !== '-9999px') {
+      const armed = ov && document.contains(ov) && ov.style.left !== '-9999px';
+      if (armed && document.activeElement === ov) {
+        /* Textarea already holds DOM focus and the OS IME has anchored
+         * its per-element state (Chinese mode, candidate window, etc.)
+         * to it. Browser default mousedown would focus the canvas
+         * (tabIndex=0), blurring the textarea -- and on Windows the
+         * subsequent ov.focus() restores DOM focus but resets the IME
+         * to default English. preventDefault keeps the textarea
+         * focused, preserving IME state across same-widget reclicks. */
+        (ev as MouseEvent).preventDefault();
+      } else if (armed) {
         try {
           (ov.focus as (opts?: { preventScroll?: boolean }) => void)({
             preventScroll: true,

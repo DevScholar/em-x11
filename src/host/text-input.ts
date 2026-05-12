@@ -113,7 +113,14 @@ export class TextInputOverlay {
   /* -- Bridge entry points (called from Host facade) ---------------------- */
 
   setFocus(window: number): void {
-    this.focusedWindow = window || null;
+    const target = window || null;
+    /* Dedup: re-focusing the textarea on the same window resets the
+     * OS IME's per-element state (Chinese mode, candidate window) to
+     * default English on Windows. Tk normally only fires XSetICFocus
+     * on real focus transitions, but guard here so any redundant call
+     * doesn't blow away IME state mid-session. */
+    if (target === this.focusedWindow && target !== null) return;
+    this.focusedWindow = target;
     if (this.remote) {
       if (!this.focusedWindow) this.remote.clearFocus();
       else {
@@ -367,6 +374,7 @@ export function createDomTextInputBridge(
   attachCompositionListeners(ta, opts.onText);
 
   let focused = false;
+  let focusedWindow: number | null = null;
   let lastAbs: { x: number; y: number } | null = null;
 
   const reposition = (): void => {
@@ -386,7 +394,11 @@ export function createDomTextInputBridge(
 
   return {
     setFocus(_window: number): void {
+      /* Dedup re-focus on the same window: see TextInputOverlay.setFocus
+       * for why this matters (Windows IME per-element state reset). */
+      if (focused && focusedWindow === _window) return;
       focused = true;
+      focusedWindow = _window;
       reposition();
       ta.value = '';
       try {
@@ -399,6 +411,7 @@ export function createDomTextInputBridge(
     },
     clearFocus(): void {
       focused = false;
+      focusedWindow = null;
       ta.blur();
       ta.style.left = '-9999px';
     },
