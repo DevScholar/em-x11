@@ -438,6 +438,15 @@ export interface EmX11Host {
   onXimSetFocus(window: number): void;
   onXimClearFocus(): void;
   onXimSetSpot(window: number, x: number, y: number): void;
+
+  /** Tcl notifier setTimerProc bridge (libemx11/notifier.c). `ms < 0`
+   *  means Tcl passed timePtr == NULL ("no timer"); otherwise schedule
+   *  a pump wake at +ms relative. */
+  onTclSetTimer(ms: number): void;
+  /** Tcl notifier alertNotifierProc bridge. Standardised "wake the
+   *  event loop now" primitive (analogue of writing to a self-pipe
+   *  fd to break a blocking select). */
+  onTclAlertNotifier(): void;
 }
 
 declare global {

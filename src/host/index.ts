@@ -417,6 +417,35 @@ export class Host implements EmX11Host {
     this.textInput.setSpot(window, x, y);
   }
 
+  /* -- EmX11Host: Tcl notifier wake signals ---------------------------- */
+
+  /** Wake target for the Tcl notifier. Hosts register their pump's
+   *  scheduler here (typically via emX11.display.installEventLoopWake).
+   *  When unset, setTimer/alert bridges from libemx11 are no-ops --
+   *  callers without a pump (test harnesses, demos that never enter
+   *  Tk's event loop) don't need to install anything. */
+  private eventLoopWake: { onTimer: (ms: number) => void; onAlert: () => void } | null = null;
+
+  installEventLoopWake(wake: { onTimer: (ms: number) => void; onAlert: () => void } | null): void {
+    this.eventLoopWake = wake;
+  }
+
+  /** Bridge target for libemx11/notifier.c real_SetTimer. ms < 0 means
+   *  "no timer scheduled" (Tcl passed timePtr == NULL); otherwise
+   *  schedule a pump wake at +ms relative. The host pump translates
+   *  this to a real setTimeout / Atomics.wait timeout as appropriate. */
+  onTclSetTimer(ms: number): void {
+    this.eventLoopWake?.onTimer(ms);
+  }
+
+  /** Bridge target for libemx11/notifier.c real_AlertNotifier. Tcl's
+   *  cross-thread "break out of waitForEvent" primitive. Hosts use
+   *  this to drive an immediate drain regardless of the current timer
+   *  schedule. */
+  onTclAlertNotifier(): void {
+    this.eventLoopWake?.onAlert();
+  }
+
 
   /* -- EmX11Host: pixmaps + drawable copies + Shape --------------------- */
 

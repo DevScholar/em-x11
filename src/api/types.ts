@@ -158,6 +158,33 @@ export interface EmX11Display {
      *  composition results from the main-thread textarea bridge here. */
     textKey(text: string): void;
   };
+  /** Plug the Tk/Tcl event-loop wake target into em-x11's notifier.
+   *  libemx11 forwards the standardised Tcl_SetNotifier setTimerProc
+   *  + alertNotifierProc signals here; hosts implement them on top
+   *  of whatever scheduling primitive they have (setTimeout in the
+   *  pyodide-tk worker, rAF in wacl-tk main thread, Atomics.notify
+   *  if cross-thread).
+   *
+   *  Without an installed wake, libemx11's bridges are silent no-ops
+   *  -- callers without a pump (test harnesses, demos that never
+   *  enter Tk's event loop) don't need to install anything.
+   *
+   *  Pass null to uninstall (e.g. before disposing the host). */
+  installEventLoopWake(wake: EventLoopWake | null): void;
+}
+
+/** Wake target a host installs into em-x11 so the standardised Tcl
+ *  notifier ABI (setTimerProc / alertNotifierProc) reaches the host's
+ *  event-loop scheduler. */
+export interface EventLoopWake {
+  /** Schedule the next pump tick at +ms relative. `ms < 0` means
+   *  "no timer scheduled" (Tcl had no pending after-events). `ms === 0`
+   *  means "fire as soon as possible". The host should cancel any
+   *  previous timer first; this is an absolute set, not a chain. */
+  onTimer(ms: number): void;
+  /** Wake the pump now, regardless of the current timer schedule.
+   *  Equivalent to Tcl_AlertNotifier on Linux. */
+  onAlert(): void;
 }
 
 /* -- debug --------------------------------------------------------------- */

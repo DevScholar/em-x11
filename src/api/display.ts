@@ -12,6 +12,7 @@
 import type { Host } from '../host/index.js';
 import type {
   EmX11Display,
+  EventLoopWake,
   InjectKeyEvent,
   InjectMouseEvent,
 } from './types.js';
@@ -31,6 +32,10 @@ export class DisplayNamespace implements EmX11Display {
     setPointer: (x: number, y: number) => this.host.devices.setPointer(x, y),
     textKey: (text: string) => this.host.devices.pushTextKey(text),
   };
+
+  installEventLoopWake(wake: EventLoopWake | null): void {
+    this.host.installEventLoopWake(wake);
+  }
 
   get canvas(): HTMLCanvasElement | OffscreenCanvas {
     return this.host.canvas.surface;
