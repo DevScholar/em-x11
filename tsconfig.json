@@ -26,9 +26,8 @@
 
     "types": ["vite/client", "emscripten", "node"],
 
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src/**/*.ts", "demos/**/*.ts"],
