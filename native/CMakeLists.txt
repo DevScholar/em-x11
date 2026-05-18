@@ -34,6 +34,7 @@ set(EMX11_SOURCES
     src/xaw_stubs.c
     src/tk_shims.c
     src/xim.c
+    src/xkb.c
     src/keysym_table.c
     src/bridges.c
     src/notifier.c
