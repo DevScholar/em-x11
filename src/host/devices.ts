@@ -18,7 +18,7 @@
 import type { Host } from './index.js';
 import type { Point } from '../types/emscripten.js';
 import type { ModuleCcallSurface } from './connection.js';
-import { keyEventToKeysym, modifiersFromEvent } from '../runtime/keymap.js';
+import { keyEventToKeysym, keyEventToKeycode, modifiersFromEvent } from '../runtime/keymap.js';
 import { cursorXidToCss } from './cursor.js';
 import {
   X_ButtonPress,
@@ -42,6 +42,11 @@ export interface MouseEventData {
 
 export interface KeyEventData {
   keysym: number;
+  /** Physical key from KeyboardEvent.code, mapped to evdev keycode.
+   *  Stable across keyboard layouts -- the layout-resolved meaning
+   *  lives in keysym. 0 if the browser code isn't in the evdev map
+   *  (very rare; older codes, vendor-specific keys). */
+  keycode: number;
   modifiers: number;
   /** True when the canvas had keyboard focus (DOM path uses
    *  document.activeElement). Worker path can pass true unconditionally
@@ -241,17 +246,22 @@ export class InputBridge {
     if (focus === null) return;
     const module = this.moduleForWindow(focus);
     if (!module) return;
-    if (e.keysym === 0 && (!e.text || e.text.length === 0)) return;
+    if (e.keysym === 0 && e.keycode === 0 && (!e.text || e.text.length === 0)) return;
     /* Stage the typed UTF-8 (if any) so Xutf8LookupString in wasm
      * returns it for the matching XKeyEvent. Empty string clears the
      * slot so a KeyRelease can't inherit text from a previous KeyPress. */
     module.ccall('emx11_set_pending_key_text', null, ['string'],
                  [e.text ?? '']);
+    /* New entry point: pass keycode + keysym separately so the wasm
+     * side stores the layout-independent physical key in XKeyEvent
+     * (XkbGetMap-friendly) without losing the layout-resolved keysym
+     * that drives bindings. Old emx11_push_key_event is still exported
+     * for legacy consumers (it derives keycode by reverse keysym lookup). */
     module.ccall(
-      'emx11_push_key_event',
+      'emx11_push_key_event_kc',
       null,
-      ['number', 'number', 'number', 'number', 'number', 'number'],
-      [xType, focus, e.keysym, e.modifiers, 0, 0],
+      ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+      [xType, focus, e.keycode, e.keysym, e.modifiers, 0, 0],
     );
   }
 
@@ -270,16 +280,19 @@ export class InputBridge {
     const module = this.moduleForWindow(focus);
     if (!module) return;
     module.ccall('emx11_set_pending_key_text', null, ['string'], [text]);
+    /* Synthetic text-only keys have no physical origin -- keycode 0
+     * so XkbGetMap consumers don't misattribute IME / paste bytes to
+     * a real key on the user's keyboard. */
     module.ccall(
-      'emx11_push_key_event', null,
-      ['number', 'number', 'number', 'number', 'number', 'number'],
-      [X_KeyPress, focus, 0, 0, 0, 0],
+      'emx11_push_key_event_kc', null,
+      ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+      [X_KeyPress, focus, 0, 0, 0, 0, 0],
     );
     module.ccall('emx11_set_pending_key_text', null, ['string'], ['']);
     module.ccall(
-      'emx11_push_key_event', null,
-      ['number', 'number', 'number', 'number', 'number', 'number'],
-      [X_KeyRelease, focus, 0, 0, 0, 0],
+      'emx11_push_key_event_kc', null,
+      ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+      [X_KeyRelease, focus, 0, 0, 0, 0, 0],
     );
   }
 
@@ -625,6 +638,7 @@ export class InputBridge {
       const text = e.key.length === 1 ? e.key : '';
       const data: KeyEventData = {
         keysym: keyEventToKeysym(e),
+        keycode: keyEventToKeycode(e),
         modifiers: modifiersFromEvent(e),
         hasFocus,
         text,
@@ -655,6 +669,7 @@ export class InputBridge {
       if (hasFocus) e.preventDefault();
       this.pushKeyUp({
         keysym: keyEventToKeysym(e),
+        keycode: keyEventToKeycode(e),
         modifiers: modifiersFromEvent(e),
         hasFocus,
         text: '',

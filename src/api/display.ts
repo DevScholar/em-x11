@@ -12,13 +12,34 @@
 import type { Host } from '../host/index.js';
 import type {
   EmX11Display,
+  EmX11Keyboard,
+  EmX11KeyboardLock,
   EventLoopWake,
   InjectKeyEvent,
   InjectMouseEvent,
 } from './types.js';
 
+class KeyboardNamespace implements EmX11Keyboard {
+  readonly lock: EmX11KeyboardLock;
+  constructor(private readonly host: Host) {
+    this.lock = {
+      enable: (opts) => this.host.keyboardLock.enable(opts ?? {}),
+      disable: () => this.host.keyboardLock.disable(),
+      isAvailable: () => this.host.keyboardLock.isAvailable(),
+      isLocked: () => this.host.keyboardLock.isLocked(),
+    };
+  }
+  async getLayoutMap(forceRefresh?: boolean): Promise<Map<string, string>> {
+    if (forceRefresh) this.host.keyboardLayout.invalidate();
+    return this.host.keyboardLayout.getLabels();
+  }
+}
+
 export class DisplayNamespace implements EmX11Display {
-  constructor(private readonly host: Host) {}
+  readonly keyboard: EmX11Keyboard;
+  constructor(private readonly host: Host) {
+    this.keyboard = new KeyboardNamespace(host);
+  }
 
   readonly inject = {
     mouseDown: (e: InjectMouseEvent) => this.host.devices.pushMouseDown(e),

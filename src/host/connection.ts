@@ -227,7 +227,15 @@ export class ConnectionManager {
         throw err;
       }
     };
-    (module as { ccall: EmscriptenModule['ccall'] }).ccall = wrappedCcall;    /* Drain Exposes that were deferred while conn.module was null.
+    (module as { ccall: EmscriptenModule['ccall'] }).ccall = wrappedCcall;
+    /* Push the user's keyboard layout into the client's keysym_table
+     * before any KeyPress is dispatched (Xt caches the keymap on first
+     * key event; missed entries become invisible forever -- see
+     * project_emx11_keysym_table_prepop). Fire-and-forget the Promise;
+     * the layout fetch is already in flight from Host construction so
+     * this typically resolves before the next animation frame. */
+    void this.host.keyboardLayout.applyToModule(module);
+    /* Drain Exposes that were deferred while conn.module was null.
      * onWindowMap / onWindowConfigure parked them here; now that the
      * client's queue is reachable via ccall, push them through. The
      * client's main() has already suspended in XNextEvent's
@@ -399,6 +407,12 @@ export class ConnectionManager {
       throw new Error(`em-x11: bindModule: no connection with id ${id}`);
     }
     conn.module = module;
+    /* Mirror the launchClient path: push the layout-resolved keymap
+     * into the just-bound module so XkbGetMap reports the user's
+     * keyboard, not US QWERTY. Safe under Pyodide's side-module
+     * loader too -- emx11_install_keysym is a normal exported wasm
+     * function. */
+    void this.host.keyboardLayout.applyToModule(module);
     const deferred = this.pendingExposes.get(id);
     if (deferred) {
       for (const winId of deferred) {

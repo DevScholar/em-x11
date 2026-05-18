@@ -122,6 +122,10 @@ export interface InjectMouseEvent {
 
 export interface InjectKeyEvent {
   keysym: number;
+  /** Physical key (evdev keycode from KeyboardEvent.code via
+   *  KEYCODE_EVDEV table). Stable across keyboard layouts. Pass 0 for
+   *  synthetic injections that don't correspond to a real key. */
+  keycode: number;
   modifiers: number;
   hasFocus?: boolean;
   /** UTF-8 string the browser produced for this key. Plain ASCII typing
@@ -171,6 +175,47 @@ export interface EmX11Display {
    *
    *  Pass null to uninstall (e.g. before disposing the host). */
   installEventLoopWake(wake: EventLoopWake | null): void;
+  /** Keyboard layout introspection + OS-key capture. See
+   *  src/host/keyboard-layout.ts and src/host/keyboard-lock.ts. */
+  readonly keyboard: EmX11Keyboard;
+}
+
+/** Layout-aware keyboard surface. Two independent capabilities:
+ *
+ *   - getLayoutMap(): the user's current physical-key labels (so apps
+ *     can draw a virtual keyboard, configure a "press a key to remap"
+ *     UI, or just confirm what AZERTY-Q produces). Wraps
+ *     navigator.keyboard.getLayoutMap() with graceful fallback to an
+ *     empty Map on non-Chromium browsers.
+ *
+ *   - lock: capture OS-level shortcut keys (Alt+Tab, Super, Esc) while
+ *     in fullscreen. Off by default; demos opt in. Auto-engages on
+ *     fullscreenchange.
+ */
+export interface EmX11Keyboard {
+  /** Resolves to KeyboardEvent.code -> label string (e.g. "KeyQ" -> "a"
+   *  on a French AZERTY user's keyboard). Empty map on browsers without
+   *  the Keyboard API (Firefox, Safari, mobile). Cached after first
+   *  call; pass forceRefresh to invalidate. */
+  getLayoutMap(forceRefresh?: boolean): Promise<Map<string, string>>;
+  /** OS-key capture controls. Opt-in; off until enable() is called.
+   *  Requires the page to enter fullscreen for the lock to actually
+   *  take effect (Web Keyboard Lock security model). */
+  readonly lock: EmX11KeyboardLock;
+}
+
+export interface EmX11KeyboardLock {
+  /** Engage on the next fullscreen entry (or right now if already in
+   *  fullscreen). Pass `keys` to whitelist KeyboardEvent.code values;
+   *  empty/omitted captures every available key. */
+  enable(opts?: { keys?: string[] }): void;
+  /** Stop auto-engaging on fullscreen + release the lock if currently
+   *  held. Safe to call when not enabled. */
+  disable(): void;
+  /** True when navigator.keyboard.lock is available in this browser. */
+  isAvailable(): boolean;
+  /** True when the OS lock is currently held. */
+  isLocked(): boolean;
 }
 
 /** Wake target a host installs into em-x11 so the standardised Tcl

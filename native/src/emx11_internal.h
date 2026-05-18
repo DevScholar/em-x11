@@ -316,6 +316,11 @@ bool emx11_event_queue_peek_typed(Display *dpy, Window w, int type, XEvent *out)
  * keycode table is exhausted (very unlikely in practice). */
 KeyCode emx11_keysym_to_keycode(Display *dpy, KeySym keysym);
 
+/* Install the US QWERTY default keysyms at every evdev keycode slot.
+ * Called once at Display init before host's getLayoutMap() patches
+ * land. See event_keysym.c::emx11_us_qwerty for the table. */
+void emx11_keysym_table_install_us_qwerty(Display *dpy);
+
 /* Look up the CSS font string bound to a loaded Font id. Returns NULL
  * if the font hasn't been loaded (caller falls back to a default). */
 const char *emx11_font_css(Font font);

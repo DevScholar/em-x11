@@ -449,8 +449,28 @@ void emx11_push_motion_event(Window window, int x, int y,
 }
 
 EMSCRIPTEN_KEEPALIVE
+void emx11_push_key_event_kc(int type, Window window,
+                             unsigned int keycode, unsigned int keysym,
+                             unsigned int state, int x, int y);
+
+EMSCRIPTEN_KEEPALIVE
 void emx11_push_key_event(int type, Window window, unsigned int keysym,
                           unsigned int state, int x, int y) {
+    /* Legacy entry point: only the keysym is supplied; we derive a
+     * synthetic keycode by reverse-looking-up the keysym in
+     * keysym_table. Kept so external consumers built against an older
+     * em-x11 still link. New host bridges should call
+     * emx11_push_key_event_kc which threads the physical keycode
+     * through from the browser's KeyboardEvent.code. */
+    Display *dpy = emx11_get_display();
+    KeyCode kc = emx11_keysym_to_keycode(dpy, (KeySym)keysym);
+    emx11_push_key_event_kc(type, window, (unsigned int)kc, keysym, state, x, y);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_key_event_kc(int type, Window window,
+                             unsigned int keycode, unsigned int keysym,
+                             unsigned int state, int x, int y) {
     Display *dpy = emx11_get_display();
     XEvent ev;
     memset(&ev, 0, sizeof(ev));
@@ -462,9 +482,16 @@ void emx11_push_key_event(int type, Window window, unsigned int keysym,
     ev.xkey.x_root      = x;
     ev.xkey.y_root      = y;
     ev.xkey.state       = state;
-    ev.xkey.keycode     = emx11_keysym_to_keycode(dpy, (KeySym)keysym);
+    ev.xkey.keycode     = (KeyCode)keycode;
     ev.xkey.same_screen = True;
     ev.xkey.time        = event_now();
+    /* Make sure keysym_table[kc] reflects the keysym we just dispatched
+     * so subsequent XLookupKeysym / XkbKeycodeToKeysym calls for this
+     * physical key return the right value -- including layout-specific
+     * keysyms patched in after Display init by the host layoutmap. */
+    if (keycode > 0 && keycode < 256 && keysym != 0) {
+        dpy->keysym_table[keycode] = (KeySym)keysym;
+    }
     /* Record the slot BEFORE push -- emx11_event_queue_push will write
      * to dpy->event_tail then advance it. The text snapshot has to land
      * in the same slot. */

@@ -131,7 +131,9 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
      * Module.onExit (set by ConnectionManager.launchClient after binding)
      * which routes to closeDisplay and tears down owned windows. */
     noExitRuntime: false,
-    quit: options.quit,
-    onExit: options.onExit,
+    /* exactOptionalPropertyTypes: passing `undefined` to a non-optional
+     * Module field would error. Spread only the keys that are set. */
+    ...(options.quit !== undefined ? { quit: options.quit } : {}),
+    ...(options.onExit !== undefined ? { onExit: options.onExit } : {}),
   });
 }

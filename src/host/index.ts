@@ -48,6 +48,8 @@ import { InputBridge } from './devices.js';
 import { GrabManager } from './grabs.js';
 import { GlxManager } from './glx.js';
 import { TextInputOverlay } from './text-input.js';
+import { KeyboardLayoutManager } from './keyboard-layout.js';
+import { KeyboardLockManager } from './keyboard-lock.js';
 import type { LoadOptions } from '../loader/wasm.js';
 import type {
   EmX11Global,
@@ -74,6 +76,13 @@ export class Host implements EmX11Host {
   readonly grabs: GrabManager;
   readonly glx: GlxManager;
   readonly textInput: TextInputOverlay;
+  /** Layout-aware keymap manager. Fetches navigator.keyboard.getLayoutMap()
+   *  once and pushes the layout into each wasm process before its first
+   *  KeyPress fires. See keyboard-layout.ts. */
+  readonly keyboardLayout: KeyboardLayoutManager;
+  /** OS-key capture while fullscreen. Opt-in; off until a demo calls
+   *  host.keyboard.lock.enable(). See keyboard-lock.ts. */
+  readonly keyboardLock: KeyboardLockManager;
 
   constructor(options: HostOptions = {}) {
     this.canvas = new RootCanvas(options);
@@ -113,6 +122,13 @@ export class Host implements EmX11Host {
       // <textarea> when available, null otherwise.
       this.textInput.element,
     );
+    this.keyboardLayout = new KeyboardLayoutManager();
+    this.keyboardLock = new KeyboardLockManager();
+    /* Fire-and-forget the getLayoutMap() fetch so the Promise is hot by
+     * the time the first wasm process connects -- it'll await on the
+     * same Promise. No-op (returns empty map) when the Keyboard API
+     * isn't available. */
+    void this.keyboardLayout.resolve();
 
     this.window.installSharedRoot();
   }
@@ -126,6 +142,7 @@ export class Host implements EmX11Host {
   dispose(): void {
     this.devices.dispose();
     this.textInput.dispose();
+    this.keyboardLock.disable();
   }
 
   /** Install this Host as the bridge facade under `globalThis.emX11._bridge`,

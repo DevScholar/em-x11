@@ -17,6 +17,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/extensions/XKB.h>
+#include <X11/extensions/XKBstr.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +66,61 @@ extern Bool XkbSetDetectableAutoRepeat(
     Display *dpy,
     Bool detectable,
     Bool *supported);
+
+/* -- Keymap allocation + retrieval. ------------------------------------ *
+ *
+ * Real X11 splits keymap acquisition into half a dozen entry points
+ * (XkbGetMap, XkbGetUpdatedMap, XkbGetKeyboard, XkbGetKeyboardByName,
+ * XkbAllocClientMap, ...) so the client can fetch incremental updates
+ * and choose which subset of XkbDescRec fields to populate. We
+ * implement the same external API; all variants converge on building
+ * a fresh XkbDescRec from the current keysym_table, which the host
+ * has already filled with navigator.keyboard.getLayoutMap() data.
+ *
+ * `which` bitmask honored: XkbKeySymsMask. Other bits (KeyTypes,
+ * ModifierMap, ...) are silently accepted -- callers that don't ask
+ * for KeySyms get an empty map (matches real Xlib's behaviour).
+ */
+
+extern XkbDescPtr XkbAllocKeyboard(void);
+
+extern Status XkbAllocClientMap(
+    XkbDescPtr xkb,
+    unsigned int which,
+    unsigned int nTypes);
+
+extern void XkbFreeClientMap(
+    XkbDescPtr xkb,
+    unsigned int what,
+    Bool freeMap);
+
+extern void XkbFreeKeyboard(
+    XkbDescPtr xkb,
+    unsigned int which,
+    Bool freeDesc);
+
+extern XkbDescPtr XkbGetMap(
+    Display *dpy,
+    unsigned int which,
+    unsigned int deviceSpec);
+
+extern Status XkbGetUpdatedMap(
+    Display *dpy,
+    unsigned int which,
+    XkbDescPtr desc);
+
+extern XkbDescPtr XkbGetKeyboard(
+    Display *dpy,
+    unsigned int which,
+    unsigned int deviceSpec);
+
+extern XkbDescPtr XkbGetKeyboardByName(
+    Display *dpy,
+    unsigned int deviceSpec,
+    void *names,           /* XkbComponentNamesPtr in real Xlib */
+    unsigned int want,
+    unsigned int need,
+    Bool load);
 
 #ifdef __cplusplus
 }

@@ -360,14 +360,24 @@ EM_JS(int, emx11_js_clipboard_read_fetch, (int dstPtr, int capacity), {
 });
 
 EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {
+    var b2 = HEAPU8.subarray(dataPtr, dataPtr + len);
+    var copy = new Uint8Array(b2);
+    /* Worker-mode hosts (pyodide-tk) install a remote hook on the
+     * em-x11 bridge facade; the call gets posted to the main thread
+     * which holds the DOM + clipboard permission. Without the hook
+     * we fall through to the direct DOM path -- works in main-thread
+     * Hosts (em-x11 demos, wacl-tk). */
+    var e = globalThis.emX11; var B = e && e._bridge;
+    if (B && typeof B.clipboardWriteRemote === 'function') {
+        B.clipboardWriteRemote(copy);
+        return;
+    }
     if (typeof navigator === 'undefined' ||
         !navigator.clipboard ||
         !navigator.clipboard.writeText) {
         console.warn('[emx11] clipboard write: API unavailable');
         return;
     }
-    var b2 = HEAPU8.subarray(dataPtr, dataPtr + len);
-    var copy = new Uint8Array(b2);
     var text = new TextDecoder('utf-8').decode(copy);
     navigator.clipboard.writeText(text).catch(function (e) {
         console.warn('[emx11] clipboard write failed:', e);
