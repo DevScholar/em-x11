@@ -89,6 +89,12 @@ export interface EmscriptenModule {
    *  ConnectionManager.launchClient to trigger window cleanup when the
    *  client process exits without an explicit XCloseDisplay. */
   onExit?: (status: number) => void;
+  /** stdout / stderr sinks. Recent Emscripten captures these at runtime
+   *  init and exposes `Module.print` / `Module.printErr` as getter-only
+   *  accessors over a closure variable, so post-init assignment throws.
+   *  Pass via the factory arg instead. */
+  print?: (msg: string) => void;
+  printErr?: (msg: string) => void;
 }
 
 /**

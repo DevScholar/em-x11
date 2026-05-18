@@ -54,6 +54,12 @@ export interface LoadOptions {
    *  `noExitRuntime: false`. Belt-and-suspenders for clean-shutdown
    *  paths that DO reach run() (e.g. main() returning normally). */
   onExit?: (status: number) => void;
+  /** stdout sink. Must be passed in factory args -- recent Emscripten
+   *  defines `Module.print` as a getter that reads a closure-bound
+   *  variable, so a post-init assignment throws "only a getter". */
+  print?: (msg: string) => void;
+  /** stderr sink. Same constraint as `print`. */
+  printErr?: (msg: string) => void;
 }
 
 export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> {
@@ -135,5 +141,7 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
      * Module field would error. Spread only the keys that are set. */
     ...(options.quit !== undefined ? { quit: options.quit } : {}),
     ...(options.onExit !== undefined ? { onExit: options.onExit } : {}),
+    ...(options.print !== undefined ? { print: options.print } : {}),
+    ...(options.printErr !== undefined ? { printErr: options.printErr } : {}),
   });
 }

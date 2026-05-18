@@ -21,6 +21,10 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts")
 # Default warning flags for our own code. Third-party code opts out.
 set(EMX11_WARN_FLAGS -Wall -Wextra -Wno-unused-parameter)
 
+# Demo helper (emx11_finalize_demo, EMX11_LIB_DIR, EMX11_INCLUDE_DIR).
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(emx11_demo)
+
 add_subdirectory(native)
 add_subdirectory(third-party/libXt)
 add_subdirectory(third-party/libXmu)

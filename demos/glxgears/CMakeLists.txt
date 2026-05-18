@@ -5,23 +5,20 @@ add_executable(glxgears
     gl_displaylist.c
 )
 
-# Pure Xlib + GLX, no Xt/Xmu/Xaw. Pull GLX from emx11_static (which
-# now exports the glX* symbols from src/glx.c) and the GL fixed-pipeline
-# stubs from emscripten's libGL via -lGL + LEGACY_GL_EMULATION.
-target_link_libraries(glxgears PRIVATE emx11_static)
-
 # Upstream is -Wall clean on a real toolchain but our strict flags
 # (-Wall -Wextra) trip on a few patterns.
 target_compile_options(glxgears PRIVATE -w)
 
+# Pure Xlib + GLX. -lGLX pulls our glX* symbols; -lGL is the emscripten
+# system lib that ships glBegin / glRotatef / matrix stack via
+# LEGACY_GL_EMULATION (turned on below).
+emx11_finalize_demo(glxgears
+    EXPORT_NAME createGlxgearsModule
+    LIBS GLX X11 GL
+    EXTRA_RUNTIME_METHODS stringToUTF8 specialHTMLTargets
+)
+
 target_link_options(glxgears PRIVATE
-    "SHELL:-s MODULARIZE=1"
-    "SHELL:-s EXPORT_ES6=1"
-    "SHELL:-s EXPORT_NAME=createGlxgearsModule"
-    # ASYNCIFY: the patched event_loop yields once per drawn frame via
-    # emscripten_sleep(0). Without ASYNCIFY the wasm thread holds the
-    # JS event loop forever and nothing paints.
-    "SHELL:-s ASYNCIFY=1"
     # GL: bring in emscripten's libGL with full fixed-function pipeline
     # emulation (glBegin / glRotatef / glLight / glMaterial / matrix
     # stack), running on WebGL1. WebGL2 is incompatible with
@@ -42,14 +39,4 @@ target_link_options(glxgears PRIVATE
     "SHELL:-Wl,--wrap=glNormal3f"
     "SHELL:-Wl,--wrap=glShadeModel"
     "SHELL:-Wl,--wrap=glMaterialfv"
-    "SHELL:-s ENVIRONMENT=web,worker"
-    "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-    "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','specialHTMLTargets']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_key_event_kc','_emx11_install_keysym','_emx11_push_expose_event','_emx11_push_map_request','_emx11_push_reparent_notify','_emx11_push_configure_notify']"
-    "SHELL:-Wl,--error-limit=0"
-)
-
-set_target_properties(glxgears PROPERTIES
-    SUFFIX ".js"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts/glxgears"
 )

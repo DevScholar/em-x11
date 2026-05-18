@@ -134,9 +134,15 @@ export class FSNamespace implements EmX11FS {
       (e) => e.data !== null || !DEFAULT_DIRS.includes(e.path),
     );
     return (mod) => {
+      /* Nothing staged -> don't even touch mod.FS. Accessing it on a
+       * wasm built without FS support calls abort() inside Emscripten's
+       * getter, which sets ABORT = true on the runtime BEFORE throwing
+       * -- so try/catch saves the JS exception but the wasm runtime is
+       * already poisoned and run() bails before main(). */
+      if (!hasUserContent) return;
       const fs = mod.FS;
       if (!fs) {
-        if (hasUserContent && !this.warnedNoFs) {
+        if (!this.warnedNoFs) {
           this.warnedNoFs = true;
           console.warn(
             'em-x11: spawned wasm has no FS runtime; skipping em.fs replay. ' +

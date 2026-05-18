@@ -75,19 +75,9 @@ export class ProcessImpl implements Process {
       arguments: this.argv,
       thisProgram: this.thisProgram,
       cacheMode,
-      preRun: [
-        (mod) => {
-          /* Hook print/printErr BEFORE any output appears. Emscripten
-           * fires preRun after FS init but well before main(), so
-           * `fputs(stderr, "...")` in C constructors lands in our
-           * sink. */
-          const stdoutWrap = mod as unknown as Record<string, unknown>;
-          stdoutWrap.print = stdout;
-          stdoutWrap.printErr = stderr;
-        },
-        fsPreRun,
-        ...userPreRun,
-      ],
+      print: stdout,
+      printErr: stderr,
+      preRun: [fsPreRun, ...userPreRun],
     };
     if (opts.factory !== undefined) launchOpts.factory = opts.factory;
     this.bootPromise = launchProcess(this.host.connection, launchOpts);
@@ -241,6 +231,8 @@ interface LaunchProcessOptions {
   thisProgram: string;
   preRun: ((mod: EmscriptenModule) => void)[];
   cacheMode: CacheMode;
+  print: (line: string) => void;
+  printErr: (line: string) => void;
   factory?: EmscriptenModuleFactory;
 }
 
@@ -259,6 +251,8 @@ async function launchProcess(
       thisProgram: opts.thisProgram,
       preRun: opts.preRun,
       cacheMode: opts.cacheMode,
+      print: opts.print,
+      printErr: opts.printErr,
     });
   }
   /* Factory-override path: skip the dynamic import and pass our own

@@ -11,32 +11,19 @@ add_executable(xcalc
 
 target_compile_definitions(xcalc PRIVATE HAVE_CONFIG_H=1)
 
-# xcalc's .c files use quoted "xcalc.h" and "actions.h" from the same dir;
-# config.h is overlaid at the root of third-party/xcalc/.
+# xcalc's .c files use quoted "xcalc.h" and "actions.h" from the same
+# dir; config.h is overlaid at the root of third-party/xcalc/.
 target_include_directories(xcalc PRIVATE ${XCALC_SRC_DIR})
-
-target_link_libraries(xcalc PRIVATE Xaw Xmu Xpm Xt emx11_static)
 
 # Third-party code: opt out of our strict warnings.
 target_compile_options(xcalc PRIVATE -w)
 
-target_link_options(xcalc PRIVATE
-    "SHELL:-s MODULARIZE=1"
-    "SHELL:-s EXPORT_ES6=1"
-    "SHELL:-s EXPORT_NAME=createXcalcModule"
-    "SHELL:-s ASYNCIFY=1"
-    "SHELL:-s ENVIRONMENT=web,worker"
-    "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-    # FS needed so the runtime can stage /usr/lib/X11/app-defaults/XCalc into
-    # MEMFS via preRun before Xt's XtResolvePathname looks for it. Without
-    # app-defaults, xcalc's button layout collapses to widget defaults and
-    # the UI is unreadable.
-    "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','FS']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_key_event_kc','_emx11_install_keysym','_emx11_push_expose_event','_emx11_push_map_request','_emx11_push_reparent_notify','_emx11_push_configure_notify']"
-    "SHELL:-Wl,--error-limit=0"
-)
-
-set_target_properties(xcalc PROPERTIES
-    SUFFIX ".js"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts/xcalc"
+# FS is needed so the runtime can stage /usr/lib/X11/app-defaults/XCalc
+# into MEMFS via preRun before Xt's XtResolvePathname looks for it.
+# Without app-defaults, xcalc's button layout collapses to widget
+# defaults and the UI is unreadable.
+emx11_finalize_demo(xcalc
+    EXPORT_NAME createXcalcModule
+    LIBS Xaw Xmu Xt Xpm Xext X11
+    EXTRA_RUNTIME_METHODS FS
 )

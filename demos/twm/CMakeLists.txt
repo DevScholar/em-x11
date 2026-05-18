@@ -41,27 +41,17 @@ target_include_directories(twm PRIVATE
     ${TWM_SRC_DIR}
 )
 
-target_link_libraries(twm PRIVATE Xmu Xt emx11_static)
-
 # Third-party code, not held to our warning standard. gram.c / lex.c
 # in particular are auto-generated and notoriously noisy.
 target_compile_options(twm PRIVATE -w)
 
-target_link_options(twm PRIVATE
-    "SHELL:-s MODULARIZE=1"
-    "SHELL:-s EXPORT_ES6=1"
-    "SHELL:-s EXPORT_NAME=createTwmModule"
-    "SHELL:-s ASYNCIFY=1"
-    "SHELL:-s ENVIRONMENT=web,worker"
-    "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-    # FS is needed for the runtime to stage /em-x11.twmrc into MEMFS via
-    # preRun before main() reads it (see src/runtime/twm-launch.ts).
-    "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','FS']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event','_emx11_push_motion_event','_emx11_push_key_event','_emx11_push_key_event_kc','_emx11_install_keysym','_emx11_push_expose_event','_emx11_push_map_request','_emx11_push_reparent_notify','_emx11_push_configure_notify','_emx11_push_destroy_notify']"
-    "SHELL:-Wl,--error-limit=0"
-)
-
-set_target_properties(twm PROPERTIES
-    SUFFIX ".js"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts/twm"
+# FS is needed for the runtime to stage /em-x11.twmrc into MEMFS via
+# preRun before main() reads it (see src/runtime/twm-launch.ts). twm
+# also needs a DestroyNotify hook so its frames clean up when a client
+# wasm process exits.
+emx11_finalize_demo(twm
+    EXPORT_NAME createTwmModule
+    LIBS Xmu Xt Xext X11
+    EXTRA_RUNTIME_METHODS FS
+    EXTRA_FUNCTIONS _emx11_push_destroy_notify
 )
