@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 /* -- 16-bit text, genuine support.
  *
@@ -127,42 +128,303 @@ int XTextWidth16(XFontStruct *fs, _Xconst XChar2b *string, int count) {
     return w;
 }
 
-/* Multibyte variants with XFontSet: xt_stubs.c hands back a real
- * (non-NULL) wrapper over a single underlying XFontStruct. Pull the
- * wrapped font out via the internal accessor and route through the
- * 8-bit XDrawString / XTextWidth paths. That way Xmb callers get the
- * same glyph coverage as the rest of the toolkit. */
+/* -- Xmb / Xwc / Xutf8 text family -----------------------------------
+ *
+ * xt_stubs.c hands back a real (non-NULL) XFontSet whose first font is
+ * the one we want to render with. The Xmb/Xutf8 variants route the
+ * UTF-8 bytes straight through XDrawString — canvas.fillText speaks
+ * UTF-8 natively. The Xwc variants encode wchar_t (UCS-4 in Emscripten)
+ * into UTF-8 first, then take the same path.
+ *
+ * All three families temporarily install the fontset's font into the
+ * GC so widgets that build a separate fontset per render-table tag get
+ * the font they asked for, not whatever font is sitting in the GC.
+ */
 
 extern XFontStruct *emx11_fontset_font(XFontSet font_set);
 
+static int wc_to_utf8_one(unsigned int cp, unsigned char *out) {
+    if (cp < 0x80) { out[0] = (unsigned char)cp; return 1; }
+    if (cp < 0x800) {
+        out[0] = (unsigned char)(0xC0 | (cp >> 6));
+        out[1] = (unsigned char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (unsigned char)(0xE0 | (cp >> 12));
+        out[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (unsigned char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    if (cp < 0x110000) {
+        out[0] = (unsigned char)(0xF0 | (cp >> 18));
+        out[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (unsigned char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    out[0] = '?';
+    return 1;
+}
+
+/* Encode a wchar_t span into a malloc'd UTF-8 buffer (NUL-terminated).
+ * Returns byte length via *out_bytes. Caller frees the buffer. */
+static unsigned char *wcs_to_utf8(const wchar_t *ws, int nw, int *out_bytes) {
+    if (!ws || nw <= 0) {
+        unsigned char *empty = malloc(1);
+        if (empty) empty[0] = 0;
+        if (out_bytes) *out_bytes = 0;
+        return empty;
+    }
+    size_t cap = (size_t)nw * 4 + 1;
+    unsigned char *buf = malloc(cap);
+    if (!buf) { if (out_bytes) *out_bytes = 0; return NULL; }
+    int used = 0;
+    for (int i = 0; i < nw; i++) {
+        used += wc_to_utf8_one((unsigned int)ws[i], buf + used);
+    }
+    buf[used] = 0;
+    if (out_bytes) *out_bytes = used;
+    return buf;
+}
+
+/* Count UTF-8 characters (not bytes) in [text, text+bytes). Treats
+ * malformed leads as one char each so we never under-count. */
+static int utf8_char_count(const char *text, int bytes) {
+    int n = 0;
+    for (int i = 0; i < bytes; ) {
+        unsigned char c = (unsigned char)text[i];
+        int step = (c < 0x80) ? 1 :
+                   ((c & 0xE0) == 0xC0) ? 2 :
+                   ((c & 0xF0) == 0xE0) ? 3 :
+                   ((c & 0xF8) == 0xF0) ? 4 : 1;
+        if (i + step > bytes) step = 1;
+        i += step;
+        n++;
+    }
+    return n;
+}
+
+static void draw_with_fontset(Display *dpy, Drawable d, XFontSet font_set,
+                              GC gc, int x, int y,
+                              const char *text, int bytes, int image_mode) {
+    if (!gc || !text || bytes <= 0) return;
+    XFontStruct *fs = emx11_fontset_font(font_set);
+    Font saved = gc->font;
+    if (fs) gc->font = fs->fid;
+    if (image_mode) XDrawImageString(dpy, d, gc, x, y, text, bytes);
+    else            XDrawString(dpy, d, gc, x, y, text, bytes);
+    gc->font = saved;
+}
+
 void XmbDrawString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
                    int x, int y, _Xconst char *text, int bytes) {
-    (void)font_set;
-    XDrawString(dpy, d, gc, x, y, text, bytes);
+    draw_with_fontset(dpy, d, font_set, gc, x, y, text, bytes, 0);
+}
+
+void Xutf8DrawString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
+                     int x, int y, _Xconst char *text, int bytes) {
+    draw_with_fontset(dpy, d, font_set, gc, x, y, text, bytes, 0);
+}
+
+void XwcDrawString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
+                   int x, int y, _Xconst wchar_t *text, int num_wchars) {
+    int bytes = 0;
+    unsigned char *u8 = wcs_to_utf8(text, num_wchars, &bytes);
+    if (u8) {
+        draw_with_fontset(dpy, d, font_set, gc, x, y,
+                          (const char *)u8, bytes, 0);
+        free(u8);
+    }
+}
+
+void XmbDrawImageString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
+                        int x, int y, _Xconst char *text, int bytes) {
+    draw_with_fontset(dpy, d, font_set, gc, x, y, text, bytes, 1);
+}
+
+void Xutf8DrawImageString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
+                          int x, int y, _Xconst char *text, int bytes) {
+    draw_with_fontset(dpy, d, font_set, gc, x, y, text, bytes, 1);
+}
+
+void XwcDrawImageString(Display *dpy, Drawable d, XFontSet font_set, GC gc,
+                        int x, int y, _Xconst wchar_t *text, int num_wchars) {
+    int bytes = 0;
+    unsigned char *u8 = wcs_to_utf8(text, num_wchars, &bytes);
+    if (u8) {
+        draw_with_fontset(dpy, d, font_set, gc, x, y,
+                          (const char *)u8, bytes, 1);
+        free(u8);
+    }
+}
+
+static int escapement_with_fontset(XFontSet font_set, const char *text, int bytes) {
+    if (!text || bytes <= 0) return 0;
+    XFontStruct *fs = emx11_fontset_font(font_set);
+    if (fs) return XTextWidth(fs, text, bytes);
+    return bytes * 7;
 }
 
 int XmbTextEscapement(XFontSet font_set, _Xconst char *text, int bytes) {
+    return escapement_with_fontset(font_set, text, bytes);
+}
+
+int Xutf8TextEscapement(XFontSet font_set, _Xconst char *text, int bytes) {
+    return escapement_with_fontset(font_set, text, bytes);
+}
+
+int XwcTextEscapement(XFontSet font_set, _Xconst wchar_t *text, int num_wchars) {
+    int bytes = 0;
+    unsigned char *u8 = wcs_to_utf8(text, num_wchars, &bytes);
+    if (!u8) return 0;
+    int w = escapement_with_fontset(font_set, (const char *)u8, bytes);
+    free(u8);
+    return w;
+}
+
+static int extents_with_fontset(XFontSet font_set, const char *text, int bytes,
+                                XRectangle *ink, XRectangle *logical) {
     XFontStruct *fs = emx11_fontset_font(font_set);
-    if (fs) return XTextWidth(fs, text, bytes);
-    return bytes * 7;                           /* last-ditch fallback */
+    int width   = fs ? XTextWidth(fs, text, bytes) : bytes * 7;
+    int ascent  = fs ? fs->ascent  : 10;
+    int descent = fs ? fs->descent : 2;
+    XRectangle r = {0, (short)-ascent, (unsigned short)width,
+                    (unsigned short)(ascent + descent)};
+    if (ink)     *ink     = r;
+    if (logical) *logical = r;
+    return width;
 }
 
 int XmbTextExtents(XFontSet font_set, _Xconst char *text, int nbytes,
                    XRectangle *ink, XRectangle *logical) {
+    return extents_with_fontset(font_set, text, nbytes, ink, logical);
+}
+
+int Xutf8TextExtents(XFontSet font_set, _Xconst char *text, int nbytes,
+                     XRectangle *ink, XRectangle *logical) {
+    return extents_with_fontset(font_set, text, nbytes, ink, logical);
+}
+
+int XwcTextExtents(XFontSet font_set, _Xconst wchar_t *text, int num_wchars,
+                   XRectangle *ink, XRectangle *logical) {
+    int bytes = 0;
+    unsigned char *u8 = wcs_to_utf8(text, num_wchars, &bytes);
+    if (!u8) return 0;
+    int w = extents_with_fontset(font_set, (const char *)u8, bytes, ink, logical);
+    free(u8);
+    return w;
+}
+
+/* PerCharExtents: walk one UTF-8 character at a time, measure width
+ * incrementally, fill ink/logical arrays with per-glyph rects. ink ==
+ * logical here because canvas.measureText gives us no ink bounds.
+ * Used by Motif XmText for cursor placement and click-to-position. */
+static Status percharextents_utf8(XFontSet font_set, const char *text, int bytes,
+                                  XRectangle *ink_buf, XRectangle *log_buf,
+                                  int buf_size, int *num_chars,
+                                  XRectangle *overall_ink,
+                                  XRectangle *overall_log) {
+    int total_chars = utf8_char_count(text, bytes);
+    if (num_chars) *num_chars = total_chars;
+    if (total_chars > buf_size) return 0;
+
     XFontStruct *fs = emx11_fontset_font(font_set);
-    int width   = fs ? XTextWidth(fs, text, nbytes) : nbytes * 7;
     int ascent  = fs ? fs->ascent  : 10;
     int descent = fs ? fs->descent : 2;
-    if (ink) {
-        ink->x      = 0;
-        ink->y      = (short)-ascent;
-        ink->width  = (unsigned short)width;
-        ink->height = (unsigned short)(ascent + descent);
+    int prev_w  = 0;
+    int idx     = 0;
+
+    for (int i = 0; i < bytes; ) {
+        unsigned char c = (unsigned char)text[i];
+        int step = (c < 0x80) ? 1 :
+                   ((c & 0xE0) == 0xC0) ? 2 :
+                   ((c & 0xF0) == 0xE0) ? 3 :
+                   ((c & 0xF8) == 0xF0) ? 4 : 1;
+        if (i + step > bytes) step = bytes - i;
+        int run_w = fs ? XTextWidth(fs, text, i + step) : (i + step) * 7;
+        int adv   = run_w - prev_w;
+        XRectangle r = {(short)prev_w, (short)-ascent,
+                        (unsigned short)(adv > 0 ? adv : 0),
+                        (unsigned short)(ascent + descent)};
+        if (ink_buf) ink_buf[idx] = r;
+        if (log_buf) log_buf[idx] = r;
+        prev_w = run_w;
+        idx++;
+        i += step;
     }
-    if (logical) *logical = ink ? *ink :
-        (XRectangle){0, (short)-ascent, (unsigned short)width,
-                     (unsigned short)(ascent + descent)};
-    return width;
+    XRectangle overall = {0, (short)-ascent,
+                          (unsigned short)prev_w,
+                          (unsigned short)(ascent + descent)};
+    if (overall_ink) *overall_ink = overall;
+    if (overall_log) *overall_log = overall;
+    return 1;
+}
+
+Status XmbTextPerCharExtents(XFontSet font_set, _Xconst char *text, int bytes,
+                             XRectangle *ink_buf, XRectangle *log_buf,
+                             int buf_size, int *num_chars,
+                             XRectangle *overall_ink, XRectangle *overall_log) {
+    return percharextents_utf8(font_set, text, bytes, ink_buf, log_buf,
+                               buf_size, num_chars, overall_ink, overall_log);
+}
+
+Status Xutf8TextPerCharExtents(XFontSet font_set, _Xconst char *text, int bytes,
+                               XRectangle *ink_buf, XRectangle *log_buf,
+                               int buf_size, int *num_chars,
+                               XRectangle *overall_ink, XRectangle *overall_log) {
+    return percharextents_utf8(font_set, text, bytes, ink_buf, log_buf,
+                               buf_size, num_chars, overall_ink, overall_log);
+}
+
+Status XwcTextPerCharExtents(XFontSet font_set, _Xconst wchar_t *text, int num_wchars,
+                             XRectangle *ink_buf, XRectangle *log_buf,
+                             int buf_size, int *num_chars,
+                             XRectangle *overall_ink, XRectangle *overall_log) {
+    int bytes = 0;
+    unsigned char *u8 = wcs_to_utf8(text, num_wchars, &bytes);
+    if (!u8) return 0;
+    Status s = percharextents_utf8(font_set, (const char *)u8, bytes,
+                                   ink_buf, log_buf, buf_size, num_chars,
+                                   overall_ink, overall_log);
+    free(u8);
+    /* num_chars is in wchar_t units, which equals codepoints == utf8 chars */
+    return s;
+}
+
+/* DrawText: array of (fontset, string, delta) segments. delta is an
+ * x-offset applied before each segment after the first. */
+void XmbDrawText(Display *dpy, Drawable d, GC gc, int x, int y,
+                 XmbTextItem *items, int nitems) {
+    if (!items) return;
+    for (int i = 0; i < nitems; i++) {
+        if (i > 0) x += items[i].delta;
+        XmbDrawString(dpy, d, items[i].font_set, gc, x, y,
+                      items[i].chars, items[i].nchars);
+        x += XmbTextEscapement(items[i].font_set, items[i].chars, items[i].nchars);
+    }
+}
+
+void Xutf8DrawText(Display *dpy, Drawable d, GC gc, int x, int y,
+                   XmbTextItem *items, int nitems) {
+    if (!items) return;
+    for (int i = 0; i < nitems; i++) {
+        if (i > 0) x += items[i].delta;
+        Xutf8DrawString(dpy, d, items[i].font_set, gc, x, y,
+                        items[i].chars, items[i].nchars);
+        x += Xutf8TextEscapement(items[i].font_set, items[i].chars, items[i].nchars);
+    }
+}
+
+void XwcDrawText(Display *dpy, Drawable d, GC gc, int x, int y,
+                 XwcTextItem *items, int nitems) {
+    if (!items) return;
+    for (int i = 0; i < nitems; i++) {
+        if (i > 0) x += items[i].delta;
+        XwcDrawString(dpy, d, items[i].font_set, gc, x, y,
+                      items[i].chars, items[i].nchars);
+        x += XwcTextEscapement(items[i].font_set, items[i].chars, items[i].nchars);
+    }
 }
 
 /* XFontSet accessor shims live in xt_stubs.c alongside XCreateFontSet
@@ -901,13 +1163,4 @@ int XGetErrorDatabaseText(Display *dpy, _Xconst char *name, _Xconst char *messag
     memcpy(buffer_return, src, n);
     buffer_return[n] = '\0';
     return 0;
-}
-
-/* Multibyte image string. Route to the 8-bit XDrawImageString; our
- * canvas-fillText font path is UTF-8 internally either way, and the
- * XFontSet argument is already a thin wrapper around a loaded CSS font. */
-void XmbDrawImageString(Display *dpy, Drawable d, XFontSet fontset, GC gc,
-                        int x, int y, _Xconst char *text, int length) {
-    (void)fontset;
-    XDrawImageString(dpy, d, gc, x, y, text, length);
 }

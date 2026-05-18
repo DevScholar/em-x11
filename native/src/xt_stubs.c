@@ -18,9 +18,11 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/Xresource.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 /* -- Generic allocator -- */
 
@@ -153,30 +155,46 @@ int XFreeCursor(Display *dpy, Cursor cursor) {
     return 1;
 }
 
-/* -- Font sets (XIM path) ---------------------------------------------
+/* -- Font sets (XIM / Motif path) -------------------------------------
  *
- * Xlib's XFontSet is a bundle of XFontStructs that together cover the
- * charsets needed by a locale. Real implementations load a font per
- * charset and switch at draw time. In em-x11 every font renders via
- * canvas.fillText (UTF-8 out of the box), so one underlying font
- * covers everything and the "set" is a thin wrapper.
+ * Xlib's XFontSet bundles XFontStructs that cover the charsets the
+ * client's locale needs. em-x11 renders every font through canvas
+ * fillText (UTF-8 by construction), so any single loaded font already
+ * covers all charsets. We still parse the full comma-separated XLFD
+ * list so XFontsOfFontSet enumerates what Motif's XmRenderTable code
+ * expects (each tag in a RenderTable typically maps to one entry).
  *
- * We used to return NULL here, which made libXaw print "Unable to
- * load any usable fontset" even though the 8-bit fallback worked
- * fine. Handing back a real handle silences the warning and routes
- * the Xmb... / Xwc... text calls through the same glyph path as
- * XDrawString.
- *
- * `struct _XOC` is opaque in Xlib.h (`typedef struct _XOC *XFontSet`),
- * so we get to define it any way we like. */
+ * struct _XOC is opaque in Xlib.h. typedef makes XOC == XFontSet, so
+ * the same struct backs both XCreateFontSet and XCreateOC.
+ */
+
+#define EMX11_FONTSET_MAX_FONTS 8
 
 struct _XOC {
-    XFontStruct     *font;                      /* single underlying font */
-    XFontStruct     *fonts_list[1];             /* XFontsOfFontSet */
-    char            *names_list[1];             /* XFontsOfFontSet */
+    Display         *dpy;
+    XFontStruct     *fonts[EMX11_FONTSET_MAX_FONTS];
+    char            *names[EMX11_FONTSET_MAX_FONTS];
+    int              n_fonts;
+    XFontStruct    **font_struct_list;          /* XFontsOfFontSet — stable until free */
+    char           **font_name_list;
     XFontSetExtents  extents;
-    char             base_name[96];
+    char            *base_name_list;
+    char            *locale;
 };
+
+static char *xfs_strdup(const char *s) {
+    if (!s) return NULL;
+    size_t n = strlen(s) + 1;
+    char *r = malloc(n);
+    if (r) memcpy(r, s, n);
+    return r;
+}
+
+static void xfs_trim(char *s) {
+    if (!s) return;
+    size_t n = strlen(s);
+    while (n && (s[n-1] == ' ' || s[n-1] == '\t')) s[--n] = '\0';
+}
 
 XFontSet XCreateFontSet(Display *dpy, _Xconst char *base_font_name_list,
                         char ***missing_charset_list_return,
@@ -186,58 +204,105 @@ XFontSet XCreateFontSet(Display *dpy, _Xconst char *base_font_name_list,
     if (missing_charset_count_return) *missing_charset_count_return = 0;
     if (def_string_return)            *def_string_return            = (char *)"";
 
-    /* The base name list can be a comma-separated XLFD list. Pick the
-     * first entry; if it's empty or lookup fails, try the canonical
-     * "fixed" alias that our font.c always resolves. */
-    char first[96] = "fixed";
-    if (base_font_name_list) {
-        size_t i = 0;
-        while (base_font_name_list[i] && base_font_name_list[i] != ','
-               && i + 1 < sizeof first) {
-            first[i] = base_font_name_list[i];
-            i++;
-        }
-        if (i > 0) first[i] = '\0';
-    }
-
-    XFontStruct *fs = XLoadQueryFont(dpy, first);
-    if (!fs) fs = XLoadQueryFont(dpy, "fixed");
-    if (!fs) return NULL;
+    const char *raw = base_font_name_list && *base_font_name_list
+                      ? base_font_name_list : "fixed";
 
     struct _XOC *set = calloc(1, sizeof *set);
     if (!set) return NULL;
-    set->font = fs;
-    set->fonts_list[0] = fs;
-    /* names_list entries are not individually freed by XFontsOfFontSet;
-     * we point at an inline buffer so cleanup is trivial. */
-    set->names_list[0] = set->base_name;
-    snprintf(set->base_name, sizeof set->base_name, "%s", first);
+    set->dpy = dpy;
+    set->base_name_list = xfs_strdup(raw);
+    set->locale = xfs_strdup("C");
 
-    /* Extents: the logical extent covers the font's full cell; ink
-     * extent is the same since we have no real glyph-ink metrics. */
-    int w = fs->max_bounds.width > 0 ? fs->max_bounds.width : 8;
-    int h = fs->ascent + fs->descent;
+    char *work = xfs_strdup(raw);
+    char *missing_buf[16];
+    int   missing = 0;
+    int   loaded  = 0;
+    char *p = work;
+    while (p && *p && loaded < EMX11_FONTSET_MAX_FONTS) {
+        while (*p == ' ' || *p == '\t') p++;
+        char *comma = strchr(p, ',');
+        if (comma) *comma = '\0';
+        xfs_trim(p);
+        if (*p) {
+            XFontStruct *fs = XLoadQueryFont(dpy, p);
+            if (fs) {
+                set->fonts[loaded] = fs;
+                set->names[loaded] = xfs_strdup(p);
+                loaded++;
+            } else if (missing < 16) {
+                missing_buf[missing++] = xfs_strdup(p);
+            }
+        }
+        p = comma ? comma + 1 : NULL;
+    }
+    free(work);
+
+    if (loaded == 0) {
+        XFontStruct *fs = XLoadQueryFont(dpy, "fixed");
+        if (!fs) {
+            free(set->base_name_list);
+            free(set->locale);
+            for (int i = 0; i < missing; i++) free(missing_buf[i]);
+            free(set);
+            return NULL;
+        }
+        set->fonts[0] = fs;
+        set->names[0] = xfs_strdup("fixed");
+        loaded = 1;
+    }
+    set->n_fonts = loaded;
+
+    set->font_struct_list = calloc((size_t)loaded, sizeof(XFontStruct *));
+    set->font_name_list   = calloc((size_t)loaded, sizeof(char *));
+    for (int i = 0; i < loaded; i++) {
+        set->font_struct_list[i] = set->fonts[i];
+        set->font_name_list[i]   = set->names[i];
+    }
+
+    int max_w = 0, max_asc = 0, max_dsc = 0;
+    for (int i = 0; i < loaded; i++) {
+        XFontStruct *fs = set->fonts[i];
+        if (fs->max_bounds.width > max_w) max_w = fs->max_bounds.width;
+        if (fs->ascent  > max_asc) max_asc = fs->ascent;
+        if (fs->descent > max_dsc) max_dsc = fs->descent;
+    }
+    if (max_w   <= 0) max_w   = 8;
+    if (max_asc <= 0) max_asc = 10;
+    if (max_dsc <= 0) max_dsc = 2;
     set->extents.max_logical_extent.x      = 0;
-    set->extents.max_logical_extent.y      = (short)(-fs->ascent);
-    set->extents.max_logical_extent.width  = (unsigned short)w;
-    set->extents.max_logical_extent.height = (unsigned short)(h > 0 ? h : 12);
+    set->extents.max_logical_extent.y      = (short)(-max_asc);
+    set->extents.max_logical_extent.width  = (unsigned short)max_w;
+    set->extents.max_logical_extent.height = (unsigned short)(max_asc + max_dsc);
     set->extents.max_ink_extent = set->extents.max_logical_extent;
 
+    if (missing_charset_count_return) *missing_charset_count_return = missing;
+    if (missing_charset_list_return && missing > 0) {
+        char **arr = calloc((size_t)missing, sizeof(char *));
+        for (int i = 0; i < missing; i++) arr[i] = missing_buf[i];
+        *missing_charset_list_return = arr;
+    } else {
+        for (int i = 0; i < missing; i++) free(missing_buf[i]);
+    }
     return (XFontSet)set;
 }
 
 void XFreeFontSet(Display *dpy, XFontSet font_set) {
     struct _XOC *set = (struct _XOC *)font_set;
     if (!set) return;
-    if (set->font) XFreeFont(dpy, set->font);
+    for (int i = 0; i < set->n_fonts; i++) {
+        if (set->fonts[i]) XFreeFont(dpy, set->fonts[i]);
+        free(set->names[i]);
+    }
+    free(set->font_struct_list);
+    free(set->font_name_list);
+    free(set->base_name_list);
+    free(set->locale);
     free(set);
 }
 
 XFontSetExtents *XExtentsOfFontSet(XFontSet font_set) {
     struct _XOC *set = (struct _XOC *)font_set;
     if (set) return &set->extents;
-    /* Xaw occasionally queries extents without checking for NULL.
-     * Return a static "empty metrics" sentinel so it gets safe zeros. */
     static XFontSetExtents empty;
     return &empty;
 }
@@ -250,18 +315,117 @@ int XFontsOfFontSet(XFontSet font_set, XFontStruct ***font_struct_list_return,
         if (font_name_list_return)   *font_name_list_return   = NULL;
         return 0;
     }
-    if (font_struct_list_return) *font_struct_list_return = set->fonts_list;
-    if (font_name_list_return)   *font_name_list_return   = set->names_list;
+    if (font_struct_list_return) *font_struct_list_return = set->font_struct_list;
+    if (font_name_list_return)   *font_name_list_return   = set->font_name_list;
+    return set->n_fonts;
+}
+
+char *XBaseFontNameListOfFontSet(XFontSet font_set) {
+    struct _XOC *set = (struct _XOC *)font_set;
+    return set ? set->base_name_list : (char *)"";
+}
+
+char *XLocaleOfFontSet(XFontSet font_set) {
+    struct _XOC *set = (struct _XOC *)font_set;
+    return set && set->locale ? set->locale : (char *)"C";
+}
+
+Bool XContextDependentDrawing(XFontSet font_set) { (void)font_set; return False; }
+Bool XDirectionalDependentDrawing(XFontSet font_set) { (void)font_set; return False; }
+Bool XContextualDrawing(XFontSet font_set) { (void)font_set; return False; }
+
+XFontStruct *emx11_fontset_font(XFontSet font_set) {
+    struct _XOC *set = (struct _XOC *)font_set;
+    return (set && set->n_fonts > 0) ? set->fonts[0] : NULL;
+}
+
+/* -- XOM / XOC --------------------------------------------------------
+ *
+ * Motif's XmRenderTable path opens an XOM, then creates XOCs with
+ * XNBaseFontName. Xlib typedefs XOC == XFontSet, so an XOC built via
+ * XCreateOC is just an XFontSet behind the scenes. We pull XNBaseFontName
+ * out of the varargs and delegate to XCreateFontSet.
+ */
+
+struct _XOM {
+    Display *dpy;
+    char    *res_name;
+    char    *res_class;
+    char    *locale;
+};
+
+XOM XOpenOM(Display *dpy, struct _XrmHashBucketRec *rdb,
+            _Xconst char *res_name, _Xconst char *res_class) {
+    (void)rdb;
+    struct _XOM *om = calloc(1, sizeof *om);
+    if (!om) return NULL;
+    om->dpy = dpy;
+    om->res_name  = xfs_strdup(res_name);
+    om->res_class = xfs_strdup(res_class);
+    om->locale    = xfs_strdup("C");
+    return (XOM)om;
+}
+
+Status XCloseOM(XOM om_) {
+    struct _XOM *om = (struct _XOM *)om_;
+    if (!om) return 0;
+    free(om->res_name);
+    free(om->res_class);
+    free(om->locale);
+    free(om);
     return 1;
 }
 
-/* Internal accessor for xaw_stubs.c -- pulls the single underlying
- * font back out of an opaque XFontSet. NULL-safe; returns NULL if the
- * set was never created or is being torn down. */
-XFontStruct *emx11_fontset_font(XFontSet font_set) {
-    struct _XOC *set = (struct _XOC *)font_set;
-    return set ? set->font : NULL;
+Display *XDisplayOfOM(XOM om_) {
+    struct _XOM *om = (struct _XOM *)om_;
+    return om ? om->dpy : NULL;
 }
+
+char *XLocaleOfOM(XOM om_) {
+    struct _XOM *om = (struct _XOM *)om_;
+    return om && om->locale ? om->locale : (char *)"C";
+}
+
+char *XSetOMValues(XOM om, ...) { (void)om; return NULL; }
+char *XGetOMValues(XOM om, ...) { (void)om; return NULL; }
+
+XOC XCreateOC(XOM om_, ...) {
+    struct _XOM *om = (struct _XOM *)om_;
+    if (!om) return NULL;
+    const char *base_name = NULL;
+    XFontSet    inherit   = NULL;
+
+    va_list ap;
+    va_start(ap, om_);
+    for (;;) {
+        const char *attr = va_arg(ap, const char *);
+        if (!attr) break;
+        if (strcmp(attr, XNBaseFontName) == 0) {
+            base_name = va_arg(ap, const char *);
+        } else if (strcmp(attr, "fontSet") == 0) {
+            inherit = va_arg(ap, XFontSet);
+        } else {
+            /* skip unknown value */
+            (void)va_arg(ap, void *);
+        }
+    }
+    va_end(ap);
+
+    if (inherit) return (XOC)inherit;
+    return (XOC)XCreateFontSet(om->dpy, base_name ? base_name : "fixed",
+                               NULL, NULL, NULL);
+}
+
+void XDestroyOC(XOC oc) {
+    /* XCreateOC returned an XFontSet; route through XFreeFontSet so all
+     * the wrapped XFontStructs are released. */
+    struct _XOC *set = (struct _XOC *)oc;
+    if (set) XFreeFontSet(set->dpy, (XFontSet)oc);
+}
+
+XOM XOMOfOC(XOC oc) { (void)oc; return NULL; }
+char *XSetOCValues(XOC oc, ...) { (void)oc; return NULL; }
+char *XGetOCValues(XOC oc, ...) { (void)oc; return NULL; }
 
 void XFreeStringList(char **list) {
     if (!list) return;
