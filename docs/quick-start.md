@@ -142,8 +142,13 @@ add_executable(xcalc
 
 target_compile_definitions(xcalc PRIVATE HAVE_CONFIG_H=1)
 target_include_directories(xcalc PRIVATE ${XCALC_SRC_DIR})
-target_link_libraries(xcalc PRIVATE Xaw Xmu Xpm Xt emx11_static)
 target_compile_options(xcalc PRIVATE -w)
+
+emx11_finalize_demo(xcalc
+    EXPORT_NAME createXcalcModule
+    LIBS Xaw Xmu Xt Xpm Xext X11
+    EXTRA_RUNTIME_METHODS FS
+)
 ```
 
 A few things to notice:
@@ -154,50 +159,37 @@ A few things to notice:
 - Third-party code is built with `-w` because our own warning flags
   (`-Wall -Wextra`) trip on patterns like unused `XtActionsRec`
   callback args. We only want strict warnings on em-x11's own code.
-- The link target is `emx11_static`, not `X11`. That is em-x11's
-  static archive of every Xlib symbol xcalc will need.
+- The link line reads like a standard Xaw program: `Xaw Xmu Xt Xpm
+  Xext X11`. em-x11 ships these as real, separately named static
+  archives (`libX11.a`, `libXaw.a`, ...), so anything you would write
+  on a Linux desktop translates over directly. Order matters the same
+  way it does to ld — higher-level first.
+- `emx11_finalize_demo` is the helper at
+  [cmake/emx11_demo.cmake](../cmake/emx11_demo.cmake). It adds the
+  include path, the artifacts library-search dir, the Emscripten link
+  options every demo shares (`MODULARIZE`, `ASYNCIFY`,
+  `ALLOW_MEMORY_GROWTH`, ...), and the `EXPORTED_FUNCTIONS` /
+  `EXPORTED_RUNTIME_METHODS` lists the JS host's event router needs.
 
-The interesting part is the link options:
+The helper internally translates each name in `LIBS` to the CMake
+target of the same name and links against `$<TARGET_FILE:foo>` — the
+full archive path. That detour exists because emcc's
+`process_libraries` silently substitutes its own JS shims for a few
+hijacked `-l<name>` flags (`X11`, `GL`, `SDL`, ...; see
+`tools/link.py:map_to_js_libs`); passing the absolute path avoids the
+hijack. From the demo author's side the link line still reads as
+standard `-l` X11 linking.
 
-```cmake
-target_link_options(xcalc PRIVATE
-    "SHELL:-s MODULARIZE=1"
-    "SHELL:-s EXPORT_ES6=1"
-    "SHELL:-s EXPORT_NAME=createXcalcModule"
-    "SHELL:-s ASYNCIFY=1"
-    "SHELL:-s ENVIRONMENT=web,worker"
-    "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-    "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','FS']"
-    "SHELL:-s EXPORTED_FUNCTIONS=['_main','_emx11_push_button_event',
-        '_emx11_push_motion_event','_emx11_push_key_event',
-        '_emx11_push_expose_event','_emx11_push_map_request',
-        '_emx11_push_reparent_notify','_emx11_push_configure_notify']"
-)
-```
+Anything you would name with `EXTRA_RUNTIME_METHODS` (here `FS`,
+because the launcher writes `app-defaults/XCalc` into MEMFS) or
+`EXTRA_FUNCTIONS` (extra exports beyond the standard event-router
+hooks) gets appended to the helper's defaults.
 
-What each line buys you, in X-developer terms:
-
-| Flag | Purpose |
-|------|---------|
-| `MODULARIZE=1`, `EXPORT_ES6=1`, `EXPORT_NAME=createXcalcModule` | Wrap the wasm in a function the host can call (`spawn`) instead of running on script load. Multiple modules can coexist, the way multiple X clients can connect to one server. |
-| `ASYNCIFY=1` | Lets blocking Xlib calls (`XNextEvent`) yield back to the JS event loop. Without it, `XPending`/`XNextEvent` would deadlock the browser tab. Required for any client whose main loop blocks on input. |
-| `ENVIRONMENT=web,worker` | Build for both the page and Web Workers. Some host configurations spawn the X clients in a worker thread. |
-| `ALLOW_MEMORY_GROWTH=1` | Equivalent to giving xcalc a growable heap instead of a fixed-size arena. |
-| `EXPORTED_FUNCTIONS=['_main', '_emx11_push_*']` | The `emx11_push_*` symbols are how the JS host *injects* X events into the client. They live in `libemx11`, so we must keep them in the final binary even though `xcalc.c` does not call them. Think of these as the wasm-side equivalent of `XPutBackEvent`. |
-| `EXPORTED_RUNTIME_METHODS=['FS', ...]` | We need `FS` because the launcher writes `app-defaults/XCalc` into the live MEMFS. Other clients can omit it. |
-
-Finally the artifact location:
-
-```cmake
-set_target_properties(xcalc PROPERTIES
-    SUFFIX ".js"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts/xcalc"
-)
-```
-
-This produces `build/artifacts/xcalc/xcalc.js` and `xcalc.wasm`. The
-dev server is configured to serve `build/` at `/build/`, so the URL
-the JS host loads is `/build/artifacts/xcalc/xcalc.js`.
+The helper also sets the artifact location:
+`build/artifacts/xcalc/xcalc.js` and `xcalc.wasm`. The dev server
+serves `build/` at `/build/`, so the JS host loads
+`/build/artifacts/xcalc/xcalc.js`. Override with `OUTPUT_DIR <dir>` if
+your demo wants something different.
 
 ## 5. Wire the demo into the top-level build
 
