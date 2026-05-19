@@ -28,7 +28,7 @@ export interface CreateEmX11Options {
   /** Logical (CSS) height of the X screen. Default 768. */
   height?: number;
   /** Optional dynamic-loader adapter. Required for `em.dlopen()`;
-   *  pyodide-tk supplies a wrapper around `loadDynlib` here. wacl-tk's
+   *  pyodide-tk supplies a wrapper around `loadDynlib` here. tcldide's
    *  static-archive build leaves it unset. */
   dlopen?: DlopenAdapter;
   /** Default stdout sink for processes spawned without their own
@@ -166,7 +166,7 @@ export interface EmX11Display {
    *  libemx11 forwards the standardised Tcl_SetNotifier setTimerProc
    *  + alertNotifierProc signals here; hosts implement them on top
    *  of whatever scheduling primitive they have (setTimeout in the
-   *  pyodide-tk worker, rAF in wacl-tk main thread, Atomics.notify
+   *  pyodide-tk worker, rAF in tcldide main thread, Atomics.notify
    *  if cross-thread).
    *
    *  Without an installed wake, libemx11's bridges are silent no-ops

@@ -10,7 +10,7 @@
  * LDSO.loadedLibsByName` so a single `em.dlopen('/usr/lib/libXft.so')`
  * loads the .so and returns its exports table.
  *
- * wacl-tk's static-archive demos never call em.dlopen and never set
+ * tcldide's static-archive demos never call em.dlopen and never set
  * the adapter; the default thrower below makes that misuse loud
  * rather than silent.
  */

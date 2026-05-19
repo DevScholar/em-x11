@@ -22,7 +22,7 @@
  *
  * Two deployments:
  *
- *   Direct (wacl-tk in main thread, em-x11 in main thread): everything
+ *   Direct (tcldide in main thread, em-x11 in main thread): everything
  *   runs in one realm. TextInputOverlay creates the textarea itself,
  *   listens for composition, and feeds the text back via host.devices.
  *

@@ -8,7 +8,7 @@
  * Two delivery paths:
  *
  *   - DOM mode (default): InputBridge attaches its own listeners on
- *     window + canvas in the constructor. Demo / wacl-tk path.
+ *     window + canvas in the constructor. Demo / tcldide path.
  *   - Headless / OffscreenCanvas mode: attachment is skipped; caller
  *     is expected to call pushMouseDown/Up/Move/Key + setPointer with
  *     canvas-local coordinates. Used by the pyodide-tk entry that

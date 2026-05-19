@@ -22,7 +22,7 @@
  *   1. Default DOM mode -- creates an HTMLCanvasElement in document and
  *      styles it (legacy demo path).
  *   2. `element: HTMLCanvasElement` -- adopts an existing canvas owned
- *      by the host page (wacl-tk, pyodide-tk main-thread path).
+ *      by the host page (tcldide, pyodide-tk main-thread path).
  *   3. `surface: OffscreenCanvas` -- worker mode. No DOM is touched.
  *      Caller must own input event delivery via host.devices.push*().
  */

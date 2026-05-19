@@ -34,7 +34,7 @@
  * channel mode, where atom interning crossed a worker boundary and
  * had to unwind via Asyncify. In direct mode every JS body returns
  * sync, so EM_ASYNC_JS is pure overhead -- worse, it forces an
- * unwind/rewind on EVERY call, which makes user-side `wacl_eval`
+ * unwind/rewind on EVERY call, which makes user-side `tcldide_eval`
  * always return a Promise (Asyncify suspends mid-eval), breaking
  * the sync runTcl entry point.
  */
@@ -366,7 +366,7 @@ EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {
      * em-x11 bridge facade; the call gets posted to the main thread
      * which holds the DOM + clipboard permission. Without the hook
      * we fall through to the direct DOM path -- works in main-thread
-     * Hosts (em-x11 demos, wacl-tk). */
+     * Hosts (em-x11 demos, tcldide). */
     var e = globalThis.emX11; var B = e && e._bridge;
     if (B && typeof B.clipboardWriteRemote === 'function') {
         B.clipboardWriteRemote(copy);

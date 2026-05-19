@@ -20,7 +20,7 @@ import { XID_PER_CONN, XID_MASK } from './constants.js';
  *  EmscriptenModule satisfies this; the Pyodide path supplies a shim
  *  that resolves names through LDSO.loadedLibsByName since side-module
  *  exports don't live on the main `_module`. Signature mirrors the
- *  local EmscriptenModule.ccall so the static archive (wacl-tk) path
+ *  local EmscriptenModule.ccall so the static archive (tcldide) path
  *  stays a drop-in. */
 export interface ModuleCcallSurface {
   ccall(

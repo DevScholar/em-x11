@@ -10,7 +10,7 @@
  *   - `stdout` / `stderr` are routed through user-supplied callbacks
  *     instead of being live streams. ReadableStream<string> is the
  *     plan eventually but a callback is what every existing consumer
- *     (wacl-tk, demos) actually needs, so we keep the surface small.
+ *     (tcldide, demos) actually needs, so we keep the surface small.
  *   - `kill()` closes the display and tears down its windows. The
  *     wasm Module itself can't be force-unloaded in a browser; its
  *     code stays linked, only the X resources go away.

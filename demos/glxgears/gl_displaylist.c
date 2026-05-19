@@ -54,7 +54,7 @@ extern void __real_glMaterialfv(GLenum face, GLenum pname, const GLfloat *params
  *
  * Lives in the demo (not emx11_static) so emx11 itself stays free
  * of EM_ASYNC_JS, which would otherwise force Asyncify unwinds on
- * non-GL clients (e.g. wacl-tk's sync runTcl). */
+ * non-GL clients (e.g. tcldide's sync runTcl). */
 EM_ASYNC_JS(void, emx11_glx_yield_until_raf, (void), {
     return new Promise(function(resolve) {
         if (typeof requestAnimationFrame === 'function') {
