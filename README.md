@@ -4,7 +4,7 @@
 
 A WebAssembly implementation of the X11/Xlib C API that renders X windows to a browser Canvas, no real X server required. This project doesn't process X Protocol packets.
 
-![Xeyes Screenshot](screenshots/twm-session.png)
+![TWM Screenshot](screenshots/twm-session.png)
 
 
 # Prerequisites
