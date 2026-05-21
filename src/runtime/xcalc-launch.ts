@@ -33,7 +33,7 @@ export async function launchXcalc(
    * /usr/include/X11/bitmaps/. The session demo stages the whole
    * xbitmaps package up front via stageXbitmaps() so the lookup
    * succeeds without an app-specific fixup here. */
-  const p = emX11.spawn(`${base}/xcalc`, { thisProgram: 'xcalc' });
+  const p = emX11.child_process.spawn(`${base}/xcalc`, { thisProgram: 'xcalc' });
   await p.ready;
   return p;
 }

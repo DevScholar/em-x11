@@ -16,7 +16,7 @@ see [The `globalThis.emX11` slot](#the-globalthisemx11-slot) below.)
 import { createEmX11 } from '@devscholar/em-x11';
 
 const emX11 = await createEmX11({ canvas: document.getElementById('x') });
-const xeyes = emX11.spawn('/build/artifacts/xeyes/xeyes.js', {
+const xeyes = emX11.child_process.spawn('/build/artifacts/xeyes/xeyes.js', {
   argv: ['xeyes'],
   thisProgram: 'xeyes',
 });
@@ -37,7 +37,7 @@ xeyes.on('exit', (code) => console.log('xeyes exited', code));
 | `dlopen`   | `DlopenAdapter` | Pluggable side-module loader for `emX11.dlopen()`. Required for the Pyodide path; static-archive consumers leave it unset. |
 | `stdout`   | `(line: string) => void` | Default sink for spawned processes' Emscripten `print`. Falls back to `console.log`. |
 | `stderr`   | `(line: string) => void` | Default sink for `printErr`. Falls back to `console.warn`. |
-| `loaderCache` | `'use' \| 'bypass' \| 'refresh'` | Cache Storage policy for `emX11.spawn`'s `.js` glue and `.wasm` binary fetches. Default `'bypass'` in Vite dev mode, `'use'` (cache-first) otherwise. See [Caching](#caching). |
+| `loaderCache` | `'use' \| 'bypass' \| 'refresh'` | Cache Storage policy for `emX11.child_process.spawn`'s `.js` glue and `.wasm` binary fetches. Default `'bypass'` in Vite dev mode, `'use'` (cache-first) otherwise. See [Caching](#caching). |
 
 ## `emX11.fs` — Linux-style staging filesystem
 
@@ -89,16 +89,16 @@ no gzip — pre-extract gzipped tars at the call site if needed). To
 write into a process's *live* FS after it has booted, use
 `process.fs.writeFileSync(...)`.
 
-## `emX11.spawn(programUrl, options?) → Process`
-
-Node-style `child_process.spawn`. Returns a `Process` synchronously
-even though the underlying wasm load is async — boot completion
-surfaces via `process.ready` and the `'exit'` / `'error'` events.
+## `emX11.child_process` — spawn and exec wasm processes
 
 ```ts
-emX11.spawn(programUrl, { argv?, thisProgram?, wasmUrl?, stdout?, stderr?, preRun?, factory? })
-emX11.exec(programUrl, opts?): Promise<{ code: number }>   // spawn + wait
+emX11.child_process.spawn(programUrl, { argv?, thisProgram?, wasmUrl?, stdout?, stderr?, preRun?, factory? }): Process
+emX11.child_process.exec(programUrl, opts?): Promise<{ code: number }>
 ```
+
+`spawn` returns a `Process` synchronously even though the underlying wasm
+load is async — boot completion surfaces via `process.ready` and the
+`'exit'` / `'error'` events. `exec` is spawn + wait.
 
 ### Program URL — extension handling
 
@@ -109,9 +109,9 @@ mental model (`exec("/usr/bin/xeyes")` is one path, not two),
 both ends itself:
 
 ```ts
-emX11.spawn('/build/artifacts/xeyes/xeyes')         // → xeyes.js + xeyes.wasm
-emX11.spawn('/build/artifacts/xeyes/xeyes.js')      // explicit glue, wasm derived
-emX11.spawn('/build/artifacts/xeyes/xeyes.wasm')    // explicit wasm, glue derived
+emX11.child_process.spawn('/build/artifacts/xeyes/xeyes')         // → xeyes.js + xeyes.wasm
+emX11.child_process.spawn('/build/artifacts/xeyes/xeyes.js')      // explicit glue, wasm derived
+emX11.child_process.spawn('/build/artifacts/xeyes/xeyes.wasm')    // explicit wasm, glue derived
 ```
 
 Pass `wasmUrl` only when the binary lives at a different path than
@@ -237,7 +237,7 @@ Without an adapter `emX11.dlopen()` throws.
 
 ## Caching
 
-`emX11.spawn()` fetches a `.js` glue and a `.wasm` binary every time;
+`emX11.child_process.spawn()` fetches a `.js` glue and a `.wasm` binary every time;
 on the second visit those bytes don't have to come from the network.
 em-x11 routes both fetches through the
 [Cache Storage API](https://developer.mozilla.org/docs/Web/API/Cache),

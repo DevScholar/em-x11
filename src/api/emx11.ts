@@ -4,19 +4,18 @@
  * Wraps the internal Host and bundles the public surfaces into one
  * object:
  *
- *   emX11.fs        — staging FS manifest (api/fs.ts)
- *   emX11.display   — canvas/root window/input injection (api/display.ts)
- *   emX11.debug     — trace flags + state dumpers (api/debug.ts)
- *   emX11.spawn     — spawn a wasm process (api/process.ts)
- *   emX11.exec      — spawn + wait
- *   emX11.dlopen    — pluggable side-module loader (api/dlopen.ts)
- *   emX11._host     — @internal escape hatch, unstable
+ *   emX11.fs              — staging FS manifest (api/fs.ts)
+ *   emX11.display         — canvas/root window/input injection (api/display.ts)
+ *   emX11.debug           — trace flags + state dumpers (api/debug.ts)
+ *   emX11.child_process   — spawn / exec wasm processes (api/child_process.ts)
+ *   emX11.dlopen          — pluggable side-module loader (api/dlopen.ts)
+ *   emX11._host           — @internal escape hatch, unstable
  *
  * The instance is NOT auto-published on globalThis. Host.attachToBridge()
  * does claim `globalThis.emX11._bridge` / `._caches` / `._debug` because
  * the C-side EM_JS bodies in libemx11 read them synchronously, but the
- * public surface (fs, display, spawn, ...) stays on the local instance
- * the caller binds. Callers who want DevTools access publish it
+ * public surface (fs, display, child_process, ...) stays on the local
+ * instance the caller binds. Callers who want DevTools access publish it
  * themselves: `globalThis.app = emX11`.
  */
 
@@ -26,15 +25,14 @@ import { cleanupOldCaches, type CacheMode } from '../loader/cache.js';
 import { DebugNamespace } from './debug.js';
 import { DisplayNamespace } from './display.js';
 import { FSNamespace } from './fs.js';
-import { ProcessImpl } from './process.js';
+import { ChildProcessNamespace } from './child_process.js';
 import { defaultDlopen } from './dlopen.js';
 import type {
   CreateEmX11Options,
   DlopenAdapter,
   DlopenOptions,
   LoadedModule,
-  Process,
-  SpawnOptions,
+  EmX11ChildProcess,
   EmX11Debug,
   EmX11Display,
   EmX11FS,
@@ -59,6 +57,7 @@ export class EmX11 {
   readonly fs: EmX11FS;
   readonly display: EmX11Display;
   readonly debug: EmX11Debug;
+  readonly child_process: EmX11ChildProcess;
   readonly version = VERSION;
 
   /** @internal Escape hatch onto the internal Host. Surface unstable;
@@ -95,6 +94,14 @@ export class EmX11 {
     this.defaultStderr = options.stderr ?? ((l) => console.warn(l));
     this.defaultCacheMode = options.loaderCache ?? defaultCacheModeForEnv();
 
+    this.child_process = new ChildProcessNamespace(
+      this._host,
+      this._fs,
+      this.defaultStdout,
+      this.defaultStderr,
+      this.defaultCacheMode,
+    );
+
     /* Fire-and-forget: prune any leftover caches from older em-x11
      * versions on the same origin. Doesn't block construction; if it
      * runs late, the worst case is one extra entry sitting in storage
@@ -107,28 +114,6 @@ export class EmX11 {
      * in libemx11 read synchronously; that is the entire global ABI.
      * Callers who want DevTools access publish the instance under
      * their own name (`globalThis.app = emX11`). */
-  }
-
-  /** Spawn a wasm process. Returns synchronously; await `process.ready`
-   *  for boot completion, or use the Node-style event API
-   *  (`process.on('exit', ...)`). */
-  spawn(glueUrl: string, options: SpawnOptions = {}): Process {
-    return new ProcessImpl(
-      this._host,
-      this._fs,
-      glueUrl,
-      options,
-      this.defaultStdout,
-      this.defaultStderr,
-      this.defaultCacheMode,
-    );
-  }
-
-  /** spawn + wait. Resolves with the exit code. */
-  async exec(glueUrl: string, options: SpawnOptions = {}): Promise<{ code: number }> {
-    const p = this.spawn(glueUrl, options);
-    await p.ready;
-    return p.wait();
   }
 
   /** Load a side module via the configured DlopenAdapter. Throws if

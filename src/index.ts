@@ -11,7 +11,7 @@
  *
  *   const em = await createEmX11({ canvas: document.getElementById('x') });
  *   await em.fs.mount({ type: 'tar', source: '/assets/x11-base.tar', target: '/usr' });
- *   const xeyes = em.spawn('/build/artifacts/xeyes/xeyes', {
+ *   const xeyes = em.child_process.spawn('/build/artifacts/xeyes/xeyes', {
  *     argv: ['xeyes'],
  *     thisProgram: 'xeyes',
  *   });

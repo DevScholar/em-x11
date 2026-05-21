@@ -107,17 +107,17 @@ export interface LaunchTwmOptions {
 }
 
 /** Spawn twm in single-thread mode. Returns once twm has armed
- *  SubstructureRedirectMask on root, so the caller's next emX11.spawn
- *  is guaranteed to route through twm's MapRequest intercept. Without
- *  that barrier, a racing client could map at root-local (0,0) before
- *  twm ever sees a MapRequest. */
+ *  SubstructureRedirectMask on root, so the caller's next
+ *  emX11.child_process.spawn is guaranteed to route through twm's
+ *  MapRequest intercept. Without that barrier, a racing client could
+ *  map at root-local (0,0) before twm ever sees a MapRequest. */
 export async function launchTwm(
   emX11: EmX11,
   options: LaunchTwmOptions = {},
 ): Promise<Process> {
   const base = options.artifactBase ?? '/build/artifacts/twm';
   emX11.fs.writeFileSync(TWMRC_PATH, TWMRC.trimStart());
-  const p = emX11.spawn(`${base}/twm`, {
+  const p = emX11.child_process.spawn(`${base}/twm`, {
     thisProgram: 'twm',
     argv: ['-f', TWMRC_PATH],
   });

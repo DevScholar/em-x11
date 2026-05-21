@@ -38,10 +38,10 @@ export interface CreateEmX11Options {
   /** Default stderr sink (Module `printErr`). Defaults to
    *  `console.warn`. */
   stderr?: (line: string) => void;
-  /** Cache Storage policy for `emX11.spawn`'s `.js` glue and `.wasm`
-   *  binary fetches. Default is `'use'` (cache-first) in production
-   *  and `'bypass'` in Vite dev mode (`import.meta.env.DEV`), so
-   *  artifact rebuilds are picked up immediately during development
+  /** Cache Storage policy for `emX11.child_process.spawn`'s `.js` glue
+   *  and `.wasm` binary fetches. Default is `'use'` (cache-first) in
+   *  production and `'bypass'` in Vite dev mode (`import.meta.env.DEV`),
+   *  so artifact rebuilds are picked up immediately during development
    *  without needing to manually clear the cache.
    *
    *  - `'use'`     — cache-first; populate on miss
@@ -251,6 +251,16 @@ export interface EmX11Debug {
   dumpWindows(): void;
   /** Print every registered passive button grab. */
   dumpGrabs(): void;
+}
+
+/* -- child_process ------------------------------------------------------- */
+
+export interface EmX11ChildProcess {
+  /** Node-style spawn. Returns synchronously; await `process.ready` for
+   *  boot completion, or listen via `process.on('exit', ...)`. */
+  spawn(glueUrl: string, options?: SpawnOptions): Process;
+  /** spawn + wait. Resolves with the exit code. */
+  exec(glueUrl: string, options?: SpawnOptions): Promise<{ code: number }>;
 }
 
 /* -- spawn / process ----------------------------------------------------- */

@@ -12,7 +12,7 @@ import { createEmX11 } from '../../src/index.js';
 
 const emX11 = await createEmX11({ width: 1024, height: 768 });
 
-const glxgears = emX11.spawn('/build/artifacts/glxgears/glxgears', {
+const glxgears = emX11.child_process.spawn('/build/artifacts/glxgears/glxgears', {
   thisProgram: 'glxgears',
 });
 await glxgears.ready;

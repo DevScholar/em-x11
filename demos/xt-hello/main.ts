@@ -7,5 +7,5 @@ import { createEmX11 } from '../../src/index.js';
 
 const emX11 = await createEmX11({ width: 1024, height: 768 });
 
-const xtHello = emX11.spawn('/build/artifacts/xt-hello/xt-hello', { thisProgram: 'xt-hello' });
+const xtHello = emX11.child_process.spawn('/build/artifacts/xt-hello/xt-hello', { thisProgram: 'xt-hello' });
 await xtHello.ready;
