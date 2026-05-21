@@ -183,6 +183,13 @@ Display *XOpenDisplay(const char *display_name) {
     return &g_display;
 }
 
+/* Used by the weak execvp override in process.c (linked into demos
+ * that opt in -- twm currently) to identify the calling wasm to the
+ * host so it can target the right ProcessImpl for respawn. */
+int emx11_current_conn_id(void) {
+    return g_display_open ? g_display.conn_id : 0;
+}
+
 int XCloseDisplay(Display *display) {
     (void)display;
     if (g_display_open) {

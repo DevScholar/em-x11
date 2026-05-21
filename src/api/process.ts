@@ -30,18 +30,24 @@ type ExitCb = (code: number) => void;
 type ErrorCb = (err: Error) => void;
 
 export class ProcessImpl implements Process {
-  readonly argv: string[];
-  readonly thisProgram: string;
-  readonly ready: Promise<void>;
+  argv: string[];
+  thisProgram: string;
+  ready: Promise<void>;
 
   private _pid = 0;
   private _module: EmscriptenModule | null = null;
-  private readonly bootPromise: Promise<{ connId: number; module: EmscriptenModule }>;
+  private bootPromise: Promise<{ connId: number; module: EmscriptenModule }>;
   private exitCode: number | null = null;
   private exitError: Error | null = null;
   private readonly exitListeners: ExitCb[] = [];
   private readonly errorListeners: ErrorCb[] = [];
   private readonly waiters: ((code: number) => void)[] = [];
+
+  /* Captured launch parameters, reused for execvp-driven respawn.
+   * The argv slot inside is rewritten with the exec()-supplied argv;
+   * everything else (cache mode, stdio, preRun) carries over. */
+  private readonly launchOpts: LaunchProcessOptions;
+  private readonly connection: ConnectionManager;
 
   constructor(
     private readonly host: Host,
@@ -52,6 +58,7 @@ export class ProcessImpl implements Process {
     defaultStderr: (line: string) => void,
     defaultCacheMode: CacheMode,
   ) {
+    this.connection = host.connection;
     this.argv = opts.argv ?? [];
     this.thisProgram = opts.thisProgram ?? deriveProgName(glueUrl);
 
@@ -69,7 +76,7 @@ export class ProcessImpl implements Process {
      * routes, and resolve `ready`. The host's connection.launchClient
      * already does the load+attach dance; we layer Process semantics
      * on top. */
-    const launchOpts: LaunchProcessOptions = {
+    this.launchOpts = {
       glueUrl: resolvedGlue,
       wasmUrl: resolvedWasm,
       arguments: this.argv,
@@ -79,19 +86,59 @@ export class ProcessImpl implements Process {
       printErr: stderr,
       preRun: [fsPreRun, ...userPreRun],
     };
-    if (opts.factory !== undefined) launchOpts.factory = opts.factory;
-    this.bootPromise = launchProcess(this.host.connection, launchOpts);
+    if (opts.factory !== undefined) this.launchOpts.factory = opts.factory;
+    this.bootPromise = launchProcess(this.connection, this.launchOpts);
+    this.ready = this.attachBoot(this.bootPromise);
+  }
 
-    this.ready = this.bootPromise.then(
+  /** Wire up bookkeeping for a (re-)launch: pid, module ref, exec
+   *  handler, error routing. Returns the ready promise. Shared between
+   *  the initial constructor launch and the execvp-driven respawn. */
+  private attachBoot(
+    boot: Promise<{ connId: number; module: EmscriptenModule }>,
+  ): Promise<void> {
+    return boot.then(
       ({ connId, module }) => {
         this._pid = connId;
         this._module = module;
+        this.host.registerExecHandler(connId, (argv) => this.respawn(argv));
       },
       (err: unknown) => {
         this.exitError = coerceError(err);
         for (const cb of this.errorListeners) cb(this.exitError);
         throw this.exitError;
       },
+    );
+  }
+
+  /** execvp-driven respawn: tear down the old connection (Module.quit
+   *  may already have done so by the time we land here, but close() is
+   *  idempotent), then boot a fresh Module instance through the same
+   *  launchOpts with the new argv. Updates `this._pid` / `this._module`
+   *  in place so callers holding a Process reference (launchTwm) keep
+   *  their handle valid across the restart. */
+  private respawn(argv: string[]): void {
+    if (this.exitCode !== null) return;
+    const oldPid = this._pid;
+    console.log('[emx11:respawn] begin', { oldPid, argv });
+    if (oldPid !== 0) {
+      this.host.unregisterExecHandler(oldPid);
+      this.host.connection.close(oldPid);
+    }
+    this._module = null;
+    this._pid = 0;
+    const newArgv = argv.slice(1);
+    const thisProgram = argv[0] ?? this.thisProgram;
+    this.argv = newArgv;
+    this.thisProgram = thisProgram;
+    this.launchOpts.arguments = newArgv;
+    this.launchOpts.thisProgram = thisProgram;
+    console.log('[emx11:respawn] launching new module');
+    this.bootPromise = launchProcess(this.connection, this.launchOpts);
+    this.ready = this.attachBoot(this.bootPromise);
+    this.ready.then(
+      () => console.log('[emx11:respawn] new module ready, pid=', this._pid),
+      (err) => console.error('[emx11:respawn] new module failed:', err),
     );
   }
 
@@ -131,6 +178,7 @@ export class ProcessImpl implements Process {
   kill(): void {
     if (this.exitCode !== null) return;
     if (this._pid !== 0) {
+      this.host.unregisterExecHandler(this._pid);
       this.host.connection.close(this._pid);
     }
     this.signalExit(0);
@@ -244,12 +292,17 @@ async function launchProcess(
   opts: LaunchProcessOptions,
 ): Promise<{ connId: number; module: EmscriptenModule }> {
   if (!opts.factory) {
+    /* Clone preRun: Emscripten's runtime drains the array via shift()
+     * during boot, so reusing the captured one across an execvp-driven
+     * respawn would hand the new Module an empty list — staged files
+     * (twmrc) silently disappear and twm boots with built-in defaults,
+     * deadlocking in AddWindow's interactive-placement XMaskEvent. */
     return connection.launchClient({
       glueUrl: opts.glueUrl,
       wasmUrl: opts.wasmUrl,
       arguments: opts.arguments,
       thisProgram: opts.thisProgram,
-      preRun: opts.preRun,
+      preRun: [...opts.preRun],
       cacheMode: opts.cacheMode,
       print: opts.print,
       printErr: opts.printErr,

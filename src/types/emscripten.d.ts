@@ -453,6 +453,13 @@ export interface EmX11Host {
    *  event loop now" primitive (analogue of writing to a self-pipe
    *  fd to break a blocking select). */
   onTclAlertNotifier(): void;
+
+  /** Wasm-side `execvp` (process.c weak override, currently linked into
+   *  twm only). Host stashes the request and a respawn handler
+   *  registered by ProcessImpl picks it up after the wasm exits, so
+   *  twm's F_RESTART produces a fresh Module instance with the supplied
+   *  argv -- the wasm analogue of Linux's fork-less exec. */
+  onExecSelf(connId: number, argv: string[]): void;
 }
 
 declare global {

@@ -310,6 +310,27 @@ EM_JS(void, emx11_js_xim_set_spot, (unsigned int window, int x, int y), {
     if (h && h.onXimSetSpot) h.onXimSetSpot(window >>> 0, x | 0, y | 0);
 });
 
+/* --- exec self (twm F_RESTART) ------------------------------------------
+ *
+ * Emscripten's libc execvp is a stub. process.c (linked into the twm
+ * wasm only) intercepts execvp/execv and routes to this bridge so the
+ * host can kill+respawn the calling connection -- the wasm analogue of
+ * a Linux fork-less exec. ProcessImpl registers a respawn handler when
+ * its connection lands; that handler triggers a new Module instance
+ * with the supplied argv. */
+EM_JS(void, emx11_js_exec_self, (int conn_id, int argv_ptrs, int argc), {
+    var args = [];
+    if (argv_ptrs !== 0 && argc > 0) {
+        var base = argv_ptrs >> 2;
+        for (var i = 0; i < argc; i++) {
+            var p = HEAPU32[base + i] >>> 0;
+            args.push(p === 0 ? '' : UTF8ToString(p));
+        }
+    }
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (h && h.onExecSelf) h.onExecSelf(conn_id | 0, args);
+});
+
 /* --- atom ---------------------------------------------------------------- */
 
 EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {

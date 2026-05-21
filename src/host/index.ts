@@ -416,6 +416,39 @@ export class Host implements EmX11Host {
     this.devices.setExplicitFocus(window);
   }
 
+  /* -- exec-self (twm F_RESTART) ---------------------------------------- */
+
+  /** Per-connection respawn handlers, populated by ProcessImpl when its
+   *  connection lands and consumed when the wasm calls execvp via the
+   *  process.c override. The handler tears down + re-launches into the
+   *  same Process handle so callers that hold a `Process` reference
+   *  (launchTwm's awaiter) keep their handle valid across the restart. */
+  private execHandlers = new Map<number, (argv: string[]) => void>();
+
+  registerExecHandler(connId: number, handler: (argv: string[]) => void): void {
+    this.execHandlers.set(connId, handler);
+  }
+  unregisterExecHandler(connId: number): void {
+    this.execHandlers.delete(connId);
+  }
+
+  onExecSelf(connId: number, argv: string[]): void {
+    console.log('[emx11:onExecSelf] conn=', connId, 'argv=', argv);
+    const handler = this.execHandlers.get(connId);
+    if (!handler) {
+      console.warn(`[emx11] onExecSelf: no handler for conn ${connId}`);
+      return;
+    }
+    setTimeout(() => {
+      console.log('[emx11:onExecSelf] dispatch respawn');
+      try {
+        handler(argv);
+      } catch (err) {
+        console.error('[emx11] exec-self respawn failed:', err);
+      }
+    }, 0);
+  }
+
   /* -- EmX11Host: XIM (xim.c) ------------------------------------------- */
 
   /** XSetICFocus on any module. Tk fires this when its focus moves
