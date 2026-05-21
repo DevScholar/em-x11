@@ -722,11 +722,29 @@ Bool XTranslateCoordinates(Display *display, Window src_w, Window dest_w,
 Status XQueryTree(Display *display, Window w,
                   Window *root_return, Window *parent_return,
                   Window **children_return, unsigned int *nchildren_return) {
-    (void)w;
     if (root_return)      *root_return      = display->screens[0].root;
     if (parent_return)    *parent_return    = None;
     if (children_return)  *children_return  = NULL;
     if (nchildren_return) *nchildren_return = 0;
+
+    /* Host enumerates mapped children of `w` in bottom-to-top stacking
+     * order. twm's RestartPreviousState walks this after F_RESTART
+     * respawn -- without it the new wasm sees an empty root and never
+     * re-manages the still-mapped clients from the prior session. */
+    int count = emx11_js_get_window_children_count(w);
+    if (count <= 0) return 1;
+    Window *kids = (Window *)malloc(sizeof(Window) * (size_t)count);
+    if (!kids) return 1;
+    /* The bridge writes 32-bit ids; Window is 32-bit in our build but
+     * read into an int buffer first to be unambiguous about layout. */
+    int *buf = (int *)malloc(sizeof(int) * (size_t)count);
+    if (!buf) { free(kids); return 1; }
+    int got = emx11_js_get_window_children(w, buf, count);
+    if (got <= 0) { free(buf); free(kids); return 1; }
+    for (int i = 0; i < got; i++) kids[i] = (Window)(unsigned int)buf[i];
+    free(buf);
+    if (children_return)  *children_return  = kids;
+    if (nchildren_return) *nchildren_return = (unsigned int)got;
     return 1;
 }
 

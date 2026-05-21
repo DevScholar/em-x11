@@ -181,6 +181,38 @@ EM_JS(int, emx11_js_get_window_shape_rects, (unsigned int id, int dstPtr, int ca
     return n;
 });
 
+/* XQueryTree cross-conn: list mapped children of `parent` (root is the
+ * usual caller, from twm's RestartPreviousState walk). Two-call pattern
+ * matching shape: count first, then fetch into a sized buffer. The
+ * count-call stashes the array so the fetch doesn't re-query. */
+EM_JS(int, emx11_js_get_window_children_count, (unsigned int parent), {
+    var e = globalThis.emX11; var h = e && e._bridge;
+    if (!h) return 0;
+    var kids = h.getWindowChildren(parent >>> 0);
+    if (!kids) return 0;
+    var caches = e._caches || (e._caches = {});
+    caches.childrenStash = { parent: parent >>> 0, kids: kids };
+    return kids.length | 0;
+});
+
+EM_JS(int, emx11_js_get_window_children, (unsigned int parent, int dstPtr, int capacity), {
+    var e = globalThis.emX11;
+    var caches = e && e._caches;
+    var stashed = caches && caches.childrenStash;
+    var kids = (stashed && stashed.parent === (parent >>> 0)) ? stashed.kids : null;
+    if (caches) caches.childrenStash = null;
+    if (!kids) {
+        var h = e && e._bridge;
+        if (!h) return 0;
+        kids = h.getWindowChildren(parent >>> 0);
+        if (!kids) return 0;
+    }
+    var n = Math.min(kids.length | 0, capacity | 0);
+    var base = dstPtr >> 2;
+    for (var i = 0; i < n; i++) HEAPU32[base + i] = kids[i] >>> 0;
+    return n;
+});
+
 /* --- passive grabs (XGrabButton / XUngrabButton) ------------------------- */
 
 EM_JS(void, emx11_js_grab_button,

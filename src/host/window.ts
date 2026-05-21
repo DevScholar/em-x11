@@ -79,6 +79,25 @@ export class WindowManager {
     };
   }
 
+  /** Cross-connection XQueryTree: enumerate mapped child XIDs of `parent`
+   *  in bottom-to-top stacking order (xorg semantics — the order Xlib
+   *  documents for children_return). twm's RestartPreviousState walks
+   *  this on root after F_RESTART respawn so the new wasm reaps the
+   *  existing client windows; without it twm sees an empty root and
+   *  loses all decorations.
+   *
+   *  Includes mapped windows only; an unmapped child wouldn't be
+   *  MappedNotOverride() anyway. Override-redirect filtering is left to
+   *  the caller (twm checks via XGetWindowAttributes). */
+  childrenOf(parent: number): number[] {
+    const out: { id: number; stack: number }[] = [];
+    for (const w of this.host.renderer.windows.values()) {
+      if (w.parent === parent && w.mapped) out.push({ id: w.id, stack: w.stackOrder });
+    }
+    out.sort((a, b) => a.stack - b.stack);
+    return out.map((e) => e.id);
+  }
+
   onCreate(
     connId: number,
     id: number,

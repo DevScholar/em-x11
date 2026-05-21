@@ -191,6 +191,13 @@ export interface EmX11Host {
    *  one set of compositor entries, one place to hang the
    *  SubstructureRedirect holder in Step 3. */
   getRootWindow(): number;
+  /** XQueryTree cross-conn: enumerate mapped children of `parent` in
+   *  bottom-to-top stacking order. Returns [] for an unknown / leaf
+   *  parent. Used by twm's RestartPreviousState walk after F_RESTART
+   *  respawn so the new wasm finds the still-mapped xeyes/xcalc
+   *  shells (xorg's XQueryTree would return them; our stub used to
+   *  return 0, leaving twm convinced root was empty). */
+  getWindowChildren(parent: number): number[];
   onWindowCreate(
     connId: number,
     id: number,

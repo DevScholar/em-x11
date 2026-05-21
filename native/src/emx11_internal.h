@@ -507,6 +507,14 @@ extern void emx11_js_pointer_xy(int *x_out, int *y_out);
  * return 0 from XGetWindowAttributes. */
 extern void emx11_js_get_window_attrs(Window id, int *out);
 
+/* Cross-connection XQueryTree: list mapped children of `parent` in
+ * bottom-to-top stacking order. Two-call pattern (count, then fetch);
+ * count returns 0 for unknown parent / no children. Used by twm's
+ * RestartPreviousState walk after F_RESTART respawn so the new wasm
+ * re-manages still-mapped client windows from the prior session. */
+extern int emx11_js_get_window_children_count(Window parent);
+extern int emx11_js_get_window_children(Window parent, int *out, int capacity);
+
 /* Cross-connection abs-origin lookup. Returns 3 ints:
  *   [0] found (0/1)  [1] ax  [2] ay
  * Used by event.c::window_abs_origin when the parent chain in the

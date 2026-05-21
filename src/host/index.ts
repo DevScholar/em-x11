@@ -195,6 +195,9 @@ export class Host implements EmX11Host {
   getRootWindow(): number {
     return this.window.getRootWindow();
   }
+  getWindowChildren(parent: number): number[] {
+    return this.window.childrenOf(parent);
+  }
   getPointerXY(): Point {
     return this.devices.getPointerXY();
   }
