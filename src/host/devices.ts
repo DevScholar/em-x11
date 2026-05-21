@@ -160,6 +160,36 @@ export class InputBridge {
     this.activePointerGrab = null;
   }
 
+  /** Drop every input-routing slot pointing at the closed connection's
+   *  Module. Without this, F_RESTART's kill+respawn leaves the active
+   *  pointer grab (twm holds one while a menu is up), the implicit drag
+   *  grab from the menu click, or the keyboard focus pointing at the
+   *  dead Module -- every subsequent ccall lands in unloaded wasm code
+   *  and the canvas appears frozen. Resolution by *Module identity*
+   *  rather than connId, because windows owned by the dead conn are
+   *  destroyed before this runs so focusedWindow's owner is already
+   *  gone. */
+  forgetConnection(module: ModuleCcallSurface | null): void {
+    if (this.activePointerGrab && this.activePointerGrab.module === module) {
+      this.activePointerGrab = null;
+      this.grabCursor = null;
+    }
+    if (this.dragModule === module) this.dragModule = null;
+    /* focusedWindow / explicitFocus may point at a window the dead conn
+     * owned; the WindowManager teardown already drops those windows from
+     * the renderer, so moduleForWindow returns null. Reset eagerly so
+     * the first key event after respawn doesn't have to walk through
+     * a stale id. */
+    if (this.focusedWindow !== null &&
+        this.host.connection.connOf(this.focusedWindow) === undefined) {
+      this.focusedWindow = null;
+    }
+    if (this.explicitFocus !== null &&
+        this.host.connection.connOf(this.explicitFocus) === undefined) {
+      this.explicitFocus = null;
+    }
+  }
+
   /** Walk `winId`'s parent chain in the renderer tree and pick the
    *  nearest ancestor with a non-null `cursor`. Mirrors X server cursor
    *  inheritance (xserver/dix/cursor.c::CheckCursorConfinement walks

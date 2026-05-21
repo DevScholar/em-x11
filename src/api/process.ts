@@ -120,7 +120,6 @@ export class ProcessImpl implements Process {
   private respawn(argv: string[]): void {
     if (this.exitCode !== null) return;
     const oldPid = this._pid;
-    console.log('[emx11:respawn] begin', { oldPid, argv });
     if (oldPid !== 0) {
       this.host.unregisterExecHandler(oldPid);
       this.host.connection.close(oldPid);
@@ -133,13 +132,11 @@ export class ProcessImpl implements Process {
     this.thisProgram = thisProgram;
     this.launchOpts.arguments = newArgv;
     this.launchOpts.thisProgram = thisProgram;
-    console.log('[emx11:respawn] launching new module');
     this.bootPromise = launchProcess(this.connection, this.launchOpts);
     this.ready = this.attachBoot(this.bootPromise);
-    this.ready.then(
-      () => console.log('[emx11:respawn] new module ready, pid=', this._pid),
-      (err) => console.error('[emx11:respawn] new module failed:', err),
-    );
+    this.ready.catch((err) => {
+      console.error('[emx11] respawn failed:', err);
+    });
   }
 
   get pid(): number {

@@ -62,9 +62,6 @@ export class EventDispatcher {
           }
         }
         if (mask & SubstructureRedirectMask) {
-          console.info(
-            `em-x11: conn ${connId} now holds SubstructureRedirect on win ${id}`,
-          );
           const waiters = this.redirectWaiters.get(id);
           if (waiters) {
             this.redirectWaiters.delete(id);

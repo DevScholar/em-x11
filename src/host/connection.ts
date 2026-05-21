@@ -269,6 +269,14 @@ export class ConnectionManager {
   close(connId: number): void {
     const conn = this.connections.get(connId);
     if (!conn) return;
+    /* Drop input-routing slots that point at this conn's Module BEFORE
+     * we tear down its windows. The active pointer grab (a WM menu
+     * commonly holds one), implicit drag grab, and focus pointers can
+     * all be cached as Module references inside InputBridge; without
+     * eviction here, the next motion / key event would ccall into
+     * unloaded wasm code and the canvas would appear frozen even though
+     * a fresh wasm has already booted (F_RESTART respawn). */
+    this.host.devices.forgetConnection(conn.module);
     /* Notify cross-conn parents (typically twm holding SubstructureNotify
      * on its frames) BEFORE the renderer wipes our windows. Without this
      * twm has no signal that the inner client is gone and its frame

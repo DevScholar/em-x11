@@ -436,14 +436,16 @@ export class Host implements EmX11Host {
   }
 
   onExecSelf(connId: number, argv: string[]): void {
-    console.log('[emx11:onExecSelf] conn=', connId, 'argv=', argv);
     const handler = this.execHandlers.get(connId);
     if (!handler) {
       console.warn(`[emx11] onExecSelf: no handler for conn ${connId}`);
       return;
     }
+    /* Defer to a fresh macrotask so the respawn launches OUTSIDE the
+     * Asyncify unwind triggered by the wasm's exit(): boot of the new
+     * Module needs a clean JS stack, not one held mid-rewind by the
+     * dying wasm. */
     setTimeout(() => {
-      console.log('[emx11:onExecSelf] dispatch respawn');
       try {
         handler(argv);
       } catch (err) {
