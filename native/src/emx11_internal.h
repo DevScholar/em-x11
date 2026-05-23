@@ -304,6 +304,14 @@ unsigned int emx11_event_queue_size(const Display *dpy);
  * root-menu hover, which gates on EnterNotify on the menu window. */
 void         emx11_repoll_pointer_window(Display *dpy);
 
+/* Reset the C-side implicit pointer grab. XGrabPointer calls this before
+ * installing the active grab so the stale grab_window from the original
+ * ButtonPress (which triggered the menu/combobox popup) doesn't keep
+ * capturing ButtonRelease events meant for popup entries. Without this,
+ * MenuButton items see ButtonPress but never ButtonRelease, so their
+ * -command callbacks don't fire. */
+void         emx11_reset_implicit_grab(void);
+
 /* Remove the first event from the queue whose type's event-mask bit is
  * set in `mask`. Copies the event into *out and compacts the queue.
  * Returns true on hit, false if nothing matched. */

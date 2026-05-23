@@ -1087,6 +1087,12 @@ int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
                  Window confine_to, Cursor cursor, Time t) {
     (void)event_mask; (void)pointer_mode; (void)keyboard_mode;
     (void)confine_to; (void)t;
+    /* Reset the C-side implicit grab before installing the active one.
+     * The ButtonPress that triggered this popup left grab_window pointing
+     * at the original button; without clearing it, subsequent ButtonRelease
+     * events on popup entries (MenuButton items, ComboBox list) get
+     * delivered to the stale grab_window instead of the entry. */
+    emx11_reset_implicit_grab();
     /* Honor the cursor argument: while a grab is active the canvas
      * pointer should display this cursor everywhere, overriding
      * per-window XDefineCursor. twm uses MoveCursor/ResizeCursor here. */
