@@ -78,14 +78,28 @@ export function paintExposedRegions(
       anyChange = true;
       const { ax, ay } = absOrigin(r, w);
       /* Translate exposed (abs) → local, intersect with unpainted,
-       * translate back to abs for the Expose dispatch + bg paint. */
+       * translate back to abs for the Expose dispatch + bg paint.
+       *
+       * xserver VTMap path (miComputeClips): when a window becomes
+       * newly viewable, `exposed = universe - borderVisible` where
+       * borderVisible is empty for a previously-unmapped window,
+       * yielding the full content area. em-x11's backing-preservation
+       * model (unpaintedRegion) breaks this for re-expose after
+       * Unmap→Map cycles: a descendant that was painted before the
+       * parent Unmap has an empty unpaintedRegion, so no Expose is
+       * sent on re-Map and the widget never redraws. Match xorg by
+       * treating NotViewable→Viewable transitions as fully unpainted. */
+      const wasNotViewable = regionIsEmpty(old.clip);
+      const effectiveUnpainted = wasNotViewable
+        ? [{ ax: 0, ay: 0, w: w.width, h: w.height }]
+        : w.unpaintedRegion;
       const exposedLocal = contentExposed.map((rc) => ({
         ax: rc.ax - ax,
         ay: rc.ay - ay,
         w: rc.w,
         h: rc.h,
       }));
-      const needsRedrawLocal = regionIntersect(w.unpaintedRegion, exposedLocal);
+      const needsRedrawLocal = regionIntersect(effectiveUnpainted, exposedLocal);
       if (!regionIsEmpty(needsRedrawLocal)) {
         for (const rc of needsRedrawLocal) {
           paintBackgroundIntoBacking(r, w, rc.ax, rc.ay, rc.w, rc.h);
