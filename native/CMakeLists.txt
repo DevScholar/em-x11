@@ -22,42 +22,67 @@ option(EMX11_HIDE_INTERNAL_SYMBOLS "Apply -fvisibility=hidden to the static arch
 
 set(EMX11_PUBLIC_HEADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# Sources per archive. Anything an Xlib stub references that is itself
-# Xlib (XCreateRegion, XKeysymToString, XCopyPlane, ...) lives in
-# libX11.a -- the files are organised per xorg/libX11 conventions.
+# Sources per archive, organised to mirror the xorg source tree layout:
+#
+#   dix/        — xserver/dix/        (device-independent X layer)
+#   Xext/       — xserver/Xext/       (built-in extensions: SHAPE, ...)
+#   render/     — xserver/render/     (RENDER extension)
+#   xkb/        — xserver/xkb/        (XKB extension)
+#   glx/        — xserver/glx/        (GLX extension)
+#   libX11/     — libX11/src/         (Xlib client API drawing + text + Xrm)
+#   emx11/      — em-x11–specific     (wasm bridges, browser glue, etc.)
+#
+# Files in emx11/ have no direct xorg counterpart.
 set(EMX11_X11_SOURCES
-    src/display.c
-    src/window.c
-    src/gc.c
-    src/drawing.c
-    src/event.c
-    src/event_queue.c
-    src/event_send.c
-    src/event_keysym.c
-    src/atom.c
-    src/property.c
-    src/selection.c
-    src/color.c
-    src/error.c
-    src/font.c
-    src/wm.c
-    src/xrm.c
-    src/pixmap.c
-    src/xim.c
-    src/Region.c
-    src/Text16.c
-    src/ImText.c
-    src/Cursor.c
-    src/xkb.c
-    src/keysym_table.c
-    src/bridges.c
-    src/notifier.c
+    emx11/display.c
+    dix/window.c
+    dix/gc.c
+    libX11/FillRct.c
+    libX11/DrRect.c
+    libX11/FillRcts.c
+    libX11/DrLine.c
+    libX11/DrLines.c
+    libX11/DrSegs.c
+    libX11/DrPoint.c
+    libX11/DrPoints.c
+    libX11/DrArc.c
+    libX11/DrArcs.c
+    libX11/FillArc.c
+    libX11/FillArcs.c
+    libX11/FillPoly.c
+    libX11/Clear.c
+    libX11/ClearArea.c
+    libX11/CopyArea.c
+    libX11/CopyPlane.c
+    libX11/PutImage.c
+    dix/events.c
+    emx11/event_queue.c
+    emx11/event_send.c
+    emx11/event_keysym.c
+    dix/atom.c
+    dix/property.c
+    dix/selection.c
+    dix/colormap.c
+    emx11/error.c
+    dix/dixfonts.c
+    emx11/wm.c
+    libX11/Xrm.c
+    dix/pixmap.c
+    emx11/xim.c
+    dix/region.c
+    libX11/Text16.c
+    libX11/ImText.c
+    dix/cursor.c
+    xkb/xkb.c
+    emx11/keysym_table.c
+    emx11/bridges.c
+    emx11/notifier.c
 )
-set(EMX11_XEXT_SOURCES       src/ext/shape.c)
-set(EMX11_XRENDER_SOURCES    src/ext/xrender.c)
-set(EMX11_FONTCONFIG_SOURCES src/fontconfig.c)
-set(EMX11_XFT_SOURCES        src/xft.c)
-set(EMX11_GLX_SOURCES        src/glx.c)
+set(EMX11_XEXT_SOURCES       Xext/shape.c)
+set(EMX11_XRENDER_SOURCES    render/render.c)
+set(EMX11_FONTCONFIG_SOURCES emx11/fontconfig.c)
+set(EMX11_XFT_SOURCES        emx11/xft.c)
+set(EMX11_GLX_SOURCES        glx/glx.c)
 
 # Combined list used only by the side-module path -- Pyodide dlopens one
 # .so, so everything still needs to land in a single artifact there.
@@ -75,8 +100,8 @@ set(EMX11_ALL_SOURCES
 # without having to hand-edit ~2000 entries. The awk script is committed;
 # running it is a no-op on a clean checkout.
 set(EMX11_KEYSYM_DEF "${EMX11_PUBLIC_HEADERS_DIR}/X11/keysymdef.h")
-set(EMX11_KEYSYM_OUT "${CMAKE_CURRENT_SOURCE_DIR}/src/keysym_table.c")
-set(EMX11_KEYSYM_AWK "${CMAKE_CURRENT_SOURCE_DIR}/src/gen_keysyms.awk")
+set(EMX11_KEYSYM_OUT "${CMAKE_CURRENT_SOURCE_DIR}/emx11/keysym_table.c")
+set(EMX11_KEYSYM_AWK "${CMAKE_CURRENT_SOURCE_DIR}/emx11/gen_keysyms.awk")
 find_program(AWK_EXECUTABLE NAMES awk gawk)
 if(AWK_EXECUTABLE)
     add_custom_command(
@@ -100,7 +125,8 @@ function(emx11_add_static_lib target output_name)
 
     target_include_directories(${target}
         PUBLIC  ${EMX11_PUBLIC_HEADERS_DIR}
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/emx11
+                ${CMAKE_CURRENT_SOURCE_DIR}/libX11
     )
 
     target_compile_options(${target} PRIVATE ${EMX11_WARN_FLAGS})
@@ -131,7 +157,7 @@ target_link_libraries(fontconfig PUBLIC X11)
 target_link_libraries(Xft        PUBLIC Xrender fontconfig X11)
 target_link_libraries(GLX        PUBLIC X11)
 
-# JS-side bridges live in src/bridges.c via EM_JS, so they're embedded in
+# JS-side bridges live in emx11/bridges.c via EM_JS, so they're embedded in
 # libX11.a itself (works under both static link and SIDE_MODULE dlopen).
 
 # --- Side module (Pyodide path; disabled by default) --------------------------
@@ -145,7 +171,8 @@ if(EMX11_BUILD_SIDE_MODULE)
 
     target_include_directories(emx11_side
         PUBLIC  ${EMX11_PUBLIC_HEADERS_DIR}
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/emx11
+                ${CMAKE_CURRENT_SOURCE_DIR}/libX11
     )
 
     # Side module is consumed by libtk.so / _tkinter.so via dynamic linking,

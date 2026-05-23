@@ -119,7 +119,7 @@ export interface Point {
 
 /**
  * The em-x11 global namespace, installed on `globalThis` before wasm
- * starts so that C code (via EM_JS bridges in native/src/bridges.c)
+ * starts so that C code (via EM_JS bridges in native/emx11/bridges.c)
  * can reach TS-side state. Populated cooperatively:
  *
  *   - createEmX11() installs the public surface (fs, spawn, display,
@@ -173,7 +173,7 @@ export interface EmX11Global {
 /**
  * The em-x11 host bridge facade, installed under `globalThis.emX11._bridge`
  * by Host.attachToBridge(). The C side calls into this via EM_JS bodies
- * in native/src/bridges.c.
+ * in native/emx11/bridges.c.
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;

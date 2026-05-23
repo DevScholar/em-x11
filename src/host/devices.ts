@@ -620,7 +620,7 @@ export class InputBridge {
     });
 
     /* Browser → Tk clipboard staging. The C-side bridge
-     * (emx11_js_clipboard_read_begin / _fetch in native/src/bridges.c) has
+     * (emx11_js_clipboard_read_begin / _fetch in native/emx11/bridges.c) has
      * to answer synchronously because runTcl is sync (no Asyncify), so we
      * pre-fill `globalThis.__emx11ClipboardBytes` ahead of every paste-
      * equivalent gesture:

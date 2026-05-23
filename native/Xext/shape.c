@@ -14,7 +14,7 @@
  *     that em-x11 has not yet introduced.
  */
 
-#include "../emx11_internal.h"
+#include "emx11_internal.h"
 
 #include <X11/Xutil.h>
 #include <X11/extensions/shape.h>

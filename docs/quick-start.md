@@ -302,7 +302,7 @@ one of the `_emx11_push_*` exports.
 - **All windows are pure black** — almost certainly a stale wasm
   artifact. The em-x11 host and the libemx11 inside the demo
   communicate via signature-tied EM_JS bridges; if you change a
-  bridge in `native/src/bridges.c` you must rebuild every demo
+  bridge in `native/emx11/bridges.c` you must rebuild every demo
   before the host's new shape matches. `pnpm build` rebuilds
   everything; partial builds are the usual cause.
 - **Browser tab freezes on first redraw** — you forgot

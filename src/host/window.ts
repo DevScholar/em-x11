@@ -135,7 +135,7 @@ export class WindowManager {
   }
 
   onSetBg(id: number, bgType: number, bgValue: number): void {
-    /* state codes from emx11_js_window_set_bg in native/src/bridges.c:
+    /* state codes from emx11_js_window_set_bg in native/emx11/bridges.c:
      *   0 = None (no auto-paint, backing left as-is)
      *   1 = Pixel (solid colour)
      *   2 = ParentRelative (tile parent's bg with parent's tile origin)

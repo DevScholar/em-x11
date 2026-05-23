@@ -2,7 +2,7 @@
  * em-x11 GLX 1.4 header — minimal subset.
  *
  * Just enough of <GL/glx.h> to compile glxgears and similar fixed-pipeline
- * GLX clients against em-x11. Backed by native/src/glx.c, which bridges
+ * GLX clients against em-x11. Backed by native/glx/glx.c, which bridges
  * GLXContext → emscripten WebGL context (WebGL1 + LEGACY_GL_EMULATION).
  *
  * Not implemented: pbuffers, GLX_SGIX_*, indirect rendering, FBConfig query

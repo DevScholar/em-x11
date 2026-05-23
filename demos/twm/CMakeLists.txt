@@ -29,7 +29,7 @@ add_executable(twm
     # Weak override of execvp/execv so f.restart can be honored by
     # the host's kill+respawn shim instead of failing as ENOSYS.
     # Linked into twm only -- other demos keep libc's stub.
-    ${CMAKE_SOURCE_DIR}/native/src/process.c
+    ${CMAKE_SOURCE_DIR}/native/emx11/process.c
 )
 
 target_compile_definitions(twm PRIVATE HAVE_CONFIG_H=1)

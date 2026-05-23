@@ -3,7 +3,7 @@
  *
  * Defines the memory layout of the opaque types (struct _XDisplay,
  * struct _XGC) that upstream <X11/Xlib.h> only forward-declares. Clients
- * never see this file; only native/src C files include it.
+ * never see this file; only native/ C files include it.
  *
  * Upstream Xlib exposes "convenience" macros such as DefaultScreen(dpy),
  * BlackPixel(dpy, scr), and ScreenOfDisplay(dpy, scr) that cast the
@@ -285,7 +285,7 @@ struct _XDisplay {
 };
 
 /* ------------------------------------------------------------------------- */
-/*  Internal helpers shared across native/src C files.                       */
+/*  Internal helpers shared across native/ C files.                          */
 /* ------------------------------------------------------------------------- */
 
 Display   *emx11_get_display(void);            /* singleton accessor        */

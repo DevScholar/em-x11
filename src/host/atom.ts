@@ -3,7 +3,7 @@
  * shared across all clients, so XInternAtom from any wasm module
  * resolves the same name to the same id.
  *
- * Predefined atoms 1..68 are still resolved locally in C (native/src/
+ * Predefined atoms 1..68 are still resolved locally in C (native/dix/
  * atom.c) for zero round-trip cost on hot paths. Anything beyond 68
  * goes through this manager so cross-module interning agrees -- the
  * fix for the WM_PROTOCOLS / WM_DELETE_WINDOW divergence we saw with

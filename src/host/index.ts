@@ -1,7 +1,7 @@
 /**
  * Host facade: the single object every wasm client (and every demo
  * harness) talks to. Implements the EmX11Host interface used by the
- * EM_JS bridges in native/src/bridges.c, plus the launchClient
+ * EM_JS bridges in native/emx11/bridges.c, plus the launchClient
  * coordination that dev demos use to start each wasm.
  *
  * Internally Host is a thin coordinator over a set of manager classes,
@@ -146,7 +146,7 @@ export class Host implements EmX11Host {
   }
 
   /** Install this Host as the bridge facade under `globalThis.emX11._bridge`,
-   *  so EM_JS bodies in native/src/bridges.c can reach it synchronously.
+   *  so EM_JS bodies in native/emx11/bridges.c can reach it synchronously.
    *  Allocates the singleton if needed and never overwrites unrelated
    *  surfaces (fs, spawn, display, debug) that createEmX11 may have
    *  already attached.
