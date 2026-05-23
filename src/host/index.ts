@@ -273,6 +273,9 @@ export class Host implements EmX11Host {
   onSelectInput(connId: number, id: number, mask: number): void {
     this.events.onSelectInput(connId, id, mask);
   }
+  onShapeSelectInput(connId: number, window: number, mask: number): void {
+    this.events.onShapeSelectInput(connId, window, mask);
+  }
   onSetOverrideRedirect(id: number, flag: boolean): void {
     this.window.onSetOverrideRedirect(id, flag);
   }

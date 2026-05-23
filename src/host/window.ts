@@ -152,25 +152,22 @@ export class WindowManager {
   }
 
   onConfigure(connId: number, id: number, x: number, y: number, w: number, h: number): void {
-    const exposed = this.host.renderer.configureWindow(id, x, y, w, h);
-    /* Region-driven Expose: paintExposedRegions returned the per-window
-     * newClip - oldClip diff (mirroring xserver miHandleValidateExposures,
-     * mi/miexpose.c). Lower-z siblings whose clipList grew where this
-     * window vacated, and the moved window itself for the area it now
-     * covers, all get one Expose per rect. Pixels in oldClip ∩ newClip
-     * are NOT in the diff so the client doesn't get a redundant
-     * Expose / overpaint there. */
-    this.host.events.pushExposesForRegions(exposed, null);
-
     /* Cross-connection ConfigureNotify delivery. When the caller is a
      * WM (twm) resizing a managed client's shell, the client app's
      * Tk / Xt layer needs to learn the new geometry to re-lay out --
      * its own EmxWindow shadow and ConfigureNotify queue live in a
      * different module. Mirrors the onReparent owner-ccall pattern.
      *
+     * Push ConfigureNotify BEFORE the backing-store configure + Expose
+     * synthesis. Xt dispatches events in queue order: if Expose lands
+     * first, Redisplay runs with the widget's stale core.width/height,
+     * then Resize (from ConfigureNotify) updates the transform but
+     * doesn't re-expose. The result is content drawn at the old size
+     * and stuck until the next user interaction triggers a fresh Expose.
+     *
      * Skip when caller == owner (Tk/Xt resizing their own toplevel):
      * notify_js_reconfigure already pushed the local ConfigureNotify
-     * before this bridge fires, and we'd double-deliver otherwise. */
+     * before the emx11_js_window_configure bridge fires. */
     const ownerConnId = this.host.connection.connOf(id);
     if (
       ownerConnId !== undefined &&
@@ -189,6 +186,9 @@ export class WindowManager {
         );
       }
     }
+
+    const exposed = this.host.renderer.configureWindow(id, x, y, w, h);
+    this.host.events.pushExposesForRegions(exposed, null);
   }
 
   onMap(connId: number, id: number): void {

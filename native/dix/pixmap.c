@@ -198,7 +198,7 @@ static int _emx11_bits_per_pixel(Display *dpy, int depth) {
     return 32;
 }
 
-static int _XInitImageFuncPtrs(XImage *image);
+int _XInitImageFuncPtrs(XImage *image);
 
 XImage *XCreateImage(Display *dpy, Visual *visual, unsigned int depth,
                      int format, int offset, char *data,
@@ -274,7 +274,7 @@ static int _emx11_destroy_image(XImage *img) {
     return 1;
 }
 
-static int _XInitImageFuncPtrs(XImage *image) {
+int _XInitImageFuncPtrs(XImage *image) {
     if (!image) return 0;
     image->f.get_pixel      = _emx11_get_pixel;
     image->f.put_pixel      = _emx11_put_pixel;

@@ -10,6 +10,7 @@
 #include "emx11_meta_layout.h"
 
 #include <X11/extensions/XInput2.h>
+#include <X11/extensions/shape.h>
 #include <emscripten.h>
 #include <string.h>
 
@@ -778,6 +779,39 @@ void emx11_push_destroy_notify(Window window, Window event_window) {
     ev.xdestroywindow.display = dpy;
     ev.xdestroywindow.event   = event_window;
     ev.xdestroywindow.window  = window;
+    emx11_event_queue_push(dpy, &ev);
+}
+
+/* Cross-connection ShapeNotify dispatch. Called by the Host when a window's
+ * shape changes and another connection has selected ShapeNotifyMask on it.
+ * Mirrors the ShapeNotify event layout in shapeproto.h: eventBase (64) +
+ * ShapeNotify (0) = type 64. */
+EMSCRIPTEN_KEEPALIVE
+void emx11_push_shape_notify(Window window, int kind, int x, int y,
+                             unsigned int width, unsigned int height,
+                             Bool shaped) {
+    Display *dpy = emx11_get_display();
+    EmxWindow *win = emx11_window_find(dpy, window);
+    /* Gate when the window is local: only deliver if the owner selected
+     * ShapeNotifyMask. When win==NULL the window is foreign and the Host
+     * already filtered subscribers before ccalling us. */
+    if (win && !(win->shape_event_mask & ShapeNotifyMask)) return;
+
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    XShapeEvent *sev = (XShapeEvent *)&ev;
+    sev->type       = 64 + ShapeNotify;
+    sev->serial     = dpy->request;
+    sev->send_event = False;
+    sev->display    = dpy;
+    sev->window     = window;
+    sev->kind       = kind;
+    sev->x          = x;
+    sev->y          = y;
+    sev->width      = width;
+    sev->height     = height;
+    sev->time       = event_now();
+    sev->shaped     = shaped;
     emx11_event_queue_push(dpy, &ev);
 }
 

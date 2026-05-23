@@ -181,6 +181,7 @@ export class GcManager {
      * affected window gets one Expose per rect. */
     const exposed = this.host.renderer.setWindowShape(id, rects);
     this.host.events.pushExposesForRegions(exposed, null);
+    this.dispatchShapeNotify(id, rects);
   }
 
   /* -- Pixmap lifecycle --------------------------------------------------- */
@@ -247,6 +248,33 @@ export class GcManager {
 
     const exposed = this.host.renderer.setWindowShape(destId, rects);
     this.host.events.pushExposesForRegions(exposed, null);
+    this.dispatchShapeNotify(destId, rects);
+  }
+
+  /** Push ShapeNotify events to cross-connection subscribers. The window's
+   *  own connection handles ShapeNotify via the C-side path (push_shape_to_js
+   *  in shape.c checks shape_event_mask). Cross-connection subscribers (twm
+   *  watching xeyes) would miss the change without this dispatch because
+   *  XShapeSelectInput's mask is in a different wasm's Display. */
+  private dispatchShapeNotify(destId: number, rects: ShapeRect[]): void {
+    const ownerConn = this.host.connection.connOf(destId);
+    if (ownerConn === undefined || ownerConn === 0) return;
+    const subscribers = this.host.events.shapeNotifySubscribersOf(destId, ownerConn);
+    if (subscribers.length === 0) return;
+    const attrs = this.host.renderer.attrsOf(destId);
+    if (!attrs) return;
+    const shaped = rects.length > 0;
+    for (const connId of subscribers) {
+      const conn = this.host.connection.get(connId);
+      if (conn?.module) {
+        conn.module.ccall(
+          'emx11_push_shape_notify',
+          null,
+          ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
+          [destId, 0 /* ShapeBounding */, 0, 0, attrs.width, attrs.height, shaped ? 1 : 0],
+        );
+      }
+    }
   }
 
   /* -- Drawable-to-drawable copy ---------------------------------------- */

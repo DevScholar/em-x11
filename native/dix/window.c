@@ -334,22 +334,23 @@ static void notify_js_reconfigure(Display *dpy, EmxWindow *win) {
      * satisfies the wait on the first poll.
      */
     dpy->request++;
-    /* Geometry-only path: window already exists on Host; just update
+    /* Push ConfigureNotify BEFORE the Host round-trip so it lands in
+     * the queue ahead of any Expose events that Host.onConfigure
+     * synthesises. Xt dispatches in queue order: if Expose arrives
+     * first, Redisplay runs with the widget's stale core.width/height,
+     * then the subsequent Resize (from ConfigureNotify) updates the
+     * transform but does not re-expose — leaving content painted at
+     * the old size until the next interaction triggers a fresh Expose.
+     *
+     * The same ordering constraint applies to the cross-connection path
+     * in Host.onConfigure (see emx11_push_configure_notify there).
+     *
+     * Geometry-only path: window already exists on Host; just update
      * its (x, y, w, h). We deliberately avoid re-calling window_create
-     * here -- doing so stomped on parent / shape / background_pixmap.
-     *
-     * Expose synthesis on a configured-while-mapped window lives Host-
-     * side (Host.onWindowConfigure) for the same reason as XMapWindow:
-     * a WM reconfiguring a managed client's shell is a cross-connection
-     * call, and only the Host knows the shell's owner module to ccall.
-     *
-     * ConfigureNotify, on the other hand, must land in the CONFIGURED
-     * client's queue so Tk can update its recorded geometry and mark
-     * the widget for paint. Without this, Tk's TopLevel stays at
-     * `geometry=1x1+0+0` after `pack` -- which is the tk-hello symptom. */
+     * here — doing so stomped on parent / shape / background_pixmap. */
+    push_configure_notify(dpy, win);
     emx11_js_window_configure(dpy->conn_id, win->id, win->x, win->y,
                               win->width, win->height);
-    push_configure_notify(dpy, win);
 }
 
 /* Cross-connection geometry change. The caller (typically a WM) has no

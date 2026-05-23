@@ -89,6 +89,7 @@ typedef struct EmxWindow {
      * each in window-local coordinates. */
     XRectangle    *shape_bounding;
     int            shape_bounding_count;
+    unsigned long  shape_event_mask;  /* XShapeSelectInput subscription */
 
     /* Linked list of XChangeProperty payloads. See property.c. */
     struct EmxProperty *properties;
@@ -583,6 +584,8 @@ extern void emx11_js_pixmap_destroy(Pixmap id);
  * from X11/extensions/shape.h). */
 extern void emx11_js_shape_combine_mask(Window dest, Pixmap src,
                                         int x_off, int y_off, int op);
+extern void emx11_js_shape_select_input(int conn_id, Window window,
+                                        unsigned long mask);
 
 /* XCopyArea / XCopyPlane / XPutImage bridges. Host dispatches by looking
  * up src/dst ids in its pixmap table: unknown id = window path, known =
@@ -700,6 +703,10 @@ void emx11_push_selection_clear  (Display *dpy, Window owner,
 void emx11_push_selection_request(Display *dpy, Window owner,
                                   Window requestor, Atom selection,
                                   Atom target, Atom property, Time time);
+void emx11_push_shape_notify    (Window window,
+                                 int kind, int x, int y,
+                                 unsigned int width, unsigned int height,
+                                 Bool shaped);
 void emx11_push_selection_notify (Display *dpy, Window requestor,
                                   Atom selection, Atom target,
                                   Atom property, Time time);

@@ -31,6 +31,11 @@ export class EventDispatcher {
    *  twm ever sees a MapRequest. */
   private readonly redirectWaiters = new Map<number, ((connId: number) => void)[]>();
 
+  /** Per-window ShapeNotify subscriptions, keyed by subscribing
+   *  connection. Tracked separately from windowSubscriptions because
+   *  ShapeNotifyMask is set via XShapeSelectInput, not XSelectInput. */
+  private readonly shapeNotifySubs = new Map<number, Set<number>>();
+
   constructor(private readonly host: Host) {}
 
   onSelectInput(connId: number, id: number, mask: number): void {
@@ -71,6 +76,38 @@ export class EventDispatcher {
       }
       subs.set(connId, mask);
     }
+  }
+
+  /** XShapeSelectInput tracking: record which connections want ShapeNotify
+   *  on a window. Called from the emx11_js_shape_select_input bridge. */
+  onShapeSelectInput(connId: number, id: number, mask: number): void {
+    if (mask === 0) {
+      const subs = this.shapeNotifySubs.get(id);
+      if (subs) {
+        subs.delete(connId);
+        if (subs.size === 0) this.shapeNotifySubs.delete(id);
+      }
+    } else {
+      let subs = this.shapeNotifySubs.get(id);
+      if (!subs) {
+        subs = new Set();
+        this.shapeNotifySubs.set(id, subs);
+      }
+      subs.add(connId);
+    }
+  }
+
+  /** Return connIds that selected ShapeNotifyMask on `id`, excluding
+   *  `exceptConn` (the connection that just changed the shape --- it
+   *  handles its own ShapeNotify via the C-side push_shape_to_js path). */
+  shapeNotifySubscribersOf(id: number, exceptConn: number): number[] {
+    const subs = this.shapeNotifySubs.get(id);
+    if (!subs) return [];
+    const out: number[] = [];
+    for (const c of subs) {
+      if (c !== exceptConn) out.push(c);
+    }
+    return out;
   }
 
   /** Resolve when some client holds SubstructureRedirectMask on `winId`.
@@ -251,6 +288,9 @@ export class EventDispatcher {
     for (const subs of this.windowSubscriptions.values()) {
       subs.delete(connId);
     }
+    for (const subs of this.shapeNotifySubs.values()) {
+      subs.delete(connId);
+    }
   }
 
   /** Drop all subscriptions on a window. Called by WindowManager on
@@ -258,6 +298,7 @@ export class EventDispatcher {
    *  closes. */
   forgetWindow(id: number): void {
     this.windowSubscriptions.delete(id);
+    this.shapeNotifySubs.delete(id);
   }
 
   /** Find the (window, connId) pair that should receive an event of

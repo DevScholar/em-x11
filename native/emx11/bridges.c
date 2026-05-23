@@ -632,6 +632,11 @@ EM_JS(void, emx11_js_shape_combine_mask, (unsigned int destId, unsigned int srcI
     if (Host) Host.onShapeCombineMask(destId, srcId, xOff, yOff, op);
 });
 
+EM_JS(void, emx11_js_shape_select_input, (int connId, unsigned int window, unsigned int mask), {
+    var e = globalThis.emX11; var Host = e && e._bridge;
+    if (Host) Host.onShapeSelectInput(connId, window, mask);
+});
+
 EM_JS(void, emx11_js_copy_area, (unsigned int srcId, unsigned int dstId, int srcX, int srcY, int w, int h, int dstX, int dstY), {
     var e = globalThis.emX11; var Host = e && e._bridge;
     if (Host) Host.onCopyArea(srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY);
