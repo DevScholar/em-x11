@@ -95,27 +95,68 @@ int XSetWindowColormap(Display *dpy, Window w, Colormap cmap) {
 
 /* -- Drawable queries ------------------------------------------------- */
 
-/* XGetImage returns a readable XImage of the drawable's pixels. In the
- * browser we don't have a synchronous GPU readback path -- Host is JS,
- * drawables are OffscreenCanvas. A NULL return makes Tk's callers fall
- * through to "couldn't snapshot" which is the honest behaviour here.
- * Tk uses it for photo image capture and postscript export, both of
- * which can be added later via a Host method that returns RGBA bytes. */
+/* -- XImage pixel accessors (ZPixmap, 32bpp BGRA) -------------------- */
+
+/* Visual masks (TrueColor): red=0xff0000 green=0xff00 blue=0xff.
+ * Pixel values from Tk_GetColorByValue are 0x00RRGGBB.
+ * The data buffer is BGRA byte order (matching the PutImage path). */
+
+static unsigned long _emx11_get_pixel(XImage *img, int x, int y) {
+    unsigned char *p = (unsigned char *)img->data + y * img->bytes_per_line + x * 4;
+    return ((unsigned long)p[2] << 16) | ((unsigned long)p[1] << 8) | (unsigned long)p[0];
+}
+
+static int _emx11_put_pixel(XImage *img, int x, int y, unsigned long pixel) {
+    unsigned char *p = (unsigned char *)img->data + y * img->bytes_per_line + x * 4;
+    p[0] = (unsigned char)(pixel & 0xff);          /* Blue */
+    p[1] = (unsigned char)((pixel >> 8) & 0xff);   /* Green */
+    p[2] = (unsigned char)((pixel >> 16) & 0xff);  /* Red */
+    p[3] = 0xff;                                    /* Alpha (opaque) */
+    return 1;
+}
+
+static int _emx11_destroy_image(XImage *img) {
+    free(img->data);
+    img->data = NULL;
+    free(img);
+    return 1;
+}
+
+int _XInitImageFuncPtrs(XImage *image) {
+    if (!image) return 0;
+    image->f.get_pixel      = _emx11_get_pixel;
+    image->f.put_pixel      = _emx11_put_pixel;
+    image->f.destroy_image  = _emx11_destroy_image;
+    return 1;
+}
+
+/* XGetImage — does NOT read back from the browser compositor (that
+ * would require an async GPU round-trip). Instead it returns a
+ * zero-filled XImage that callers can write to via XPutPixel and then
+ * commit with XPutImage. This is sufficient for the "create blank
+ * buffer, stamp pixels, blit" pattern that Tk's checkbutton/radiobutton
+ * indicator drawing and ttk theme element building rely on.
+ *
+ * Real readback for photo-image capture and postscript export can be
+ * added later via a Host method that returns RGBA bytes. */
 XImage *XGetImage(Display *dpy, Drawable d, int x, int y,
                   unsigned int w, unsigned int h,
                   unsigned long plane_mask, int format) {
-    (void)dpy; (void)d; (void)x; (void)y;
-    (void)w; (void)h; (void)plane_mask; (void)format;
-    return NULL;
-}
+    (void)dpy; (void)d; (void)x; (void)y; (void)plane_mask;
+    if (w == 0 || h == 0) return NULL;
 
-/* Xlib internal used by tk's XCreateImage replacement path. Tk declares
- * this returning int (despite the headerless internal origin), so match
- * that. Our XImages already have their function pointers set at
- * creation time, so there's no work to do. */
-int _XInitImageFuncPtrs(XImage *image) {
-    (void)image;
-    return 1;
+    XImage *img = XCreateImage(dpy, NULL, 24, format, 0, NULL, w, h, 32, 0);
+    if (!img) return NULL;
+
+    _XInitImageFuncPtrs(img);
+
+    int data_size = img->bytes_per_line * (int)h;
+    img->data = calloc(1, (size_t)data_size);
+    if (!img->data) {
+        free(img);
+        return NULL;
+    }
+    return img;
 }
 
 /* -- Plural-form drawing wrappers ------------------------------------ */
