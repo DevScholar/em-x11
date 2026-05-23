@@ -139,7 +139,14 @@ int XEventsQueued(Display *display, int mode) {
 
 int XNextEvent(Display *display, XEvent *event_return) {
     if (emx11_event_queue_size(display) == 0) return 0;
-    return emx11_event_queue_pop(display, event_return) ? 1 : 0;
+    int ok = emx11_event_queue_pop(display, event_return) ? 1 : 0;
+    EM_ASM({
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceNext && $0) {
+            console.log('[c-next] XNextEvent conn=' + $1 + ' type=' + $2 + ' win=' + ($3 >>> 0));
+        }
+    }, ok, display->conn_id, event_return->type, event_return->xany.window);
+    return ok;
 }
 
 /* -- Event helpers -- */
@@ -214,7 +221,16 @@ Bool XCheckTypedWindowEvent(Display *dpy, Window w, int event_type, XEvent *ev) 
 
 int XMaskEvent(Display *dpy, long event_mask, XEvent *ev) {
     for (;;) {
-        if (emx11_event_queue_peek_match(dpy, event_mask, ev)) return 1;
+        if (emx11_event_queue_peek_match(dpy, event_mask, ev)) {
+            EM_ASM({
+                var d = globalThis.emX11 && globalThis.emX11._debug;
+                if (d && d.traceMask) {
+                    console.log('[c-mask] XMaskEvent conn=' + $0 + ' mask=0x' + ($1 >>> 0).toString(16) +
+                                ' found type=' + $2 + ' win=' + ($3 >>> 0));
+                }
+            }, dpy->conn_id, event_mask, ev->type, ev->xany.window);
+            return 1;
+        }
         emscripten_sleep(10);
     }
 }

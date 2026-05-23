@@ -122,13 +122,50 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
     return best;
 }
 
-/* -- JS -> C event bridges ------------------------------------------------- */
+/* Mirrors xserver/dix/events.c DeliverDeviceEvents (line 2888): given
+ * the z-order-correct deepest window from the host (whose JS findWindowAt
+ * is equivalent to xorg's XYToWindow → miSpriteTrace), walk up the parent
+ * chain in this Display's table to find the first window whose event_mask
+ * contains `need_mask`. Returns that window with coordinates relative to
+ * it. Falls back to the starting window if no ancestor matches.
+ *
+ * This hybrid approach fixes both tcldide and twm:
+ * - tcldide: host hint is a Tk widget in the same Display → widget has
+ *   the mask → delivered directly (z-order correct, mask correct)
+ * - twm: host hint may be a cross-connection shadow (in this Display's
+ *   EmxWindow table from reparent but mapped=false / mask=0) → walk up
+ *   skips it, finds frame/root with the right mask → correct
+ * - twm active grab: host hint is a foreign window not in this Display
+ *   → caller falls back to hit_test → finds twm window → correct */
+static EmxWindow *walk_up_for_mask(Display *dpy, EmxWindow *start,
+                                   int rx, int ry, long need_mask,
+                                   int *lx_out, int *ly_out) {
+    int base_ax, base_ay, depth_unused;
+    window_abs_origin(dpy, start, &base_ax, &base_ay, &depth_unused);
 
-/* Note on the `window` argument: the JS bridge passes whatever window it
- * thinks the pointer is over, but that hint is unreliable for nested
- * widgets (the compositor doesn't know parent chains). We ignore it for
- * button/motion and re-run the hit test here with authoritative parent
- * data from the EmxWindow table. */
+    EmxWindow *cur = start;
+    int ax = base_ax, ay = base_ay;
+    while (cur) {
+        if (cur->event_mask & need_mask) {
+            if (lx_out) *lx_out = rx - ax;
+            if (ly_out) *ly_out = ry - ay;
+            return cur;
+        }
+        if (cur->parent == None || cur->parent == cur->id) break;
+        EmxWindow *p = emx11_window_find(dpy, cur->parent);
+        if (!p) break;
+        ax -= cur->x;
+        ay -= cur->y;
+        cur = p;
+    }
+    /* Nothing along the chain selected for this event. Deliver to the
+     * starting window anyway so the event isn't lost. */
+    if (lx_out) *lx_out = rx - base_ax;
+    if (ly_out) *ly_out = ry - base_ay;
+    return start;
+}
+
+/* -- JS -> C event bridges ------------------------------------------------- */
 
 /* Implicit pointer grab state (x11protocol.txt §523).
  * A ButtonPress initiates a grab: subsequent ButtonRelease and MotionNotify
@@ -138,14 +175,12 @@ static Window       grab_window         = None;
 static unsigned int grab_button_count   = 0;
 
 /* Active pointer grab (XGrabPointer). Tracked separately from the implicit
- * grab so that the mask-gate bypass in emx11_push_motion_event works even
- * when the implicit grab_window is legitimately None (XGrabPointer clears the
- * stale implicit grab so ButtonRelease routes to the window under the pointer
+ * grab so crossing events carry mode=NotifyGrab (emit_crossing) and the
+ * motion_target fallback (emx11_push_motion_event) can route to the grab
+ * window when hit_test finds nothing. XGrabPointer also resets the stale
+ * implicit grab so ButtonRelease routes to the window under the pointer
  * instead of the original press window -- needed for MenuButton/ComboBox
- * popup entries). Without this, twm f.move/f.resize loop XMaskEvent never
- * sees MotionNotify: none of twm's frame/title_w/client windows select for
- * PointerMotionMask, so every motion event hits the mask gate and is dropped,
- * and the drag deadlocks. */
+ * popup entries where Tk posts a transient menu and calls XGrabPointer. */
 static bool active_grab = false;
 static Window active_grab_window = None;
 
@@ -260,7 +295,16 @@ static void emit_crossing(Display *dpy, int type, Window w, Window peer,
     ev.xcrossing.y           = y_root - ay;
     ev.xcrossing.x_root      = x_root;
     ev.xcrossing.y_root      = y_root;
-    ev.xcrossing.mode        = NotifyNormal;
+    /* Tk's menubutton dismisses a posted menu on LeaveNotify with
+     * mode=NotifyNormal (tkMenuButtonLeave in library/menu.tcl). During
+     * an active pointer grab -- set by XGrabPointer when Tk posts the
+     * menu -- the X server delivers crossings with mode=NotifyGrab so
+     * the menubutton knows the leave was grab-induced and keeps the menu
+     * posted. Without this, the repoll after XMapWindow(menu) emits
+     * a LeaveNotify with NotifyNormal, Tk's menubutton dismisses the
+     * menu immediately, and the "first click pops menu then it vanishes"
+     * symptom appears. */
+    ev.xcrossing.mode        = active_grab ? NotifyGrab : NotifyNormal;
     ev.xcrossing.detail      = detail;
     ev.xcrossing.same_screen = True;
     ev.xcrossing.focus       = (w == dpy->focus_window);
@@ -352,51 +396,25 @@ void emx11_push_button_event(int type, Window window, int x, int y,
         if (grab_button_count > 0) grab_button_count--;
         if (grab_button_count == 0) grab_window = None;
     } else {
-        /* C-side hit_test is authoritative for mask-based delivery
-         * (mirrors xorg's DeliverEventsToWindow traversal). The JS host
-         * hint is only trusted as an override when it names a window in a
-         * different z-order branch than hit_test found -- i.e. a popup
-         * menu (shallow child of root) drawn above a deeper widget.
-         * Without this inversion, two classes of bugs appear:
-         *   1. JS subscriber tables may route to root when an
-         *      intermediate window (title_w, frame) has the mask,
-         *      causing every click to act like a root click.
-         *   2. hit_test's depth-first walk picks a buried widget
-         *      under a popup menu instead of the topmost menu entry. */
-        int ht_lx = 0, ht_ly = 0;
+        /* Start from the JS host's z-order-correct window (like xorg's
+         * XYToWindow), then walk up the C-side parent chain for the
+         * first window whose event_mask has the needed bit (like xorg's
+         * DeliverDeviceEvents). This hybrid handles:
+         * - tcldide: host hint widget → has mask → delivered directly
+         * - twm: host hint is a cross-conn shadow (mask=0) → walk up
+         *   to frame/root with the mask → correct subscriber chosen
+         * - Foreign host hint: not in this Display → fallback to hit_test */
         long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
-        EmxWindow *ht_target = hit_test(dpy, x_root, y_root, mask, &ht_lx, &ht_ly);
-        EmxWindow *hint_target = emx11_window_find(dpy, window);
-
-        target = ht_target;
-        lx = ht_lx;
-        ly = ht_ly;
-
-        if (hint_target && hint_target != ht_target) {
-            if (!ht_target) {
-                /* hit_test failed -- use host hint */
-                target = hint_target;
-                lx = x;
-                ly = y;
-            } else if (!win_is_inferior_of(dpy, ht_target->id, hint_target->id)) {
-                /* Host hint is NOT an ancestor of the hit_test result.
-                 * Different z-order branch (popup menu above deeper
-                 * widget). Trust the z-order-aware host hint. */
-                target = hint_target;
-                lx = x;
-                ly = y;
-            }
-            /* else: host hint IS an ancestor of hit_test result
-             * (e.g. root → title_w). Keep the more specific hit_test
-             * target -- the ancestor route from JS subscriber tables
-             * is a fallback, not the authoritative window. */
+        target = emx11_window_find(dpy, window);
+        if (target) {
+            target = walk_up_for_mask(dpy, target, x_root, y_root, mask, &lx, &ly);
+        } else {
+            target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
         }
-
-        /* Active grab cross-connection fallback: the host hint may
-         * name a window owned by another connection; hit_test also
-         * fails because this Display has no window at that point.
-         * Deliver to the active grab window so the grabbing client
-         * sees the event. */
+        /* Active grab cross-connection fallback: when neither the
+         * host hint nor hit_test found a window (both may reference
+         * windows owned by another connection), route to the active
+         * grab window. */
         if (!target && active_grab) {
             target = emx11_window_find(dpy, active_grab_window);
             if (target) {
@@ -458,75 +476,94 @@ void emx11_push_motion_event(Window window, int x, int y,
                              unsigned int state) {
     Display *dpy = emx11_get_display();
 
-    /* Pointer-window tracking: C-side hit_test is authoritative
-     * (mirrors xorg's sprite position). Host hint is only a fallback
-     * for cross-connection cases where no local window exists at the
-     * point. The deferred repoll path (emx11_repoll_pointer_window_hint)
-     * handles popup-menu z-order correctness on map/unmap. */
-    int lx_fb = 0, ly_fb = 0;
-    EmxWindow *pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
-    Window cur_pw = pt ? pt->id : None;
-    if (cur_pw == None && window != None && emx11_window_find(dpy, window)) {
-        cur_pw = window;
+    /* Pointer-window tracking: JS host's findWindowAt is z-order-
+     * aware. Trust it first; hit_test is depth-based and can't
+     * distinguish overlapping siblings (popup menu above toplevel).
+     * Fall back to hit_test only when the host hint is None or names
+     * a foreign window not in this Display's table.
+     *
+     * During an implicit or active pointer grab crossing events are
+     * suppressed (xorg's CheckMotion is a no-op while a grab is
+     * active). Without this suppression, the JS hint window under
+     * the pointer (which differs from the grab window) causes a
+     * LeaveNotify on the grab window every motion tick -- twm's
+     * HandleButtonPress sees the LeaveNotify right after the
+     * ButtonPress, interprets it as "the pointer already left the
+     * title bar", and aborts the drag start. */
+    if (grab_window == None && !active_grab) {
+        Window cur_pw = window;
+        if (cur_pw == None || !emx11_window_find(dpy, cur_pw)) {
+            int lx_fb = 0, ly_fb = 0;
+            EmxWindow *pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
+            cur_pw = pt ? pt->id : None;
+        }
+        update_pointer_window(dpy, cur_pw, x_root, y_root, state);
     }
-    update_pointer_window(dpy, cur_pw, x_root, y_root, state);
 
-    /* MotionNotify routing: grab window during a grab, hit_test result
-     * otherwise. Host hint is only used when hit_test fails (cross-
-     * connection) or when it names a window in a different z-order
-     * branch (popup menu above deeper widget). */
+    /* MotionNotify routing: grab window during a grab, otherwise
+     * start from the JS host's z-order-correct window and walk up
+     * the C-side parent chain for mask matching (mirrors xorg's
+     * XYToWindow → DeliverDeviceEvents). hit_test is only a fallback
+     * for cross-connection cases where the host hint doesn't exist
+     * in this Display's table. */
     EmxWindow *motion_target;
     bool via_grab = false;
+    const char *path_label = "none";
     if (grab_window != None) {
         motion_target = emx11_window_find(dpy, grab_window);
         if (!motion_target || !motion_target->mapped) return;
         via_grab = true;
+        path_label = "implicit_grab";
     } else {
-        int ht_lx = 0, ht_ly = 0;
-        motion_target = hit_test(dpy, x_root, y_root,
-                                 PointerMotionMask | ButtonMotionMask,
-                                 &ht_lx, &ht_ly);
-        EmxWindow *hint_target = emx11_window_find(dpy, window);
-        if (hint_target && hint_target != motion_target) {
-            if (!motion_target ||
-                !win_is_inferior_of(dpy, motion_target->id, hint_target->id)) {
-                /* hit_test failed OR host hint is in a different z-order
-                 * branch (popup menu). Trust the z-order-aware hint. */
-                motion_target = hint_target;
-            }
+        motion_target = emx11_window_find(dpy, window);
+        if (motion_target) {
+            int unused_lx = 0, unused_ly = 0;
+            motion_target = walk_up_for_mask(dpy, motion_target,
+                                             x_root, y_root,
+                                             PointerMotionMask | ButtonMotionMask,
+                                             &unused_lx, &unused_ly);
+            path_label = "hint+walk";
+        } else {
+            int lx_fb = 0, ly_fb = 0;
+            motion_target = hit_test(dpy, x_root, y_root,
+                                     PointerMotionMask | ButtonMotionMask,
+                                     &lx_fb, &ly_fb);
+            path_label = motion_target ? "hit_test" : "none";
         }
         if (!motion_target && active_grab) {
             motion_target = emx11_window_find(dpy, active_grab_window);
+            path_label = motion_target ? "active_grab_fb" : "none";
         }
         if (!motion_target) return;
     }
-    /* Mask gate. Skipped during an implicit pointer grab: x11protocol
-     * §523 specifies that MotionNotify (and ButtonRelease) are reported
-     * to the grabbing client regardless of the grab window's selected
-     * event mask. xserver/dix/events.c::CheckMotion mirrors this -- grab
-     * delivery bypasses the per-window mask check. Without this skip,
-     * twm's f.move loop never sees motion: twm selects only
-     * ButtonPressMask|Expose|Enter|Leave on its title-bar frame, and the
-     * grab during a drag pins motion_target to that frame, so every
-     * motion event hits the mask gate and gets dropped. The drag loop's
-     * XQueryPointer keeps reading the press position, abs(...) <
-     * MoveDelta stays true, and twm's `f.deltastop` aborts the move
-     * without ever calling XMoveWindow -- so the window never moves and
-     * controls under the press point remain hot. */
-    if (!via_grab && !active_grab &&
-        !(motion_target->event_mask & (PointerMotionMask | ButtonMotionMask)))
-        return;
+    /* Mask gate removed: while matching xserver/dix/events.c semantics,
+     * filtering MotionNotify by PointerMotionMask|ButtonMotionMask broke
+     * tcldide standalone demos where ttk widgets (notebook, menubutton)
+     * rely on MotionNotify for hover/cursor tracking but select
+     * EnterWindowMask|LeaveWindowMask rather than PointerMotionMask.
+     * tcl/tk safely ignores MotionNotify it didn't select for, so
+     * pushing it unconditionally is harmless. The grab bypass that was
+     * paired with this gate (via_grab/active_grab) is also removed --
+     * without the gate there's nothing to bypass. */
 
+    /* Decision-path diagnostic trace. Toggled via
+     * `globalThis.emX11._debug.traceCMot` (set from DevTools). */
     EM_ASM({
         var d = globalThis.emX11 && globalThis.emX11._debug;
         if (d && d.traceCMot) {
             console.log('[c-mot] conn=' + $0 + ' rx=' + $1 + ' ry=' + $2 +
-                        ' grab=' + ($3 ? 'Y' : 'N') +
-                        ' target=' + ($4 >>> 0) +
-                        ' mask=0x' + ($5 >>> 0).toString(16));
+                        ' hint=' + ($3 >>> 0) + ' path=' + ($4 !== null ? UTF8ToString($4) : '?') +
+                        ' target=' + ($5 >>> 0) +
+                        ' activeGrab=' + ($6 ? 'Y' : 'N') +
+                        ' targetMask=0x' + ($7 >>> 0).toString(16) +
+                        ' implicitGrab=' + ($8 ? 'Y' : 'N'));
         }
-    }, dpy->conn_id, x_root, y_root, via_grab ? 1 : 0,
-       motion_target->id, (unsigned long)motion_target->event_mask);
+    }, dpy->conn_id, x_root, y_root, window,
+       path_label,
+       motion_target->id,
+       active_grab ? 1 : 0,
+       (unsigned long)motion_target->event_mask,
+       via_grab ? 1 : 0);
 
     int ax = 0, ay = 0, depth;
     window_abs_origin(dpy, motion_target, &ax, &ay, &depth);
@@ -858,6 +895,13 @@ int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
                  Window confine_to, Cursor cursor, Time t) {
     (void)event_mask; (void)pointer_mode; (void)keyboard_mode;
     (void)confine_to; (void)t;
+    EM_ASM({
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceGrab) {
+            console.log('[c-grab] XGrabPointer conn=' + $0 + ' grab_win=' + ($1 >>> 0) +
+                        ' owner_events=' + $2 + ' cursor=' + $3);
+        }
+    }, dpy->conn_id, grab_window, owner_events ? 1 : 0, (unsigned int)cursor);
     dpy->request++;
     emx11_reset_implicit_grab();
     active_grab = true;

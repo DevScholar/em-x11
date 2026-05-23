@@ -246,8 +246,11 @@ export class InputBridge {
       this.dragModule ??
       (win !== null ? this.moduleForWindow(win) : null);
     if (globalThis.emX11?._debug?.traceMotion) {
+      const route = this.activePointerGrab ? 'activeGrab' :
+                    this.dragModule ? 'dragModule' :
+                    win !== null ? 'win' : 'NONE';
       console.log(
-        `[mot] (${e.x}, ${e.y}) win=${win} drag=${this.dragModule ? 'Y' : 'N'} module=${module ? 'Y' : 'N'}`,
+        `[mot] (${e.x}, ${e.y}) win=${win} route=${route} module=${module ? 'Y' : 'N'}`,
       );
     }
     if (!module) return;
@@ -344,10 +347,21 @@ export class InputBridge {
   private deliverButton(xType: number, e: MouseEventData): void {
     this.setPointer(e.x, e.y);
     const target = this.host.renderer.findWindowAt(e.x, e.y);
+    /* X11 button-event state must be the modifier mask BEFORE this
+     * event (xserver/dix/events.c::DeliverDeviceEvents). e.modifiers
+     * comes from `MouseEvent.buttons`, which is the state AFTER the
+     * DOM event. For ButtonPress, clear the just-pressed button's mask;
+     * for ButtonRelease, restore the just-released button's mask so it
+     * reflects "was still held before release". Without this, twm sees
+     * state=Button1Mask on the very first ButtonPress and skips f.move. */
+    const btnMask = 1 << (7 + e.button);
+    const x11State = xType === X_ButtonPress
+      ? e.modifiers & ~btnMask
+      : e.modifiers | btnMask;
     const traceFlag = !!globalThis.emX11?._debug?.traceButton;
     if (traceFlag) {
       console.log(
-        `[btn] type=${xType} (${e.x}, ${e.y}) target=${target} button=${e.button} mods=0x${e.modifiers.toString(16)}`,
+        `[btn] type=${xType} (${e.x}, ${e.y}) target=${target} button=${e.button} mods=0x${e.modifiers.toString(16)} x11State=0x${x11State.toString(16)}`,
       );
     }
     if (target === null) return;
@@ -375,7 +389,7 @@ export class InputBridge {
         'emx11_push_button_event',
         null,
         ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
-        [xType, target, lx, ly, e.x, e.y, e.button, e.modifiers],
+        [xType, target, lx, ly, e.x, e.y, e.button, x11State],
       );
       return;
     }
@@ -412,7 +426,7 @@ export class InputBridge {
     let viaGrab = false;
 
     if (xType === X_ButtonPress) {
-      const grabWin = this.host.grabs.lookup(target, e.button, e.modifiers);
+      const grabWin = this.host.grabs.lookup(target, e.button, x11State);
       if (traceFlag) console.log(`  grab lookup -> ${grabWin}`);
       if (grabWin !== null) {
         deliveryWin = grabWin;
@@ -432,7 +446,17 @@ export class InputBridge {
           deliveryWin = target;
           deliveryConn = this.host.connection.connOf(target) ?? null;
         } else {
-          deliveryWin = sub.winId;
+          /* Route to the subscriber's connection, but keep the original
+           * deepest hit window as deliveryWin. The C-side walk_up_for_mask
+           * checks its own EmxWindow.event_mask (set via XCreateWindow /
+           * XChangeWindowAttributes CWEventMask), which may differ from the
+           * JS-side subscription table. When the deepest window (e.g. twm's
+           * title bar) does have the mask in the C struct, walk_up_for_mask
+           * returns it directly -> event.window stays the title bar ->
+           * twm's HandleButtonPress classifies as C_TITLE -> f.move fires.
+           * If the C mask is also missing, walk_up_for_mask walks up to the
+           * frame as before -- no regression. */
+          deliveryWin = target;
           deliveryConn = sub.connId;
         }
       }
@@ -453,14 +477,14 @@ export class InputBridge {
           'emx11_push_button_event',
           null,
           ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
-          [xType, deliveryWin, lx, ly, e.x, e.y, e.button, e.modifiers],
+          [xType, deliveryWin, lx, ly, e.x, e.y, e.button, x11State],
         );
         this.dragModule = null;
         return;
       }
       const sub = this.host.events.findSubscriberFor(target, X_ButtonReleaseMask);
       if (sub) {
-        deliveryWin = sub.winId;
+        deliveryWin = target;
         deliveryConn = sub.connId;
       } else {
         deliveryConn = this.host.connection.connOf(target) ?? null;
@@ -504,7 +528,7 @@ export class InputBridge {
       'emx11_push_button_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
-      [xType, deliveryWin, lx, ly, e.x, e.y, e.button, e.modifiers],
+      [xType, deliveryWin, lx, ly, e.x, e.y, e.button, x11State],
     );
   }
 
