@@ -227,6 +227,16 @@ export class InputBridge {
     this.deliverButton(X_ButtonRelease, e);
   }
 
+  /** Translate a browser WheelEvent into paired X11 ButtonPress+ButtonRelease.
+   *  Classic X11 maps scroll to Button4 (up) and Button5 (down). Each
+   *  wheel "tick" produces one immediate press-then-release pair — no
+   *  separate release event, since the wheel has no held state. */
+  pushWheel(e: Omit<MouseEventData, 'button'> & { deltaY: number }): void {
+    const button = e.deltaY < 0 ? 4 : 5;
+    this.pushMouseDown({ x: e.x, y: e.y, button, modifiers: e.modifiers });
+    this.pushMouseUp({ x: e.x, y: e.y, button, modifiers: e.modifiers });
+  }
+
   pushMouseMove(e: Omit<MouseEventData, 'button'>): void {
     this.setPointer(e.x, e.y);
     const win = this.host.renderer.findWindowAt(e.x, e.y);
@@ -379,10 +389,10 @@ export class InputBridge {
       const origin = this.host.getWindowAbsOrigin(target);
       const lx = origin ? e.x - origin.ax : e.x;
       const ly = origin ? e.y - origin.ay : e.y;
-      if (xType === X_ButtonPress) {
+      if (xType === X_ButtonPress && e.button < 4) {
         this.dragModule = grab.module;
         this.focusedWindow = grab.window;
-      } else if (this.dragModule === grab.module) {
+      } else if (xType === X_ButtonRelease && this.dragModule === grab.module) {
         this.dragModule = null;
       }
       grab.module.ccall(
@@ -510,7 +520,7 @@ export class InputBridge {
     const lx = origin ? e.x - origin.ax : e.x;
     const ly = origin ? e.y - origin.ay : e.y;
 
-    if (xType === X_ButtonPress) {
+    if (xType === X_ButtonPress && e.button < 4) {
       /* Focus tracking diverges from delivery: route keys to the nearest
        * ancestor that selected KeyPressMask, not whoever owns ButtonPress.
        * twm grabs ButtonPress on its frame for click-to-raise; without
@@ -519,7 +529,12 @@ export class InputBridge {
        * select KeyPressMask on the same widget Xt selects ButtonPressMask
        * on, so this path matches the old behavior there. glxgears (no
        * WMHints, so twm never calls XSetInputFocus on its behalf) needs
-       * this implicit press-driven focus to receive keys at all. */
+       * this implicit press-driven focus to receive keys at all.
+       *
+       * Guard e.button < 4: only physical mouse buttons (left/middle/right)
+       * change keyboard focus and start the implicit pointer grab. Scroll
+       * buttons (4/5) are delivered as immediate press+release pairs and
+       * must not steal focus or create a drag. */
       const keySub = this.host.events.findSubscriberFor(target, X_KeyPressMask);
       this.focusedWindow = keySub?.winId ?? deliveryWin;
       this.dragModule = module;
@@ -611,6 +626,17 @@ export class InputBridge {
       this.pushMouseMove({ x, y, modifiers: modifiersFromEvent(e) });
     });
     on(el, 'contextmenu', (e) => e.preventDefault());
+    /* Scroll wheel → X11 Button4/Button5. Must be non-passive so
+     * preventDefault stops the browser from scrolling the page. */
+    const onWheel = (ev: Event): void => {
+      const e = ev as WheelEvent;
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      const { x, y } = this.cssPoint(e, el);
+      this.pushWheel({ x, y, modifiers: modifiersFromEvent(e), deltaY: e.deltaY });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    this.domListeners.push({ target: el, type: 'wheel', handler: onWheel });
     /* Click-to-focus. If the textarea overlay is currently armed for IME
      * (host has called XSetICFocus on a Tk widget that wants text input),
      * keep DOM focus on the overlay so the OS IME stays attached -- moving
