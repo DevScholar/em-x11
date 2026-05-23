@@ -490,7 +490,7 @@ void emx11_push_motion_event(Window window, int x, int y,
      * HandleButtonPress sees the LeaveNotify right after the
      * ButtonPress, interprets it as "the pointer already left the
      * title bar", and aborts the drag start. */
-    if (grab_window == None && !active_grab) {
+    if (grab_window == None) {
         Window cur_pw = window;
         if (cur_pw == None || !emx11_window_find(dpy, cur_pw)) {
             int lx_fb = 0, ly_fb = 0;
