@@ -746,7 +746,8 @@ int XGrabKey(Display *a, int b, unsigned int c, Window d, Bool e,
 
 int XUngrabKeyboard(Display *dpy, Time t) { (void)dpy; (void)t; return 1; }
 int XUngrabPointer (Display *dpy, Time t) {
-    (void)dpy; (void)t;
+    (void)t;
+    dpy->request++;
     emx11_js_set_grab_cursor(0);
     emx11_js_ungrab_pointer();
     return 1;

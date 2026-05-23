@@ -538,12 +538,12 @@ int XSetWindowBorderPixmap(Display *dpy, Window w, Pixmap pixmap) {
     (void)dpy; (void)w; (void)pixmap; return 1;
 }
 int XDefineCursor(Display *dpy, Window w, Cursor cursor) {
-    (void)dpy;
+    dpy->request++;
     emx11_js_window_set_cursor(w, (unsigned int)cursor);
     return 1;
 }
 int XUndefineCursor(Display *dpy, Window w) {
-    (void)dpy;
+    dpy->request++;
     emx11_js_window_set_cursor(w, 0);
     return 1;
 }
@@ -926,6 +926,7 @@ XImage *XGetImage(Display *dpy, Drawable d, int x, int y,
  * cursor art, so these just mint unique ids. */
 
 static XID g_cursor_next2 = 0x40000001;
+#define EMX11_FONT_CURSOR_TAG 0x70000000u
 
 Cursor XCreatePixmapCursor(Display *dpy, Pixmap src, Pixmap mask,
                            XColor *fg, XColor *bg, unsigned int x, unsigned int y) {
@@ -933,12 +934,17 @@ Cursor XCreatePixmapCursor(Display *dpy, Pixmap src, Pixmap mask,
     return (Cursor)(g_cursor_next2++);
 }
 
+/* XCreateGlyphCursor encodes src_ch (the glyph index in the cursor font,
+ * which is the XC_* shape constant) with EMX11_FONT_CURSOR_TAG so the JS
+ * host can map it to a CSS cursor keyword. Without this, Tk's
+ * TkGetCursorByName path (XCreateGlyphCursor, not XCreateFontCursor)
+ * produced pixmap-cursor ids that all resolved to 'default'. */
 Cursor XCreateGlyphCursor(Display *dpy, Font src_font, Font mask_font,
                           unsigned int src_ch, unsigned int mask_ch,
                           _Xconst XColor *fg, _Xconst XColor *bg) {
     (void)dpy; (void)src_font; (void)mask_font;
-    (void)src_ch; (void)mask_ch; (void)fg; (void)bg;
-    return (Cursor)(g_cursor_next2++);
+    (void)mask_ch; (void)fg; (void)bg;
+    return (Cursor)(EMX11_FONT_CURSOR_TAG | (src_ch & 0xFFFu));
 }
 
 int XRecolorCursor(Display *dpy, Cursor cursor, XColor *fg, XColor *bg) {
@@ -1087,6 +1093,7 @@ int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
                  Window confine_to, Cursor cursor, Time t) {
     (void)event_mask; (void)pointer_mode; (void)keyboard_mode;
     (void)confine_to; (void)t;
+    dpy->request++;
     /* Reset the C-side implicit grab before installing the active one.
      * The ButtonPress that triggered this popup left grab_window pointing
      * at the original button; without clearing it, subsequent ButtonRelease
