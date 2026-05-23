@@ -146,6 +146,7 @@ static unsigned int grab_button_count   = 0;
  * PointerMotionMask, so every motion event hits the mask gate and is dropped,
  * and the drag deadlocks. */
 static bool active_grab = false;
+static Window active_grab_window = None;
 
 /* Monotonic millisecond timestamp for xbutton/xmotion/xkey/xcrossing `time`
  * fields. Some WMs (twm's ConstrainedMove in particular: menus.c:1500) compare
@@ -350,20 +351,61 @@ void emx11_push_button_event(int type, Window window, int x, int y,
         if (grab_button_count > 0) grab_button_count--;
         if (grab_button_count == 0) grab_window = None;
     } else {
-        /* Trust the Host's z-order-aware findWindowAt result. The Host
-         * already did the ancestor-chain subscriber propagation
-         * (findSubscriberFor / grabs.lookup) and computed window-local
-         * coords in (x, y). Fall back to C-side hit_test only when the
-         * hint is invalid -- the C-side test is depth-based and can't
-         * distinguish a popup menu from a deeper widget underneath. */
-        target = emx11_window_find(dpy, window);
-        if (target) {
-            lx = x;
-            ly = y;
-        } else {
-            long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
-            target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
+        /* C-side hit_test is authoritative for mask-based delivery
+         * (mirrors xorg's DeliverEventsToWindow traversal). The JS host
+         * hint is only trusted as an override when it names a window in a
+         * different z-order branch than hit_test found -- i.e. a popup
+         * menu (shallow child of root) drawn above a deeper widget.
+         * Without this inversion, two classes of bugs appear:
+         *   1. JS subscriber tables may route to root when an
+         *      intermediate window (title_w, frame) has the mask,
+         *      causing every click to act like a root click.
+         *   2. hit_test's depth-first walk picks a buried widget
+         *      under a popup menu instead of the topmost menu entry. */
+        int ht_lx = 0, ht_ly = 0;
+        long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
+        EmxWindow *ht_target = hit_test(dpy, x_root, y_root, mask, &ht_lx, &ht_ly);
+        EmxWindow *hint_target = emx11_window_find(dpy, window);
+
+        target = ht_target;
+        lx = ht_lx;
+        ly = ht_ly;
+
+        if (hint_target && hint_target != ht_target) {
+            if (!ht_target) {
+                /* hit_test failed -- use host hint */
+                target = hint_target;
+                lx = x;
+                ly = y;
+            } else if (!win_is_inferior_of(dpy, ht_target->id, hint_target->id)) {
+                /* Host hint is NOT an ancestor of the hit_test result.
+                 * Different z-order branch (popup menu above deeper
+                 * widget). Trust the z-order-aware host hint. */
+                target = hint_target;
+                lx = x;
+                ly = y;
+            }
+            /* else: host hint IS an ancestor of hit_test result
+             * (e.g. root → title_w). Keep the more specific hit_test
+             * target -- the ancestor route from JS subscriber tables
+             * is a fallback, not the authoritative window. */
         }
+
+        /* Active grab cross-connection fallback: the host hint may
+         * name a window owned by another connection; hit_test also
+         * fails because this Display has no window at that point.
+         * Deliver to the active grab window so the grabbing client
+         * sees the event. */
+        if (!target && active_grab) {
+            target = emx11_window_find(dpy, active_grab_window);
+            if (target) {
+                int ax = 0, ay = 0, depth;
+                window_abs_origin(dpy, target, &ax, &ay, &depth);
+                lx = x_root - ax;
+                ly = y_root - ay;
+            }
+        }
+
         if (target && type == ButtonPress) {
             /* Ensure Tk has seen an Enter on this widget before its
              * <ButtonPress-1> binding runs. Covers the case where a click
@@ -401,6 +443,7 @@ void emx11_push_button_event(int type, Window window, int x, int y,
     ev.xbutton.y           = ly;
     ev.xbutton.x_root      = x_root;
     ev.xbutton.y_root      = y_root;
+    ev.xbutton.root        = dpy->screens[0].root;
     ev.xbutton.button      = button;
     ev.xbutton.state       = state;
     ev.xbutton.same_screen = True;
@@ -414,22 +457,23 @@ void emx11_push_motion_event(Window window, int x, int y,
                              unsigned int state) {
     Display *dpy = emx11_get_display();
 
-    /* Pointer-window tracking: trust the Host's z-order-aware findWindowAt
-     * result passed as `window`. The C-side hit_test is depth-based and
-     * can't distinguish a popup menu (shallow top-level) from a deeper
-     * widget underneath it. Fall back to C-side hit_test only when the
-     * Host hint is None or names a window we don't know. */
-    Window cur_pw = window;
-    if (cur_pw == None || !emx11_window_find(dpy, cur_pw)) {
-        int lx_fb = 0, ly_fb = 0;
-        EmxWindow *pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
-        cur_pw = pt ? pt->id : None;
+    /* Pointer-window tracking: C-side hit_test is authoritative
+     * (mirrors xorg's sprite position). Host hint is only a fallback
+     * for cross-connection cases where no local window exists at the
+     * point. The deferred repoll path (emx11_repoll_pointer_window_hint)
+     * handles popup-menu z-order correctness on map/unmap. */
+    int lx_fb = 0, ly_fb = 0;
+    EmxWindow *pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
+    Window cur_pw = pt ? pt->id : None;
+    if (cur_pw == None && window != None && emx11_window_find(dpy, window)) {
+        cur_pw = window;
     }
     update_pointer_window(dpy, cur_pw, x_root, y_root, state);
 
-    /* MotionNotify routing: grab window during a grab, Host-hint window
-     * otherwise. The Host's findWindowAt is z-order-aware and correctly
-     * picks a popup menu item over a deeper ancestor underneath. */
+    /* MotionNotify routing: grab window during a grab, hit_test result
+     * otherwise. Host hint is only used when hit_test fails (cross-
+     * connection) or when it names a window in a different z-order
+     * branch (popup menu above deeper widget). */
     EmxWindow *motion_target;
     bool via_grab = false;
     if (grab_window != None) {
@@ -437,15 +481,23 @@ void emx11_push_motion_event(Window window, int x, int y,
         if (!motion_target || !motion_target->mapped) return;
         via_grab = true;
     } else {
-        motion_target = emx11_window_find(dpy, window);
-        if (!motion_target) {
-            /* Host hint invalid -- fall back to C-side hit_test. */
-            int lx_fb = 0, ly_fb = 0;
-            motion_target = hit_test(dpy, x_root, y_root,
-                                     PointerMotionMask | ButtonMotionMask,
-                                     &lx_fb, &ly_fb);
-            if (!motion_target) return;
+        int ht_lx = 0, ht_ly = 0;
+        motion_target = hit_test(dpy, x_root, y_root,
+                                 PointerMotionMask | ButtonMotionMask,
+                                 &ht_lx, &ht_ly);
+        EmxWindow *hint_target = emx11_window_find(dpy, window);
+        if (hint_target && hint_target != motion_target) {
+            if (!motion_target ||
+                !win_is_inferior_of(dpy, motion_target->id, hint_target->id)) {
+                /* hit_test failed OR host hint is in a different z-order
+                 * branch (popup menu). Trust the z-order-aware hint. */
+                motion_target = hint_target;
+            }
         }
+        if (!motion_target && active_grab) {
+            motion_target = emx11_window_find(dpy, active_grab_window);
+        }
+        if (!motion_target) return;
     }
     /* Mask gate. Skipped during an implicit pointer grab: x11protocol
      * §523 specifies that MotionNotify (and ButtonRelease) are reported
@@ -488,6 +540,7 @@ void emx11_push_motion_event(Window window, int x, int y,
     ev.xmotion.x_root      = x_root;
     ev.xmotion.y_root      = y_root;
     ev.xmotion.state       = state;
+    ev.xmotion.root        = dpy->screens[0].root;
     ev.xmotion.is_hint     = NotifyNormal;
     ev.xmotion.same_screen = True;
     ev.xmotion.time        = event_now();
@@ -529,6 +582,7 @@ void emx11_push_key_event_kc(int type, Window window,
     ev.xkey.y_root      = y;
     ev.xkey.state       = state;
     ev.xkey.keycode     = (KeyCode)keycode;
+    ev.xkey.root        = dpy->screens[0].root;
     ev.xkey.same_screen = True;
     ev.xkey.time        = event_now();
     /* Make sure keysym_table[kc] reflects the keysym we just dispatched
@@ -759,6 +813,7 @@ int XUngrabPointer(Display *dpy, Time t) {
     (void)t;
     dpy->request++;
     active_grab = false;
+    active_grab_window = None;
     emx11_js_set_grab_cursor(0);
     emx11_js_ungrab_pointer();
     return 1;
@@ -772,6 +827,7 @@ int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
     dpy->request++;
     emx11_reset_implicit_grab();
     active_grab = true;
+    active_grab_window = grab_window;
     emx11_js_set_grab_cursor((unsigned int)cursor);
     emx11_js_grab_pointer((unsigned int)dpy->conn_id,
                           grab_window, owner_events ? 1 : 0);
