@@ -232,3 +232,44 @@ Status XSetStandardProperties(Display *dpy, Window w,
     if (hints) XSetWMNormalHints(dpy, w, hints);
     return 1;
 }
+
+/* -- Screensaver controls -- not meaningful in a browser tab. ------------ */
+
+int XForceScreenSaver(Display *dpy, int mode) {
+    (void)dpy; (void)mode;
+    return 1;
+}
+
+int XResetScreenSaver(Display *dpy) {
+    (void)dpy;
+    return 1;
+}
+
+/* -- WM hints that a window manager would read. We don't have one running
+ * as a separate process, and Tk just writes them; swallow silently. ------- */
+
+int XSetIconName(Display *dpy, Window w, _Xconst char *icon_name) {
+    (void)dpy; (void)w; (void)icon_name;
+    return 1;
+}
+
+void XSetWMClientMachine(Display *dpy, Window w, XTextProperty *prop) {
+    (void)dpy; (void)w; (void)prop;
+}
+
+Status XSetWMColormapWindows(Display *dpy, Window w, Window *colormap_windows,
+                             int count) {
+    (void)dpy; (void)w; (void)colormap_windows; (void)count;
+    return 1;
+}
+
+/* -- WM reconfiguration -- the point of going via XReconfigureWMWindow
+ * is to let the WM intercept the request; without one we just apply
+ * it directly. */
+
+Status XReconfigureWMWindow(Display *dpy, Window w, int screen_number,
+                            unsigned int mask, XWindowChanges *changes) {
+    (void)screen_number;
+    if (!changes) return 0;
+    return (Status)XConfigureWindow(dpy, w, mask, changes);
+}

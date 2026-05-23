@@ -419,3 +419,28 @@ int XwcLookupString(XIC ic, XKeyPressedEvent *event,
  * preedit redraw. Tk delivers the KeyPress straight to its handler
  * which calls Xutf8LookupString and inserts the bytes. The stub in
  * xt_stubs.c remains authoritative. */
+
+/* -- XIM registration callbacks. Tk uses them to register a "tell me when
+ * an XIM appears" watcher; XOpenIM already succeeds on the first call so
+ * the callback never has to fire. */
+
+Bool XRegisterIMInstantiateCallback(Display *dpy, struct _XrmHashBucketRec *rdb,
+                                    char *res_name, char *res_class,
+                                    XIDProc callback, XPointer client_data) {
+    (void)dpy; (void)rdb; (void)res_name; (void)res_class;
+    (void)callback; (void)client_data;
+    return False;
+}
+
+Bool XUnregisterIMInstantiateCallback(Display *dpy, struct _XrmHashBucketRec *rdb,
+                                      char *res_name, char *res_class,
+                                      XIDProc callback, XPointer client_data) {
+    (void)dpy; (void)rdb; (void)res_name; (void)res_class;
+    (void)callback; (void)client_data;
+    return False;
+}
+
+char *XSetIMValues(XIM im, ...) {
+    (void)im;
+    return NULL;
+}

@@ -298,3 +298,40 @@ int XPutImage(Display *dpy, Drawable d, GC gc, XImage *image,
                        gc->foreground, gc->background);
     return 1;
 }
+
+/* -- Plural-form drawing wrappers. Delegate to the scalar form; callers
+ * that pass XRectangle[] or XArc[] get item-at-a-time dispatch. */
+
+int XFillRectangles(Display *dpy, Drawable d, GC gc,
+                    XRectangle *rectangles, int nrectangles) {
+    if (!rectangles) return 0;
+    for (int i = 0; i < nrectangles; i++) {
+        XFillRectangle(dpy, d, gc, rectangles[i].x, rectangles[i].y,
+                       rectangles[i].width, rectangles[i].height);
+    }
+    return 1;
+}
+
+/* Xmu's DrRndRect.c (XmuDrawRoundedRectangle / XmuFillRoundedRectangle)
+ * stamps arcs for every corner in a single XDrawArcs / XFillArcs call.
+ * Xaw's Command/Toggle widgets then call DrRndRect for every button in a
+ * Form, which is how xcalc pulls it in. Delegate to the scalar form. */
+int XDrawArcs(Display *dpy, Drawable d, GC gc, XArc *arcs, int narcs) {
+    if (!arcs) return 0;
+    for (int i = 0; i < narcs; i++) {
+        XDrawArc(dpy, d, gc, arcs[i].x, arcs[i].y,
+                 arcs[i].width, arcs[i].height,
+                 arcs[i].angle1, arcs[i].angle2);
+    }
+    return 1;
+}
+
+int XFillArcs(Display *dpy, Drawable d, GC gc, XArc *arcs, int narcs) {
+    if (!arcs) return 0;
+    for (int i = 0; i < narcs; i++) {
+        XFillArc(dpy, d, gc, arcs[i].x, arcs[i].y,
+                 arcs[i].width, arcs[i].height,
+                 arcs[i].angle1, arcs[i].angle2);
+    }
+    return 1;
+}

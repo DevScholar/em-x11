@@ -46,7 +46,6 @@ set(EMX11_X11_SOURCES
     src/pixmap.c
     src/xt_stubs.c
     src/xaw_stubs.c
-    src/tk_shims.c
     src/xim.c
     src/xkb.c
     src/keysym_table.c

@@ -771,25 +771,154 @@ emx11_close_display_proc XESetCloseDisplay(Display *dpy, int extension,
     return NULL;
 }
 
-/* -- Image stubs. XPutImage lives in drawing.c; XCreateImage still stays
- * here because it's pure housekeeping -- the wasm side allocates the
- * XImage header and data buffer; XPutImage is what copies to a Drawable. */
+/* -- Image lifecycle: XCreateImage, XGetImage, pixel accessors, and
+ * XInitImage / XDestroyImage.
+ *
+ * XPutImage lives in drawing.c (it bridges drawable data to the host);
+ * the pixel accessors and XGetImage are here alongside XCreateImage so the
+ * whole XImage pipeline stays in one place.
+ *
+ * Pixel format: em-x11's single screen is 24-bit TrueColor with 32bpp
+ * (B,G,R,A in wasm memory, matching the PutImage BGRA path). The pixel
+ * accessors below encode/decode 0x00RRGGBB ↔ BGRA bytes. */
+
+#define ROUNDUP(nbytes, pad) (((((nbytes) - 1) + (pad)) / (pad)) * (pad))
+
+static int _emx11_bits_per_pixel(Display *dpy, int depth) {
+    ScreenFormat *fmt = dpy->pixmap_format;
+    for (int i = dpy->nformats; i > 0; i--, fmt++) {
+        if (fmt->depth == depth) return fmt->bits_per_pixel;
+    }
+    if (depth <= 1)  return 1;
+    if (depth <= 4)  return 4;
+    if (depth <= 8)  return 8;
+    if (depth <= 16) return 16;
+    return 32;
+}
+
+int _XInitImageFuncPtrs(XImage *image);
 
 XImage *XCreateImage(Display *dpy, Visual *visual, unsigned int depth,
                      int format, int offset, char *data,
                      unsigned int width, unsigned int height,
                      int bitmap_pad, int bytes_per_line) {
-    (void)dpy; (void)visual; (void)format; (void)offset;
+    if (depth == 0 || depth > 32) return NULL;
+    if (format != XYBitmap && format != XYPixmap && format != ZPixmap)
+        return NULL;
+    if (format == XYBitmap && depth != 1) return NULL;
+    if (bitmap_pad != 8 && bitmap_pad != 16 && bitmap_pad != 32) return NULL;
+    if (offset < 0) return NULL;
+
     XImage *img = calloc(1, sizeof(*img));
     if (!img) return NULL;
-    img->width          = (int)width;
-    img->height         = (int)height;
-    img->depth          = (int)depth;
-    img->data           = data;
-    img->xoffset        = 0;
-    img->bitmap_pad     = bitmap_pad;
-    img->bytes_per_line = bytes_per_line ? bytes_per_line : (int)(width * 4);
-    img->bits_per_pixel = 32;
+
+    img->width       = (int)width;
+    img->height      = (int)height;
+    img->format      = format;
+    img->depth       = (int)depth;
+    img->data        = data;
+    img->xoffset     = offset;
+    img->bitmap_pad  = bitmap_pad;
+
+    img->byte_order       = dpy->byte_order;
+    img->bitmap_unit      = dpy->bitmap_unit;
+    img->bitmap_bit_order = dpy->bitmap_bit_order;
+
+    if (visual) {
+        img->red_mask   = visual->red_mask;
+        img->green_mask = visual->green_mask;
+        img->blue_mask  = visual->blue_mask;
+    }
+
+    int bpp = (format == ZPixmap) ? _emx11_bits_per_pixel(dpy, (int)depth) : 1;
+    img->bits_per_pixel = bpp;
+
+    int min_bpl;
+    if (format == ZPixmap)
+        min_bpl = ROUNDUP(bpp * (int)width, bitmap_pad);
+    else
+        min_bpl = ROUNDUP((int)width + offset, bitmap_pad);
+
+    if (bytes_per_line == 0)
+        img->bytes_per_line = min_bpl;
+    else if (bytes_per_line < min_bpl) {
+        free(img);
+        return NULL;
+    } else
+        img->bytes_per_line = bytes_per_line;
+
+    _XInitImageFuncPtrs(img);
+    return img;
+}
+
+/* -- XImage pixel accessors (32bpp ZPixmap BGRA) ---------------------------
+ * Visual masks (TrueColor): red=0xff0000 green=0xff00 blue=0xff.
+ * Pixel values from Tk_GetColorByValue are 0x00RRGGBB.
+ * The data buffer is BGRA byte order matching the PutImage path. */
+
+static unsigned long _emx11_get_pixel(XImage *img, int x, int y) {
+    unsigned char *p = (unsigned char *)img->data + y * img->bytes_per_line + x * 4;
+    return ((unsigned long)p[2] << 16) | ((unsigned long)p[1] << 8) | (unsigned long)p[0];
+}
+
+static int _emx11_put_pixel(XImage *img, int x, int y, unsigned long pixel) {
+    unsigned char *p = (unsigned char *)img->data + y * img->bytes_per_line + x * 4;
+    p[0] = (unsigned char)(pixel & 0xff);
+    p[1] = (unsigned char)((pixel >> 8) & 0xff);
+    p[2] = (unsigned char)((pixel >> 16) & 0xff);
+    p[3] = 0xff;
+    return 1;
+}
+
+static int _emx11_destroy_image(XImage *img) {
+    free(img->data);
+    img->data = NULL;
+    free(img);
+    return 1;
+}
+
+/* -- InitImageFuncPtrs: wire the 32bpp BGRA accessors (the only pixel
+ * format em-x11 surfaces use). Callers that create depth-1 XYBitmap images
+ * bypass XPutPixel and write raw bitmap bytes directly, so a single set of
+ * accessors suffices for every XImage in the process. */
+
+int _XInitImageFuncPtrs(XImage *image) {
+    if (!image) return 0;
+    image->f.get_pixel      = _emx11_get_pixel;
+    image->f.put_pixel      = _emx11_put_pixel;
+    image->f.destroy_image  = _emx11_destroy_image;
+    return 1;
+}
+
+/* -- XGetImage — does NOT read back from the browser compositor (that
+ * would require an async GPU round-trip). Instead it returns a
+ * zero-filled XImage that callers can write to via XPutPixel and then
+ * commit with XPutImage. This is sufficient for the "create blank
+ * buffer, stamp pixels, blit" pattern that Tk's checkbutton/radiobutton
+ * indicator drawing and ttk theme element building rely on.
+ *
+ * Real readback for photo-image capture and postscript export can be
+ * added later via a Host method that returns RGBA bytes. */
+
+XImage *XGetImage(Display *dpy, Drawable d, int x, int y,
+                  unsigned int w, unsigned int h,
+                  unsigned long plane_mask, int format) {
+    (void)dpy; (void)d; (void)x; (void)y; (void)plane_mask;
+    if (w == 0 || h == 0) return NULL;
+
+    /* Derive the correct depth for the requested format so XCreateImage
+     * produces a consistent XImage: ZPixmap → 24, XYBitmap → 1. */
+    int depth = (format == XYBitmap) ? 1 : (int)dpy->screens[0].root_depth;
+    XImage *img = XCreateImage(dpy, NULL, (unsigned int)depth, format, 0,
+                               NULL, w, h, dpy->bitmap_pad, 0);
+    if (!img) return NULL;
+
+    int data_size = img->bytes_per_line * (int)h;
+    img->data = calloc(1, (size_t)data_size);
+    if (!img->data) {
+        free(img);
+        return NULL;
+    }
     return img;
 }
 
@@ -1163,4 +1292,32 @@ int XGetErrorDatabaseText(Display *dpy, _Xconst char *name, _Xconst char *messag
     memcpy(buffer_return, src, n);
     buffer_return[n] = '\0';
     return 0;
+}
+
+/* -- Keyboard grab — same rationale as XGrabPointer: we have no real
+ * input routing that would steal events from other windows, so reporting
+ * GrabSuccess is truthful. */
+
+int XGrabKeyboard(Display *dpy, Window grab_window, Bool owner_events,
+                  int pointer_mode, int keyboard_mode, Time t) {
+    (void)dpy; (void)grab_window; (void)owner_events;
+    (void)pointer_mode; (void)keyboard_mode; (void)t;
+    return GrabSuccess;
+}
+
+/* -- XNoOp: a server round-trip with no side effect. In em-x11 there is
+ * no server, so this is genuinely a no-op. */
+
+int XNoOp(Display *dpy) {
+    (void)dpy;
+    return 1;
+}
+
+/* -- XListHosts: browser has no access-control list. Return empty list. */
+
+XHostAddress *XListHosts(Display *dpy, int *nhosts_return, Bool *state_return) {
+    (void)dpy;
+    if (nhosts_return) *nhosts_return = 0;
+    if (state_return)  *state_return  = False;
+    return NULL;
 }

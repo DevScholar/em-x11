@@ -933,3 +933,38 @@ int XmbTextListToTextProperty(Display *dpy, char **list, int count,
     (void)dpy; (void)style;
     return XStringListToTextProperty(list, count, text_prop_return) ? 0 : -1;
 }
+
+/* -- Region extras beyond the bounding-box core above. -------------------- */
+
+int XRectInRegion(Region r, int x, int y, unsigned int w, unsigned int h) {
+    EmxRegion *er = (EmxRegion *)r;
+    if (!er || er->is_empty) return RectangleOut;
+    int rx2 = x + (int)w;
+    int ry2 = y + (int)h;
+    if (rx2 <= er->x1 || x >= er->x2 || ry2 <= er->y1 || y >= er->y2)
+        return RectangleOut;
+    if (x >= er->x1 && y >= er->y1 && rx2 <= er->x2 && ry2 <= er->y2)
+        return RectangleIn;
+    return RectanglePart;
+}
+
+/* Bounding-rect subtraction is ambiguous -- concave results can't be
+ * represented. Be conservative: dst becomes src1 unchanged, which
+ * over-redraws but is always correct. Tk uses XSubtractRegion for
+ * damage-minimisation; painting more pixels than strictly needed is
+ * a performance concern, not correctness. */
+int XSubtractRegion(Region src1, Region src2, Region dst) {
+    (void)src2;
+    EmxRegion *a = (EmxRegion *)src1;
+    EmxRegion *d = (EmxRegion *)dst;
+    if (!d) return 0;
+    if (!a || a->is_empty) {
+        d->is_empty = 1;
+        d->x1 = d->y1 = d->x2 = d->y2 = 0;
+        return 1;
+    }
+    d->x1 = a->x1; d->y1 = a->y1;
+    d->x2 = a->x2; d->y2 = a->y2;
+    d->is_empty = a->is_empty;
+    return 1;
+}

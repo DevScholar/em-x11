@@ -30,6 +30,7 @@
 
 #include "emx11_internal.h"
 
+#include <X11/Xutil.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -233,4 +234,40 @@ Colormap XCreateColormap(Display *dpy, Window w, Visual *visual, int alloc) {
 Status XLookupColor(Display *dpy, Colormap cmap, _Xconst char *name,
                     XColor *exact_def_return, XColor *screen_def_return) {
     return XAllocNamedColor(dpy, cmap, name, screen_def_return, exact_def_return);
+}
+
+/* -- Visual accessors -- single-screen TrueColor world. ------------------- */
+
+VisualID XVisualIDFromVisual(Visual *visual) {
+    return visual ? visual->visualid : 0;
+}
+
+/* Return the single TrueColor visual we always hand out. Tk calls this
+ * to enumerate candidates (e.g. to pick a matching 32-bit visual for
+ * image import); a one-element list is sufficient. Caller XFrees. */
+XVisualInfo *XGetVisualInfo(Display *dpy, long mask, XVisualInfo *template_,
+                            int *nitems_return) {
+    (void)mask; (void)template_;
+    if (nitems_return) *nitems_return = 0;
+    if (!dpy) return NULL;
+    XVisualInfo *info = calloc(1, sizeof(XVisualInfo));
+    if (!info) return NULL;
+    Visual *v = dpy->screens[0].root_visual;
+    info->visual        = v;
+    info->visualid      = v ? v->visualid : 0;
+    info->screen        = 0;
+    info->depth         = dpy->screens[0].root_depth;
+    info->class         = TrueColor;
+    info->red_mask      = 0x00ff0000;
+    info->green_mask    = 0x0000ff00;
+    info->blue_mask     = 0x000000ff;
+    info->colormap_size = 256;
+    info->bits_per_rgb  = 8;
+    if (nitems_return) *nitems_return = 1;
+    return info;
+}
+
+int XSetWindowColormap(Display *dpy, Window w, Colormap cmap) {
+    (void)dpy; (void)w; (void)cmap;
+    return 1;                                   /* single-colormap world */
 }
