@@ -20,6 +20,7 @@
 
 #include "emx11_internal.h"
 
+#include <X11/Xutil.h>
 #include <stdlib.h>
 
 typedef struct EmxPixmap {
@@ -128,4 +129,175 @@ Bool emx11_pixmap_exists(Pixmap id) {
 unsigned int emx11_pixmap_depth(Pixmap id) {
     EmxPixmap *p = pixmap_find(id);
     return p ? p->depth : 0;
+}
+
+/* -- Pixmap-from-bitmap-data -- */
+
+Pixmap XCreatePixmapFromBitmapData(Display *dpy, Drawable d, char *data,
+                                   unsigned int w, unsigned int h,
+                                   unsigned long fg, unsigned long bg,
+                                   unsigned int depth) {
+    Pixmap pm = XCreatePixmap(dpy, d, w, h, depth);
+    if (pm == None || !data || w == 0 || h == 0) return pm;
+    int bpl = (int)((w + 7u) / 8u);
+    int data_len = bpl * (int)h;
+    emx11_js_put_image(pm, 0, 0, w, h,
+                       XYBitmap, 1, bpl,
+                       (const unsigned char *)data, data_len,
+                       fg, bg);
+    return pm;
+}
+
+int XReadBitmapFileData(_Xconst char *filename, unsigned int *w,
+                        unsigned int *h, unsigned char **data,
+                        int *x_hot, int *y_hot) {
+    (void)filename;
+    if (w)     *w = 0;
+    if (h)     *h = 0;
+    if (data)  *data = NULL;
+    if (x_hot) *x_hot = -1;
+    if (y_hot) *y_hot = -1;
+    return BitmapFileInvalid;
+}
+
+int XReadBitmapFile(Display *dpy, Drawable d, _Xconst char *filename,
+                    unsigned int *w, unsigned int *h, Pixmap *bitmap_return,
+                    int *x_hot, int *y_hot) {
+    (void)dpy; (void)d;
+    return XReadBitmapFileData(filename, w, h, NULL, x_hot, y_hot) == 0 ?
+        BitmapSuccess : BitmapFileInvalid;
+    (void)bitmap_return;
+}
+
+int XWriteBitmapFile(Display *dpy, _Xconst char *filename, Pixmap bitmap,
+                     unsigned int w, unsigned int h, int x_hot, int y_hot) {
+    (void)dpy; (void)filename; (void)bitmap; (void)w; (void)h;
+    (void)x_hot; (void)y_hot;
+    return BitmapNoMemory;
+}
+
+Pixmap XCreateBitmapFromData(Display *dpy, Drawable d, _Xconst char *data,
+                             unsigned int width, unsigned int height) {
+    return XCreatePixmapFromBitmapData(dpy, d, (char *)data, width, height,
+                                       1, 0, 1);
+}
+
+/* -- XImage pipeline -- */
+
+#define ROUNDUP(nbytes, pad) (((((nbytes) - 1) + (pad)) / (pad)) * (pad))
+
+static int _emx11_bits_per_pixel(Display *dpy, int depth) {
+    ScreenFormat *fmt = dpy->pixmap_format;
+    for (int i = dpy->nformats; i > 0; i--, fmt++) {
+        if (fmt->depth == depth) return fmt->bits_per_pixel;
+    }
+    if (depth <= 1)  return 1;
+    if (depth <= 4)  return 4;
+    if (depth <= 8)  return 8;
+    if (depth <= 16) return 16;
+    return 32;
+}
+
+static int _XInitImageFuncPtrs(XImage *image);
+
+XImage *XCreateImage(Display *dpy, Visual *visual, unsigned int depth,
+                     int format, int offset, char *data,
+                     unsigned int width, unsigned int height,
+                     int bitmap_pad, int bytes_per_line) {
+    if (depth == 0 || depth > 32) return NULL;
+    if (format != XYBitmap && format != XYPixmap && format != ZPixmap)
+        return NULL;
+    if (format == XYBitmap && depth != 1) return NULL;
+    if (bitmap_pad != 8 && bitmap_pad != 16 && bitmap_pad != 32) return NULL;
+    if (offset < 0) return NULL;
+
+    XImage *img = calloc(1, sizeof(*img));
+    if (!img) return NULL;
+
+    img->width       = (int)width;
+    img->height      = (int)height;
+    img->format      = format;
+    img->depth       = (int)depth;
+    img->data        = data;
+    img->xoffset     = offset;
+    img->bitmap_pad  = bitmap_pad;
+
+    img->byte_order       = dpy->byte_order;
+    img->bitmap_unit      = dpy->bitmap_unit;
+    img->bitmap_bit_order = dpy->bitmap_bit_order;
+
+    if (visual) {
+        img->red_mask   = visual->red_mask;
+        img->green_mask = visual->green_mask;
+        img->blue_mask  = visual->blue_mask;
+    }
+
+    int bpp = (format == ZPixmap) ? _emx11_bits_per_pixel(dpy, (int)depth) : 1;
+    img->bits_per_pixel = bpp;
+
+    int min_bpl;
+    if (format == ZPixmap)
+        min_bpl = ROUNDUP(bpp * (int)width, bitmap_pad);
+    else
+        min_bpl = ROUNDUP((int)width + offset, bitmap_pad);
+
+    if (bytes_per_line == 0)
+        img->bytes_per_line = min_bpl;
+    else if (bytes_per_line < min_bpl) {
+        free(img);
+        return NULL;
+    } else
+        img->bytes_per_line = bytes_per_line;
+
+    _XInitImageFuncPtrs(img);
+    return img;
+}
+
+static unsigned long _emx11_get_pixel(XImage *img, int x, int y) {
+    unsigned char *p = (unsigned char *)img->data + y * img->bytes_per_line + x * 4;
+    return ((unsigned long)p[2] << 16) | ((unsigned long)p[1] << 8) | (unsigned long)p[0];
+}
+
+static int _emx11_put_pixel(XImage *img, int x, int y, unsigned long pixel) {
+    unsigned char *p = (unsigned char *)img->data + y * img->bytes_per_line + x * 4;
+    p[0] = (unsigned char)(pixel & 0xff);
+    p[1] = (unsigned char)((pixel >> 8) & 0xff);
+    p[2] = (unsigned char)((pixel >> 16) & 0xff);
+    p[3] = 0xff;
+    return 1;
+}
+
+static int _emx11_destroy_image(XImage *img) {
+    free(img->data);
+    img->data = NULL;
+    free(img);
+    return 1;
+}
+
+static int _XInitImageFuncPtrs(XImage *image) {
+    if (!image) return 0;
+    image->f.get_pixel      = _emx11_get_pixel;
+    image->f.put_pixel      = _emx11_put_pixel;
+    image->f.destroy_image  = _emx11_destroy_image;
+    return 1;
+}
+
+XImage *XGetImage(Display *dpy, Drawable d, int x, int y,
+                  unsigned int w, unsigned int h,
+                  unsigned long plane_mask, int format) {
+    (void)dpy; (void)d; (void)x; (void)y; (void)plane_mask;
+    if (w == 0 || h == 0) return NULL;
+
+    int depth = (format == XYBitmap) ? 1 : (int)dpy->screens[0].root_depth;
+    XImage *img = XCreateImage(dpy, NULL, (unsigned int)depth, format, 0,
+                               NULL, w, h, dpy->bitmap_pad, 0);
+    if (!img) return NULL;
+
+    int data_size = img->bytes_per_line * (int)h;
+    img->data = calloc(1, (size_t)data_size);
+    if (!img->data) {
+        free(img);
+        return NULL;
+    }
+    return img;
 }

@@ -8,7 +8,7 @@
  * Cursor xids arrive from C through `emx11_js_window_set_cursor`.
  * Two encodings:
  *
- *   - 0x70000000 | shape  (xt_stubs.c::XCreateFontCursor) -- decode
+ *   - 0x70000000 | shape  (Cursor.c::XCreateFontCursor) -- decode
  *     `shape` directly via `cursorFontCss`. shape is the X11 cursorfont
  *     constant (0..152, even values; odd values are the mask glyph and
  *     never appear here).
@@ -64,7 +64,7 @@ const SHAPE_TO_CSS: Record<number, string> = {
   152: 'text',         // XC_xterm
 };
 
-/** Map a Cursor xid (as encoded by xt_stubs.c) to a CSS `cursor:`
+/** Map a Cursor xid (as encoded by Cursor.c) to a CSS `cursor:`
  *  keyword. Pass 0 for "no cursor set" (XUndefineCursor / never set);
  *  callers should treat 0 as "inherit from parent". */
 export function cursorXidToCss(xid: number): string | null {

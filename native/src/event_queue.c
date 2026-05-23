@@ -7,6 +7,8 @@
 
 #include "emx11_internal.h"
 
+#include <emscripten.h>
+
 bool emx11_event_queue_push(Display *dpy, const XEvent *event) {
     unsigned int next_tail = (dpy->event_tail + 1) % EMX11_EVENT_QUEUE_CAPACITY;
     if (next_tail == dpy->event_head) {
@@ -136,10 +138,83 @@ int XEventsQueued(Display *display, int mode) {
 }
 
 int XNextEvent(Display *display, XEvent *event_return) {
-    /* DIAGNOSTIC: was a busy-wait emscripten_sleep loop. The browser
-     * pump pushes events from JS, so blocking inside wasm is wrong --
-     * it spins consuming CPU instead of yielding. Return 0 if no event
-     * is available; callers should check XPending first. */
     if (emx11_event_queue_size(display) == 0) return 0;
     return emx11_event_queue_pop(display, event_return) ? 1 : 0;
+}
+
+/* -- Event helpers -- */
+
+Bool XFilterEvent(XEvent *event, Window w) {
+    (void)event; (void)w;
+    return False;
+}
+
+Bool XCheckIfEvent(Display *dpy, XEvent *event_return,
+                   Bool (*predicate)(Display *, XEvent *, XPointer),
+                   XPointer arg) {
+    if (!dpy || !event_return || !predicate) return False;
+    unsigned int i = dpy->event_head;
+    while (i != dpy->event_tail) {
+        XEvent *e = &dpy->event_queue[i];
+        if (predicate(dpy, e, arg)) {
+            *event_return = *e;
+            unsigned int next = (i + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+            while (next != dpy->event_tail) {
+                dpy->event_queue[i] = dpy->event_queue[next];
+                i = next;
+                next = (next + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+            }
+            dpy->event_tail =
+                (dpy->event_tail + EMX11_EVENT_QUEUE_CAPACITY - 1) %
+                EMX11_EVENT_QUEUE_CAPACITY;
+            return True;
+        }
+        i = (i + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+    }
+    return False;
+}
+
+int XIfEvent(Display *dpy, XEvent *event_return,
+             Bool (*predicate)(Display *, XEvent *, XPointer),
+             XPointer arg) {
+    while (!XCheckIfEvent(dpy, event_return, predicate, arg)) {
+        emscripten_sleep(1);
+    }
+    return 1;
+}
+
+int XPeekEvent(Display *dpy, XEvent *event_return) {
+    while (dpy->event_head == dpy->event_tail) emscripten_sleep(1);
+    *event_return = dpy->event_queue[dpy->event_head];
+    return 1;
+}
+
+int XPutBackEvent(Display *dpy, XEvent *event) {
+    if (!dpy || !event) return 0;
+    dpy->event_head = (dpy->event_head + EMX11_EVENT_QUEUE_CAPACITY - 1) %
+                       EMX11_EVENT_QUEUE_CAPACITY;
+    dpy->event_queue[dpy->event_head] = *event;
+    return 1;
+}
+
+static int XSynchronize_noop(Display *dpy) { (void)dpy; return 0; }
+
+int (*XSynchronize(Display *dpy, Bool onoff))(Display *) {
+    (void)dpy; (void)onoff;
+    return XSynchronize_noop;
+}
+
+Bool XCheckMaskEvent(Display *dpy, long event_mask, XEvent *ev) {
+    return emx11_event_queue_peek_match(dpy, event_mask, ev) ? True : False;
+}
+
+Bool XCheckTypedWindowEvent(Display *dpy, Window w, int event_type, XEvent *ev) {
+    return emx11_event_queue_peek_typed(dpy, w, event_type, ev) ? True : False;
+}
+
+int XMaskEvent(Display *dpy, long event_mask, XEvent *ev) {
+    for (;;) {
+        if (emx11_event_queue_peek_match(dpy, event_mask, ev)) return 1;
+        emscripten_sleep(10);
+    }
 }

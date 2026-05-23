@@ -24,8 +24,7 @@ set(EMX11_PUBLIC_HEADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 # Sources per archive. Anything an Xlib stub references that is itself
 # Xlib (XCreateRegion, XKeysymToString, XCopyPlane, ...) lives in
-# libX11.a -- the stub split files (xt_stubs.c, xaw_stubs.c) are
-# misleadingly named but really are Xlib filler.
+# libX11.a -- the files are organised per xorg/libX11 conventions.
 set(EMX11_X11_SOURCES
     src/display.c
     src/window.c
@@ -44,9 +43,11 @@ set(EMX11_X11_SOURCES
     src/wm.c
     src/xrm.c
     src/pixmap.c
-    src/xt_stubs.c
-    src/xaw_stubs.c
     src/xim.c
+    src/Region.c
+    src/Text16.c
+    src/ImText.c
+    src/Cursor.c
     src/xkb.c
     src/keysym_table.c
     src/bridges.c

@@ -1,7 +1,7 @@
 /*
  * Keysym name <-> code table, auto-generated from X11/keysymdef.h.
  *
- * Used by XStringToKeysym / XKeysymToString in xt_stubs.c. The table
+ * Used by XStringToKeysym / XKeysymToString in event_keysym.c. The table
  * itself lives in keysym_table.c, which is produced by running
  * gen_keysyms.awk over keysymdef.h (done once; re-run if we upgrade
  * the X11 proto headers).

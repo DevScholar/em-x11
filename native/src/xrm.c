@@ -641,3 +641,29 @@ void XrmStringToBindingQuarkList(_Xconst char *s, XrmBindingList bindings,
     }
     quarks[out] = NULLQUARK;
 }
+
+/* -- Xrm extensions -- */
+
+char *XResourceManagerString(Display *dpy) {
+    (void)dpy; return NULL;
+}
+
+char *XScreenResourceString(Screen *screen) {
+    (void)screen; return NULL;
+}
+
+Bool XrmEnumerateDatabase(XrmDatabase db, XrmNameList names,
+                          XrmClassList classes, int mode,
+                          Bool (*proc)(XrmDatabase *, XrmBindingList,
+                                       XrmQuarkList, XrmRepresentation *,
+                                       XrmValue *, XPointer),
+                          XPointer arg) {
+    (void)db; (void)names; (void)classes; (void)mode; (void)proc; (void)arg;
+    return False;
+}
+
+void XrmQPutResource(XrmDatabase *db, XrmBindingList bindings,
+                     XrmQuarkList quarks, XrmRepresentation type,
+                     XrmValue *value) {
+    (void)db; (void)bindings; (void)quarks; (void)type; (void)value;
+}

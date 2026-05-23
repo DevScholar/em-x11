@@ -794,3 +794,47 @@ int XReparentWindow(Display *display, Window w, Window parent, int x, int y) {
     emx11_js_reparent_window(w, parent, x, y);
     return 1;
 }
+
+/* -- Window border / cursor -- */
+
+int XSetWindowBorder(Display *dpy, Window w, unsigned long border) {
+    EmxWindow *win = emx11_window_find(dpy, w);
+    if (!win) return 0;
+    win->border_pixel = border;
+    emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+    return 1;
+}
+
+int XSetWindowBorderPixmap(Display *dpy, Window w, Pixmap pixmap) {
+    (void)dpy; (void)w; (void)pixmap; return 1;
+}
+
+int XDefineCursor(Display *dpy, Window w, Cursor cursor) {
+    dpy->request++;
+    emx11_js_window_set_cursor(w, (unsigned int)cursor);
+    return 1;
+}
+
+int XUndefineCursor(Display *dpy, Window w) {
+    dpy->request++;
+    emx11_js_window_set_cursor(w, 0);
+    return 1;
+}
+
+int XSetWindowBorderWidth(Display *dpy, Window w, unsigned int width) {
+    EmxWindow *win = emx11_window_find(dpy, w);
+    if (!win) return 0;
+    win->border_width = width;
+    emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+    return 1;
+}
+
+/* -- Save set -- */
+
+int XAddToSaveSet(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
+int XRemoveFromSaveSet(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
+
+/* -- Subwindow circulation -- */
+
+int XCirculateSubwindowsDown(Display *dpy, Window w) { (void)dpy; (void)w; return 1; }
+int XCirculateSubwindowsUp(Display *dpy, Window w)   { (void)dpy; (void)w; return 1; }

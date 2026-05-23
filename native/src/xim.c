@@ -21,6 +21,7 @@
 
 #include <emscripten.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,7 +51,7 @@ extern void emx11_js_xim_set_focus(Window window);
 extern void emx11_js_xim_clear_focus(void);
 extern void emx11_js_xim_set_spot(Window window, int x, int y);
 
-/* Decode a captured nested list from xaw_stubs.c::XVaCreateNestedList.
+/* Decode a captured nested list from XvaCreateNestedList.
  * Returns 1 + fills count/names/values when the pointer is one of ours,
  * 0 otherwise (Tk wraps preedit attrs in XVaCreateNestedList, so any
  * pointer we see at XCreateIC / XSetICValues for XNPreeditAttributes
@@ -418,7 +419,7 @@ int XwcLookupString(XIC ic, XKeyPressedEvent *event,
 /* XFilterEvent stays False for Tier A: we don't intercept keys for
  * preedit redraw. Tk delivers the KeyPress straight to its handler
  * which calls Xutf8LookupString and inserts the bytes. The stub in
- * xt_stubs.c remains authoritative. */
+ * Cursor.c remains authoritative. */
 
 /* -- XIM registration callbacks. Tk uses them to register a "tell me when
  * an XIM appears" watcher; XOpenIM already succeeds on the first call so
@@ -443,4 +444,63 @@ Bool XUnregisterIMInstantiateCallback(Display *dpy, struct _XrmHashBucketRec *rd
 char *XSetIMValues(XIM im, ...) {
     (void)im;
     return NULL;
+}
+
+/* -- XDisplayOfIM -- */
+
+Display *XDisplayOfIM(XIM im) {
+    (void)im; return NULL;
+}
+
+/* -- XVaCreateNestedList + decoder -- */
+
+static const char EMX11_NESTED_LIST_MAGIC[] = "emx11-nested-list";
+
+XVaNestedList XVaCreateNestedList(int unused_dummy, ...) {
+    (void)unused_dummy;
+    va_list ap;
+    int n = 0;
+    va_start(ap, unused_dummy);
+    for (;;) {
+        const char *name = va_arg(ap, const char *);
+        if (!name) break;
+        (void)va_arg(ap, void *);
+        n++;
+    }
+    va_end(ap);
+
+    void **buf = (void **)calloc(2 + 2 * n + 1, sizeof(void *));
+    if (!buf) return NULL;
+    buf[0] = (void *)EMX11_NESTED_LIST_MAGIC;
+    buf[1] = (void *)(uintptr_t)n;
+    int o = 2;
+    va_start(ap, unused_dummy);
+    for (int i = 0; i < n; i++) {
+        const char *name = va_arg(ap, const char *);
+        void *value      = va_arg(ap, void *);
+        buf[o++] = (void *)name;
+        buf[o++] = value;
+    }
+    va_end(ap);
+    buf[o] = NULL;
+    return (XVaNestedList)buf;
+}
+
+int emx11_nested_list_decode(void *list, int *count_out,
+                             const char ***names_out, void ***values_out) {
+    if (!list) return 0;
+    void **slots = (void **)list;
+    if (slots[0] != (void *)EMX11_NESTED_LIST_MAGIC) return 0;
+    int n = (int)(uintptr_t)slots[1];
+    static const char *name_buf[16];
+    static void       *val_buf[16];
+    if (n > 16) n = 16;
+    for (int i = 0; i < n; i++) {
+        name_buf[i] = (const char *)slots[2 + 2 * i + 0];
+        val_buf[i]  = slots[2 + 2 * i + 1];
+    }
+    if (count_out)  *count_out  = n;
+    if (names_out)  *names_out  = name_buf;
+    if (values_out) *values_out = val_buf;
+    return 1;
 }

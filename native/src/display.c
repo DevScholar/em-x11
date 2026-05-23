@@ -1,5 +1,6 @@
 #include "emx11_internal.h"
 
+#include <X11/Xutil.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -239,4 +240,219 @@ unsigned long XBlackPixel(Display *display, int screen_number) {
 
 unsigned long XWhitePixel(Display *display, int screen_number) {
     return display->screens[screen_number].white_pixel;
+}
+
+/* -- Generic allocator -- */
+
+int XFree(void *data) {
+    free(data);
+    return 1;
+}
+
+/* -- Display / Screen accessors -- */
+
+Display *XDisplayOfScreen(Screen *screen) {
+    return screen ? screen->display : NULL;
+}
+
+int XScreenNumberOfScreen(Screen *screen) {
+    (void)screen;
+    return 0;
+}
+
+char *XDisplayName(const char *string) {
+    if (string && *string) return (char *)string;
+    return (char *)":0";
+}
+
+int XDisplayKeycodes(Display *dpy, int *min_keycodes_return,
+                     int *max_keycodes_return) {
+    (void)dpy;
+    if (min_keycodes_return) *min_keycodes_return = 8;
+    if (max_keycodes_return) *max_keycodes_return = 255;
+    return 1;
+}
+
+/* -- Visual matching -- */
+
+Status XMatchVisualInfo(Display *dpy, int screen, int depth,
+                        int class_, XVisualInfo *vinfo_return) {
+    if (!dpy || !vinfo_return) return 0;
+    if (screen != 0) return 0;
+    if (class_ != TrueColor) return 0;
+
+    Visual *v = dpy->screens[0].root_visual;
+    memset(vinfo_return, 0, sizeof(*vinfo_return));
+    vinfo_return->visual        = v;
+    vinfo_return->visualid      = v ? v->visualid : 0;
+    vinfo_return->screen        = 0;
+    vinfo_return->depth         = depth ? depth : dpy->screens[0].root_depth;
+    vinfo_return->class         = TrueColor;
+    vinfo_return->red_mask      = 0x00ff0000;
+    vinfo_return->green_mask    = 0x0000ff00;
+    vinfo_return->blue_mask     = 0x000000ff;
+    vinfo_return->colormap_size = 256;
+    vinfo_return->bits_per_rgb  = 8;
+    return 1;
+}
+
+/* -- X context manager (id-based hash) -- */
+
+typedef struct ContextEntry {
+    XID                  xid;
+    XContext             context;
+    XPointer             data;
+    struct ContextEntry *next;
+} ContextEntry;
+
+static ContextEntry *g_context_head = NULL;
+
+int XSaveContext(Display *dpy, XID xid, XContext context, const char *data) {
+    (void)dpy;
+    for (ContextEntry *e = g_context_head; e; e = e->next) {
+        if (e->xid == xid && e->context == context) {
+            e->data = (XPointer)data;
+            return 0;
+        }
+    }
+    ContextEntry *e = calloc(1, sizeof(*e));
+    if (!e) return XCNOMEM;
+    e->xid = xid;
+    e->context = context;
+    e->data = (XPointer)data;
+    e->next = g_context_head;
+    g_context_head = e;
+    return 0;
+}
+
+int XFindContext(Display *dpy, XID xid, XContext context, XPointer *data_return) {
+    (void)dpy;
+    for (ContextEntry *e = g_context_head; e; e = e->next) {
+        if (e->xid == xid && e->context == context) {
+            if (data_return) *data_return = e->data;
+            return 0;
+        }
+    }
+    if (data_return) *data_return = NULL;
+    return XCNOENT;
+}
+
+int XDeleteContext(Display *dpy, XID xid, XContext context) {
+    (void)dpy;
+    ContextEntry **link = &g_context_head;
+    for (ContextEntry *e = g_context_head; e; link = &e->next, e = e->next) {
+        if (e->xid == xid && e->context == context) {
+            *link = e->next;
+            free(e);
+            return 0;
+        }
+    }
+    return XCNOENT;
+}
+
+/* -- Internal-connection watches -- */
+
+Status XAddConnectionWatch(Display *dpy, XConnectionWatchProc proc,
+                           XPointer data) {
+    (void)dpy; (void)proc; (void)data;
+    return 1;
+}
+
+void XProcessInternalConnection(Display *dpy, int fd) {
+    (void)dpy; (void)fd;
+}
+
+/* -- Display-level metadata -- */
+
+Visual *XDefaultVisual(Display *dpy, int screen_number) {
+    (void)screen_number;
+    return dpy ? dpy->screens[0].root_visual : NULL;
+}
+
+Colormap XDefaultColormap(Display *dpy, int screen_number) {
+    (void)screen_number;
+    return dpy ? dpy->screens[0].cmap : 0;
+}
+
+int XDefaultDepth(Display *dpy, int screen_number) {
+    (void)screen_number;
+    return dpy ? dpy->screens[0].root_depth : 24;
+}
+
+unsigned long XNextRequest(Display *dpy) {
+    (void)dpy; return 1UL;
+}
+
+int *XListDepths(Display *dpy, int screen_number, int *count_return) {
+    (void)screen_number;
+    int *out = malloc(sizeof(int));
+    if (!out) {
+        if (count_return) *count_return = 0;
+        return NULL;
+    }
+    out[0] = dpy ? dpy->screens[0].root_depth : 24;
+    if (count_return) *count_return = 1;
+    return out;
+}
+
+long XMaxRequestSize(Display *dpy) {
+    (void)dpy;
+    return 262140;
+}
+
+/* -- Server grabs -- */
+
+int XGrabServer(Display *dpy)   { (void)dpy; return 1; }
+int XUngrabServer(Display *dpy) { (void)dpy; return 1; }
+
+/* -- Extension registration -- */
+
+XExtCodes *XAddExtension(Display *dpy) {
+    (void)dpy;
+    XExtCodes *codes = calloc(1, sizeof(*codes));
+    if (codes) codes->extension = 0;
+    return codes;
+}
+
+typedef int (*emx11_close_display_proc)(Display *, XExtCodes *);
+
+emx11_close_display_proc XESetCloseDisplay(Display *dpy, int extension,
+                                           emx11_close_display_proc proc) {
+    (void)dpy; (void)extension; (void)proc;
+    return NULL;
+}
+
+/* -- Locale -- */
+
+Bool XSupportsLocale(void) {
+    return True;
+}
+
+char *XSetLocaleModifiers(_Xconst char *modifier_list) {
+    (void)modifier_list;
+    return (char *)"";
+}
+
+/* -- Misc stubs -- */
+
+int XBell(Display *dpy, int percent) {
+    (void)dpy; (void)percent;
+    return 1;
+}
+
+int XKillClient(Display *dpy, XID resource) {
+    (void)dpy; (void)resource;
+    return 1;
+}
+
+int XNoOp(Display *dpy) {
+    (void)dpy;
+    return 1;
+}
+
+XHostAddress *XListHosts(Display *dpy, int *nhosts_return, Bool *state_return) {
+    (void)dpy;
+    if (nhosts_return) *nhosts_return = 0;
+    if (state_return)  *state_return  = False;
+    return NULL;
 }

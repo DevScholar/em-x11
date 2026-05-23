@@ -1,5 +1,6 @@
 #include "emx11_internal.h"
 
+#include <X11/Xutil.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -146,4 +147,38 @@ int XSetClipRectangles(Display *display, GC gc,
     (void)clip_x_origin; (void)clip_y_origin;
     (void)rectangles; (void)n; (void)ordering;
     return 1;
+}
+
+/* -- GC setter stubs -- */
+
+int XSetArcMode(Display *dpy, GC gc, int arc_mode) {
+    (void)dpy; (void)gc; (void)arc_mode; return 1;
+}
+int XSetDashes(Display *dpy, GC gc, int dash_offset,
+               _Xconst char *dash_list, int n) {
+    (void)dpy; (void)gc; (void)dash_offset; (void)dash_list; (void)n; return 1;
+}
+int XSetFillRule(Display *dpy, GC gc, int fill_rule) {
+    (void)dpy; (void)gc; (void)fill_rule; return 1;
+}
+int XSetGraphicsExposures(Display *dpy, GC gc, Bool graphics_exposures) {
+    (void)dpy; (void)gc; (void)graphics_exposures; return 1;
+}
+int XSetPlaneMask(Display *dpy, GC gc, unsigned long plane_mask) {
+    (void)dpy; (void)gc; (void)plane_mask; return 1;
+}
+int XSetStipple(Display *dpy, GC gc, Pixmap stipple) {
+    (void)dpy; (void)gc; (void)stipple; return 1;
+}
+int XSetSubwindowMode(Display *dpy, GC gc, int subwindow_mode) {
+    (void)dpy; (void)gc; (void)subwindow_mode; return 1;
+}
+int XSetTSOrigin(Display *dpy, GC gc, int ts_x_origin, int ts_y_origin) {
+    (void)dpy; (void)gc; (void)ts_x_origin; (void)ts_y_origin; return 1;
+}
+int XSetTile(Display *dpy, GC gc, Pixmap tile) {
+    (void)dpy; (void)gc; (void)tile; return 1;
+}
+int XSetRegion(Display *dpy, GC gc, Region r) {
+    (void)dpy; (void)gc; (void)r; return 1;
 }

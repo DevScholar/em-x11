@@ -604,3 +604,16 @@ Bool emx11_selection_intercept_send(Display *dpy, Window w, const XEvent *ev) {
     if (data) free(data);
     return True;
 }
+
+/* -- Cut buffers -- */
+
+char *XFetchBytes(Display *dpy, int *nbytes_return) {
+    (void)dpy;
+    if (nbytes_return) *nbytes_return = 0;
+    return NULL;
+}
+
+int XStoreBytes(Display *dpy, _Xconst char *bytes, int nbytes) {
+    (void)dpy; (void)bytes; (void)nbytes;
+    return 1;
+}

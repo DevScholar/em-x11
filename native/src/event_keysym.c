@@ -214,3 +214,67 @@ int XLookupString(XKeyEvent *event, char *buffer_return, int bytes_buffer,
     }
     return 0;
 }
+
+/* -- Keyboard mapping -- */
+
+KeySym *XGetKeyboardMapping(Display *dpy, unsigned int first, int count,
+                            int *keysyms_per_keycode_return) {
+    if (keysyms_per_keycode_return) *keysyms_per_keycode_return = 1;
+    if (count <= 0) return NULL;
+    KeySym *out = calloc((size_t)count, sizeof(KeySym));
+    if (!out) return NULL;
+    for (int i = 0; i < count; i++) {
+        unsigned int kc = (unsigned int)first + (unsigned int)i;
+        out[i] = (kc < 256) ? dpy->keysym_table[kc] : NoSymbol;
+    }
+    return out;
+}
+
+XModifierKeymap *XGetModifierMapping(Display *dpy) {
+    (void)dpy;
+    XModifierKeymap *m = calloc(1, sizeof(*m));
+    if (!m) return NULL;
+    m->max_keypermod = 2;
+    m->modifiermap = calloc(8 * m->max_keypermod, sizeof(KeyCode));
+    return m;
+}
+
+int XFreeModifiermap(XModifierKeymap *modmap) {
+    if (!modmap) return 0;
+    free(modmap->modifiermap);
+    free(modmap);
+    return 1;
+}
+
+int XRefreshKeyboardMapping(XMappingEvent *event) {
+    (void)event;
+    return 0;
+}
+
+/* -- Keysym <-> name -- */
+
+#include "keysym_table.h"
+
+char *XKeysymToString(KeySym keysym) {
+    for (const struct KeysymEntry *e = g_keysym_table; e->name; e++) {
+        if (e->keysym == keysym) return (char *)e->name;
+    }
+    return NULL;
+}
+
+KeySym XStringToKeysym(_Xconst char *s) {
+    if (!s) return NoSymbol;
+    if (s[0] && !s[1]) return (KeySym)(unsigned char)s[0];
+    for (const struct KeysymEntry *e = g_keysym_table; e->name; e++) {
+        if (strcmp(e->name, s) == 0) return e->keysym;
+    }
+    return NoSymbol;
+}
+
+void XConvertCase(KeySym keysym, KeySym *lower_return, KeySym *upper_return) {
+    KeySym lo = keysym, hi = keysym;
+    if (keysym >= 'A' && keysym <= 'Z') lo = keysym + ('a' - 'A');
+    if (keysym >= 'a' && keysym <= 'z') hi = keysym - ('a' - 'A');
+    if (lower_return) *lower_return = lo;
+    if (upper_return) *upper_return = hi;
+}

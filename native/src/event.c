@@ -9,6 +9,7 @@
 #include "emx11_internal.h"
 #include "emx11_meta_layout.h"
 
+#include <X11/extensions/XInput2.h>
 #include <emscripten.h>
 #include <string.h>
 
@@ -713,4 +714,124 @@ void emx11_push_destroy_notify(Window window, Window event_window) {
     ev.xdestroywindow.event   = event_window;
     ev.xdestroywindow.window  = window;
     emx11_event_queue_push(dpy, &ev);
+}
+
+/* -- Passive input grabs -- */
+
+int XGrabButton(Display *dpy, unsigned int button, unsigned int modifiers,
+                Window grab_window, Bool owner_events,
+                unsigned int event_mask, int pointer_mode, int keyboard_mode,
+                Window confine_to, Cursor cursor) {
+    (void)dpy;
+    emx11_js_grab_button(grab_window, button, modifiers,
+                         owner_events ? 1 : 0, event_mask,
+                         pointer_mode, keyboard_mode, confine_to, cursor);
+    return 1;
+}
+
+int XUngrabButton(Display *dpy, unsigned int button, unsigned int modifiers,
+                  Window grab_window) {
+    (void)dpy;
+    emx11_js_ungrab_button(grab_window, button, modifiers);
+    return 1;
+}
+
+int XGrabKey(Display *a, int b, unsigned int c, Window d, Bool e,
+             int f, int g) {
+    (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; (void)g;
+    return 1;
+}
+
+int XUngrabKeyboard(Display *dpy, Time t) { (void)dpy; (void)t; return 1; }
+
+int XUngrabPointer(Display *dpy, Time t) {
+    (void)t;
+    dpy->request++;
+    emx11_js_set_grab_cursor(0);
+    emx11_js_ungrab_pointer();
+    return 1;
+}
+
+int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
+                 unsigned int event_mask, int pointer_mode, int keyboard_mode,
+                 Window confine_to, Cursor cursor, Time t) {
+    (void)event_mask; (void)pointer_mode; (void)keyboard_mode;
+    (void)confine_to; (void)t;
+    dpy->request++;
+    emx11_reset_implicit_grab();
+    emx11_js_set_grab_cursor((unsigned int)cursor);
+    emx11_js_grab_pointer((unsigned int)dpy->conn_id,
+                          grab_window, owner_events ? 1 : 0);
+    return GrabSuccess;
+}
+
+int XWarpPointer(Display *dpy, Window src_w, Window dest_w,
+                 int src_x, int src_y, unsigned int src_width, unsigned int src_height,
+                 int dest_x, int dest_y) {
+    (void)dpy; (void)src_w; (void)dest_w;
+    (void)src_x; (void)src_y; (void)src_width; (void)src_height;
+    (void)dest_x; (void)dest_y;
+    return 1;
+}
+
+int XUngrabKey(Display *dpy, int keycode, unsigned int modifiers,
+               Window grab_window) {
+    (void)dpy; (void)keycode; (void)modifiers; (void)grab_window;
+    return 1;
+}
+
+int XGrabKeyboard(Display *dpy, Window grab_window, Bool owner_events,
+                  int pointer_mode, int keyboard_mode, Time t) {
+    (void)dpy; (void)grab_window; (void)owner_events;
+    (void)pointer_mode; (void)keyboard_mode; (void)t;
+    return GrabSuccess;
+}
+
+/* -- XQueryPointer -- */
+
+Bool XQueryPointer(Display *dpy, Window w, Window *root_return,
+                   Window *child_return, int *root_x_return, int *root_y_return,
+                   int *win_x_return, int *win_y_return,
+                   unsigned int *mask_return) {
+    int px = 0, py = 0;
+    emx11_js_pointer_xy(&px, &py);
+    int wx = px, wy = py;
+    if (w != None) {
+        int origin[EMX11_ABS_ORIGIN_SIZE] = {0};
+        emx11_js_get_window_abs_origin(w, origin);
+        if (origin[EMX11_ABS_ORIGIN_PRESENT]) {
+            wx = px - origin[EMX11_ABS_ORIGIN_AX];
+            wy = py - origin[EMX11_ABS_ORIGIN_AY];
+        }
+    }
+    EM_ASM({
+        var d = globalThis.emX11 && globalThis.emX11._debug;
+        if (d && d.traceQp) {
+            console.log('[c-qp] conn=' + $0 + ' win=' + $1 +
+                        ' root=(' + $2 + ',' + $3 + ')' +
+                        ' local=(' + $4 + ',' + $5 + ')');
+        }
+    }, dpy->conn_id, w, px, py, wx, wy);
+    if (root_return)     *root_return     = dpy->screens[0].root;
+    if (child_return)    *child_return    = None;
+    if (root_x_return)   *root_x_return   = px;
+    if (root_y_return)   *root_y_return   = py;
+    if (win_x_return)    *win_x_return    = wx;
+    if (win_y_return)    *win_y_return    = wy;
+    if (mask_return)     *mask_return     = 0;
+    return True;
+}
+
+/* -- XInput2 stubs -- */
+
+Status XIQueryVersion(Display *dpy, int *major_version_inout,
+                      int *minor_version_inout) {
+    (void)dpy; (void)major_version_inout; (void)minor_version_inout;
+    return BadRequest;
+}
+
+int XISelectEvents(Display *dpy, Window win, XIEventMask *masks,
+                   int num_masks) {
+    (void)dpy; (void)win; (void)masks; (void)num_masks;
+    return Success;
 }

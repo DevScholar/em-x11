@@ -273,3 +273,206 @@ Status XReconfigureWMWindow(Display *dpy, Window w, int screen_number,
     if (!changes) return 0;
     return (Status)XConfigureWindow(dpy, w, mask, changes);
 }
+
+/* -- WM convenience calls -- */
+
+int XMapRaised(Display *dpy, Window w) {
+    XMapWindow(dpy, w);
+    emx11_js_window_raise(w);
+    return 1;
+}
+
+int XMapSubwindows(Display *dpy, Window w) {
+    if (!dpy) return 0;
+    for (int i = 0; i < EMX11_MAX_WINDOWS; i++) {
+        EmxWindow *c = &dpy->windows[i];
+        if (c->in_use && c->parent == w && !c->mapped) {
+            XMapWindow(dpy, c->id);
+        }
+    }
+    return 1;
+}
+
+int XIconifyWindow(Display *dpy, Window w, int screen) {
+    (void)dpy; (void)w; (void)screen;
+    return 1;
+}
+
+int XWithdrawWindow(Display *dpy, Window w, int screen) {
+    (void)screen;
+    return XUnmapWindow(dpy, w);
+}
+
+int XSetTransientForHint(Display *dpy, Window w, Window prop_window) {
+    return XChangeProperty(dpy, w, XA_WM_TRANSIENT_FOR, XA_WINDOW, 32,
+                           PropModeReplace,
+                           (unsigned char *)&prop_window, 1);
+}
+
+int XSetCommand(Display *dpy, Window w, char **argv, int argc) {
+    if (!argv || argc <= 0) return 0;
+    size_t total = 0;
+    for (int i = 0; i < argc; i++) total += strlen(argv[i]) + 1;
+    unsigned char *buf = malloc(total);
+    if (!buf) return 0;
+    size_t o = 0;
+    for (int i = 0; i < argc; i++) {
+        size_t n = strlen(argv[i]) + 1;
+        memcpy(buf + o, argv[i], n);
+        o += n;
+    }
+    int ok = XChangeProperty(dpy, w, XA_WM_COMMAND, XA_STRING, 8,
+                             PropModeReplace, buf, (int)total);
+    free(buf);
+    return ok;
+}
+
+int XWMGeometry(Display *dpy, int screen, _Xconst char *user_geom,
+                _Xconst char *def_geom, unsigned int border_width,
+                XSizeHints *hints, int *x_ret, int *y_ret,
+                int *w_ret, int *h_ret, int *gravity_ret) {
+    (void)dpy; (void)screen; (void)user_geom; (void)def_geom;
+    (void)border_width; (void)hints;
+    if (x_ret) *x_ret = 0;
+    if (y_ret) *y_ret = 0;
+    if (w_ret) *w_ret = 0;
+    if (h_ret) *h_ret = 0;
+    if (gravity_ret) *gravity_ret = NorthWestGravity;
+    return 0;
+}
+
+/* -- Text property conversion -- */
+
+int XmbTextListToTextProperty(Display *dpy, char **list, int count,
+                              XICCEncodingStyle style,
+                              XTextProperty *text_prop_return) {
+    (void)dpy; (void)style;
+    return XStringListToTextProperty(list, count, text_prop_return) ? 0 : -1;
+}
+
+int XmbTextPropertyToTextList(Display *dpy, const XTextProperty *tp,
+                              char ***list_return, int *count_return) {
+    (void)dpy;
+    if (!tp || !list_return || !count_return) return XNoMemory;
+    char **list = calloc(2, sizeof(char *));
+    if (!list) return XNoMemory;
+    list[0] = tp->value ? strdup((const char *)tp->value) : strdup("");
+    list[1] = NULL;
+    *list_return = list;
+    *count_return = 1;
+    return 0;
+}
+
+/* -- ICCCM / WM hint readers -- */
+
+Status XFetchName(Display *dpy, Window w, char **name_return) {
+    if (name_return) *name_return = NULL;
+    if (!dpy) return 0;
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0, bytes_after = 0;
+    unsigned char *data = NULL;
+    int rc = XGetWindowProperty(dpy, w, XA_WM_NAME, 0, 65536, False,
+                                XA_STRING, &actual_type, &actual_format,
+                                &nitems, &bytes_after, &data);
+    if (rc != Success || actual_type != XA_STRING || actual_format != 8 ||
+        !data || nitems == 0) {
+        if (data) XFree(data);
+        return 0;
+    }
+    if (name_return) *name_return = (char *)data;
+    else             XFree(data);
+    return 1;
+}
+
+Status XGetWMIconName(Display *dpy, Window w, XTextProperty *text_prop) {
+    (void)dpy; (void)w;
+    if (text_prop) memset(text_prop, 0, sizeof(*text_prop));
+    return 0;
+}
+
+Status XGetTransientForHint(Display *dpy, Window w, Window *prop_window_return) {
+    (void)dpy; (void)w;
+    if (prop_window_return) *prop_window_return = None;
+    return 0;
+}
+
+Status XGetWMColormapWindows(Display *dpy, Window w,
+                             Window **windows_return, int *count_return) {
+    (void)dpy; (void)w;
+    if (windows_return) *windows_return = NULL;
+    if (count_return)   *count_return   = 0;
+    return 0;
+}
+
+Status XGetRGBColormaps(Display *dpy, Window w,
+                        XStandardColormap **stdcmaps, int *count, Atom property) {
+    (void)dpy; (void)w; (void)property;
+    if (stdcmaps) *stdcmaps = NULL;
+    if (count)    *count    = 0;
+    return 0;
+}
+
+int XInstallColormap(Display *dpy, Colormap cmap) {
+    (void)dpy; (void)cmap;
+    return 1;
+}
+
+/* -- XParseGeometry -- */
+
+int XParseGeometry(_Xconst char *geom, int *x, int *y,
+                   unsigned int *width, unsigned int *height) {
+    if (!geom || !*geom) return 0;
+    int mask = 0;
+    const char *p = geom;
+    unsigned int uval;
+    int sval;
+
+    if (*p >= '0' && *p <= '9') {
+        uval = 0;
+        while (*p >= '0' && *p <= '9') { uval = uval * 10 + (unsigned)(*p++ - '0'); }
+        if (*p == 'x' || *p == 'X') {
+            if (width) *width = uval;
+            mask |= WidthValue;
+            p++;
+            uval = 0;
+            while (*p >= '0' && *p <= '9') { uval = uval * 10 + (unsigned)(*p++ - '0'); }
+            if (height) *height = uval;
+            mask |= HeightValue;
+        }
+    }
+    for (int axis = 0; axis < 2; axis++) {
+        int sign = 0;
+        if (*p == '+') { sign = 1; p++; }
+        else if (*p == '-') { sign = -1; p++; }
+        else break;
+        sval = 0;
+        while (*p >= '0' && *p <= '9') { sval = sval * 10 + (*p++ - '0'); }
+        if (sign < 0) sval = -sval;
+        if (axis == 0) { if (x) *x = sval; mask |= XValue; if (sign < 0) mask |= XNegative; }
+        else           { if (y) *y = sval; mask |= YValue; if (sign < 0) mask |= YNegative; }
+    }
+    return mask;
+}
+
+/* -- X Sync extension stubs -- */
+
+Status XSyncQueryExtension(Display *dpy, int *event_base_return,
+                           int *error_base_return) {
+    (void)dpy;
+    if (event_base_return) *event_base_return = 0;
+    if (error_base_return) *error_base_return = 0;
+    return False;
+}
+
+int XSyncSetPriority(Display *dpy, XID client_resource_id, int priority) {
+    (void)dpy; (void)client_resource_id; (void)priority;
+    return 0;
+}
+
+int XSyncGetPriority(Display *dpy, XID client_resource_id,
+                     int *return_priority) {
+    (void)dpy; (void)client_resource_id;
+    if (return_priority) *return_priority = 0;
+    return 0;
+}

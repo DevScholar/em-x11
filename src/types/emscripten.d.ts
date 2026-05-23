@@ -165,7 +165,7 @@ export interface EmX11Global {
     traceCMot: boolean;
     /** XMoveWindow / XConfigureWindow log (window.c). */
     traceMove: boolean;
-    /** XQueryPointer log from Xaw shims (xaw_stubs.c). */
+    /** XQueryPointer log output. */
     traceQp: boolean;
   };
 }
