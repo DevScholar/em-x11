@@ -136,6 +136,17 @@ static EmxWindow *hit_test(Display *dpy, int rx, int ry, long need_mask,
 static Window       grab_window         = None;
 static unsigned int grab_button_count   = 0;
 
+/* Active pointer grab (XGrabPointer). Tracked separately from the implicit
+ * grab so that the mask-gate bypass in emx11_push_motion_event works even
+ * when the implicit grab_window is legitimately None (XGrabPointer clears the
+ * stale implicit grab so ButtonRelease routes to the window under the pointer
+ * instead of the original press window -- needed for MenuButton/ComboBox
+ * popup entries). Without this, twm f.move/f.resize loop XMaskEvent never
+ * sees MotionNotify: none of twm's frame/title_w/client windows select for
+ * PointerMotionMask, so every motion event hits the mask gate and is dropped,
+ * and the drag deadlocks. */
+static bool active_grab = false;
+
 /* Monotonic millisecond timestamp for xbutton/xmotion/xkey/xcrossing `time`
  * fields. Some WMs (twm's ConstrainedMove in particular: menus.c:1500) compare
  * `event.time - last_click_time` against a timeout to detect rapid successive
@@ -449,7 +460,7 @@ void emx11_push_motion_event(Window window, int x, int y,
      * MoveDelta stays true, and twm's `f.deltastop` aborts the move
      * without ever calling XMoveWindow -- so the window never moves and
      * controls under the press point remain hot. */
-    if (!via_grab &&
+    if (!via_grab && !active_grab &&
         !(motion_target->event_mask & (PointerMotionMask | ButtonMotionMask)))
         return;
 
@@ -747,6 +758,7 @@ int XUngrabKeyboard(Display *dpy, Time t) { (void)dpy; (void)t; return 1; }
 int XUngrabPointer(Display *dpy, Time t) {
     (void)t;
     dpy->request++;
+    active_grab = false;
     emx11_js_set_grab_cursor(0);
     emx11_js_ungrab_pointer();
     return 1;
@@ -759,6 +771,7 @@ int XGrabPointer(Display *dpy, Window grab_window, Bool owner_events,
     (void)confine_to; (void)t;
     dpy->request++;
     emx11_reset_implicit_grab();
+    active_grab = true;
     emx11_js_set_grab_cursor((unsigned int)cursor);
     emx11_js_grab_pointer((unsigned int)dpy->conn_id,
                           grab_window, owner_events ? 1 : 0);
