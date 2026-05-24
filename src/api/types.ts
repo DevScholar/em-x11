@@ -136,6 +136,13 @@ export interface InjectKeyEvent {
   text?: string;
 }
 
+export interface InjectWheelEvent {
+  x: number;
+  y: number;
+  deltaY: number;
+  modifiers: number;
+}
+
 export interface EmX11Display {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas;
   readonly width: number;
@@ -161,6 +168,7 @@ export interface EmX11Display {
      *  carrying text but no useful keysym. Worker-mode hosts forward
      *  composition results from the main-thread textarea bridge here. */
     textKey(text: string): void;
+    wheel(e: InjectWheelEvent): void;
   };
   /** Plug the Tk/Tcl event-loop wake target into em-x11's notifier.
    *  libemx11 forwards the standardised Tcl_SetNotifier setTimerProc

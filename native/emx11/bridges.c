@@ -800,6 +800,11 @@ EM_JS(void, emx11_js_window_raise, (unsigned int id), {
     if (Host) Host.onWindowRaise(id);
 });
 
+EM_JS(void, emx11_js_window_lower, (unsigned int id), {
+    var e = globalThis.emX11; var Host = e && e._bridge;
+    if (Host) Host.onWindowLower(id);
+});
+
 EM_JS(void, emx11_js_select_input, (int connId, unsigned int id, unsigned int mask), {
     var e = globalThis.emX11; var Host = e && e._bridge;
     if (Host) Host.onSelectInput(connId, id, mask >>> 0);

@@ -488,6 +488,17 @@ export function raiseWindow(r: RendererState, id: number): Map<number, Region> {
   return paintExposedRegions(r, oldClips);
 }
 
+/** XLowerWindow: give the window the lowest stackOrder among siblings
+ *  so it paints on bottom. */
+export function lowerWindow(r: RendererState, id: number): Map<number, Region> {
+  const w = r.windows.get(id);
+  if (!w) return new Map();
+  const oldClips = snapshotClips(r);
+  w.stackOrder = r.stackCounter--;
+  recomputeClipsAll(r);
+  return paintExposedRegions(r, oldClips);
+}
+
 /** Enumerate the mapped descendants of `id` in parent-before-child DFS
  *  order. Used by Host to synthesize Expose events for every visible
  *  window whose content was wiped by a subtree repaint (map, move,

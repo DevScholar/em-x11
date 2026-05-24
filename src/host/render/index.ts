@@ -103,6 +103,7 @@ export class Renderer implements RendererState {
   destroyWindow(id: number): Map<number, Region> { return tree.destroyWindow(this, id); }
   setWindowShape(id: number, rects: ShapeRect[]): Map<number, Region> { return tree.setWindowShape(this, id, rects); }
   raiseWindow(id: number): Map<number, Region> { return tree.raiseWindow(this, id); }
+  lowerWindow(id: number): Map<number, Region> { return tree.lowerWindow(this, id); }
 
   parentOf(id: number): number { return tree.parentOf(this, id); }
   mappedDescendants(id: number): number[] { return tree.mappedDescendants(this, id); }

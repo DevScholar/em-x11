@@ -458,7 +458,14 @@ int XConfigureWindow(Display *display, Window w,
     if (valuemask & CWWidth)       win->width  = (unsigned int)values->width;
     if (valuemask & CWHeight)      win->height = (unsigned int)values->height;
     if (valuemask & CWBorderWidth) win->border_width = (unsigned int)values->border_width;
-    /* CWStackMode / CWSibling: z-order management not yet implemented. */
+    if (valuemask & CWStackMode) {
+        if (values->stack_mode == Above) {
+            emx11_js_window_raise(w);
+        } else if (values->stack_mode == Below) {
+            emx11_js_window_lower(w);
+        }
+        /* Opposite / TopIf / BottomIf are less common; defer until needed. */
+    }
     notify_js_reconfigure(display, win);
     if (valuemask & CWBorderWidth) {
         emx11_js_window_set_border(win->id, win->border_width, win->border_pixel);
@@ -473,7 +480,8 @@ int XRaiseWindow(Display *display, Window w) {
 }
 
 int XLowerWindow(Display *display, Window w) {
-    (void)display; (void)w;
+    (void)display;
+    emx11_js_window_lower(w);
     return 1;
 }
 

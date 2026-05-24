@@ -17,6 +17,7 @@ import type {
   EventLoopWake,
   InjectKeyEvent,
   InjectMouseEvent,
+  InjectWheelEvent,
 } from './types.js';
 
 class KeyboardNamespace implements EmX11Keyboard {
@@ -52,6 +53,7 @@ export class DisplayNamespace implements EmX11Display {
       this.host.devices.pushKeyUp({ ...e, hasFocus: e.hasFocus ?? true }),
     setPointer: (x: number, y: number) => this.host.devices.setPointer(x, y),
     textKey: (text: string) => this.host.devices.pushTextKey(text),
+    wheel: (e: InjectWheelEvent) => this.host.devices.pushWheel(e),
   };
 
   installEventLoopWake(wake: EventLoopWake | null): void {

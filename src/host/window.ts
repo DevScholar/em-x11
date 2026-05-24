@@ -287,6 +287,11 @@ export class WindowManager {
     this.host.events.pushExposesForRegions(exposed, null);
   }
 
+  onLower(id: number): void {
+    const exposed = this.host.renderer.lowerWindow(id);
+    this.host.events.pushExposesForRegions(exposed, null);
+  }
+
   onReparent(id: number, parent: number, x: number, y: number): void {
     const exposed = this.host.renderer.reparentWindow(id, parent, x, y);
     /* Notify the window's *owner* connection that its shadow is now stale.
