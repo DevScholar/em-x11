@@ -1,6 +1,6 @@
 /**
  * Landing page for the em-x11 dev server. Lists available demos.
- * Real application UX is per-demo under demos/<name>/.
+ * Real application UX is per-example under examples/<name>/.
  */
 
 const demos = [
@@ -28,7 +28,7 @@ if (root) {
   for (const demo of demos) {
     const li = document.createElement('li');
     const a = document.createElement('a');
-    a.href = `/demos/${demo.name}/`;
+    a.href = `/examples/${demo.name}/`;
     a.textContent = `${demo.name} — ${demo.description}`;
     li.appendChild(a);
     list.appendChild(li);

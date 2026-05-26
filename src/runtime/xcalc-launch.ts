@@ -1,7 +1,7 @@
 /**
  * xcalc launcher.
  *
- * The vendored xcalc in third-party/ is a verbatim X.Org tarball that
+ * The vendored xcalc in ignored-area/third-party/ is a verbatim X.Org tarball that
  * gets fetched at setup time and is NOT git-tracked. Anything em-x11
  * specific lives on the runtime side.
  *
@@ -13,7 +13,7 @@
  */
 
 // eslint-disable-next-line
-import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
+import xcalcAppDefaults from '../../ignored-area/third-party/xcalc/app-defaults/XCalc?raw';
 import type { EmX11 } from '../api/emx11.js';
 import type { Process } from '../api/types.js';
 

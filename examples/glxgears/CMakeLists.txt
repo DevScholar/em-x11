@@ -1,4 +1,4 @@
-set(GLXGEARS_SRC_DIR "${CMAKE_SOURCE_DIR}/third-party/glxgears")
+set(GLXGEARS_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/glxgears")
 
 add_executable(glxgears
     ${GLXGEARS_SRC_DIR}/glxgears.c

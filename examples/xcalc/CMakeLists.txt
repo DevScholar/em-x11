@@ -1,4 +1,4 @@
-set(XCALC_SRC_DIR "${CMAKE_SOURCE_DIR}/third-party/xcalc")
+set(XCALC_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/xcalc")
 
 # xcalc is an Xaw-based scientific calculator. Upstream ships a flat
 # tarball (see scripts/fetch-third-party.sh layout=app) so all sources

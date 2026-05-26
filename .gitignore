@@ -30,4 +30,4 @@ Thumbs.db
 *.log
 
 references
-/third-party/
+ignored-area/

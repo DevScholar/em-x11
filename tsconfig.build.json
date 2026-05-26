@@ -10,5 +10,5 @@
     "rootDir": "src"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "build", "references", "native", "third-party", "demos"]
+  "exclude": ["node_modules", "dist", "build", "references", "native", "ignored-area", "examples"]
 }

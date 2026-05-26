@@ -1,7 +1,7 @@
 /**
  * twm launcher — spawns twm via the public em.spawn API.
  *
- * The vendored twm in third-party/ is a verbatim X.Org tarball that gets
+ * The vendored twm in ignored-area/third-party/ is a verbatim X.Org tarball that gets
  * fetched at setup time and is NOT git-tracked. Patching it in-place would
  * vanish on the next fetch -- so any em-x11 specific tweaks live in the
  * runtime instead.
@@ -23,7 +23,7 @@ import type { Process } from '../api/types.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';
 
-/* Mirrors third-party/twm/src/system.twmrc with two em-x11 specific
+/* Mirrors ignored-area/third-party/twm/src/system.twmrc with two em-x11 specific
  * additions; see prior revision history for the full justification.
  *   RandomPlacement   — interactive placement deadlocks our browser world
  *   OpaqueMove        — GXxor rubber-band can't be undone on Canvas 2D */

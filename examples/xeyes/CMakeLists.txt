@@ -1,4 +1,4 @@
-set(XEYES_SRC_DIR "${CMAKE_SOURCE_DIR}/third-party/xeyes")
+set(XEYES_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/xeyes")
 
 add_executable(xeyes
     ${XEYES_SRC_DIR}/xeyes.c

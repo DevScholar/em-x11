@@ -66,13 +66,13 @@ Clone the repo, then from the project root:
 
 ```bash
 pnpm install
-bash scripts/fetch-third-party.sh
 ```
 
-`fetch-third-party.sh` downloads the X.Org tarballs we depend on
-(libXt, libXaw, libXmu, libXpm) and the apps we ship as demos
-(xeyes, xcalc, twm, xclock) into `third-party/`. That directory is
-gitignored — it is fully reproducible from the script.
+`pnpm install` runs `scripts/fetch-third-party.sh` automatically via
+a `postinstall` hook. The script downloads the X.Org tarballs we depend
+on (libXt, libXaw, libXmu, libXpm) and the apps we ship as examples
+(xeyes, xcalc, twm, xclock) into `ignored-area/third-party/`. That
+directory is gitignored — it is fully reproducible from the script.
 
 ## 2. Add xcalc to the fetch script
 
@@ -87,7 +87,7 @@ Two layouts are supported: `lib` (for libraries that ship `src/` and
 `include/` subdirectories) and `app` (for the flat tarball layout that
 X.Org applications use, with all `.c`/`.h` files at the root). xcalc
 uses `app`, so the whole extracted tree gets mirrored verbatim into
-`third-party/xcalc/`.
+`ignored-area/third-party/xcalc/`.
 
 For a brand new client you would add a row to the array, run the
 script, and you are done with this step.
@@ -125,14 +125,14 @@ fresh.
 
 ## 4. The demo's `CMakeLists.txt`
 
-Each X client gets its own subdirectory under `demos/`. For xcalc, that
-is [demos/xcalc/CMakeLists.txt](../demos/xcalc/CMakeLists.txt).
+Each X client gets its own subdirectory under `examples/`. For xcalc, that
+is [examples/xcalc/CMakeLists.txt](../examples/xcalc/CMakeLists.txt).
 Read it once before you copy from it; the comments are load-bearing.
 
 The shape is:
 
 ```cmake
-set(XCALC_SRC_DIR "${CMAKE_SOURCE_DIR}/third-party/xcalc")
+set(XCALC_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/xcalc")
 
 add_executable(xcalc
     ${XCALC_SRC_DIR}/xcalc.c
@@ -153,7 +153,7 @@ emx11_finalize_demo(xcalc
 
 A few things to notice:
 
-- We treat `third-party/xcalc/` as the source directory directly. The
+- We treat `ignored-area/third-party/xcalc/` as the source directory directly. The
   three `.c` files come straight from the tarball; we do not patch
   them.
 - Third-party code is built with `-w` because our own warning flags
@@ -196,7 +196,7 @@ your demo wants something different.
 Open [CMakeLists.txt](../CMakeLists.txt) and add:
 
 ```cmake
-add_subdirectory(demos/xcalc)
+add_subdirectory(examples/xcalc)
 ```
 
 (For xcalc it is already there.) Without that line, the new
@@ -230,7 +230,7 @@ That gives you the launcher in
 [src/runtime/xcalc-launch.ts](../src/runtime/xcalc-launch.ts):
 
 ```ts
-import xcalcAppDefaults from '../../third-party/xcalc/app-defaults/XCalc?raw';
+import xcalcAppDefaults from '../../ignored-area/third-party/xcalc/app-defaults/XCalc?raw';
 import type { EmX11 } from '../api/emx11.js';
 
 export async function launchXcalc(emX11: EmX11): Promise<Process> {
@@ -258,12 +258,12 @@ labels. That is the canonical "I forgot app-defaults" symptom.
 
 A demo is just an HTML entry point and a TypeScript module:
 
-[demos/xcalc/index.html](../demos/xcalc/index.html) is one `<script
+[examples/xcalc/index.html](../examples/xcalc/index.html) is one `<script
 type="module">` tag pointing at `main.ts`. Vite picks up every
-`demos/*/index.html` automatically as an entry, so just placing the
+`examples/*/index.html` automatically as an entry, so just placing the
 file there makes the dev server publish a route.
 
-[demos/xcalc/main.ts](../demos/xcalc/main.ts) is six lines:
+[examples/xcalc/main.ts](../examples/xcalc/main.ts) is six lines:
 
 ```ts
 import { createEmX11 } from '../../src/index.js';
@@ -286,7 +286,7 @@ pnpm build      # configures + builds wasm artifacts (calls emcmake/emmake under
 pnpm dev        # vite dev server with hot reload
 ```
 
-Open `http://localhost:5173/demos/xcalc/` and you should see xcalc.
+Open `http://localhost:5173/examples/xcalc/` and you should see xcalc.
 
 Click the buttons. If they highlight on hover and respond to clicks,
 the input event path works (DOM `mousemove`/`mousedown` →

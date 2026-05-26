@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 #
-# fetch-third-party.sh -- populate third-party/ from upstream tarballs.
+# fetch-third-party.sh -- populate ignored-area/third-party/ from upstream tarballs.
 #
-# The checked-in tree keeps third-party/ gitignored; this script
+# The checked-in tree keeps ignored-area/third-party/ gitignored; this script
 # re-hydrates it so the build has the libraries libXt / libXaw /
 # libXmu / libXpm available. Run it once after cloning, and again
 # after bumping a library version in the LIBS table below.
 #
 # For each library:
 #   1. Download the official X.Org tarball
-#   2. Extract its src/, include/, COPYING into third-party/<name>/
+#   2. Extract its src/, include/, COPYING into ignored-area/third-party/<name>/
 #   3. Copy our em-x11 meta files (CMakeLists.txt, config.h,
 #      ORIGIN.txt) from scripts/third-party/<name>/ on top
-#   4. Apply any patches from scripts/third-party/<name>/patches/
+#   4. Apply any patches from patches/<name>/
 #   5. Drop any pre-generated sources from
 #      scripts/third-party/<name>/generated/ into src/
 #   6. Delete the downloaded tarball
 #
-# The script is destructive: each run wipes third-party/<name>/ before
-# re-populating, so edits made directly to third-party/ will be lost.
-# Upstream modifications belong under scripts/third-party/<name>/patches/.
+# The script is destructive: each run wipes ignored-area/third-party/<name>/ before
+# re-populating, so edits made directly to ignored-area/third-party/ will be lost.
+# Upstream modifications belong under patches/<name>/.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-THIRD_PARTY_DIR="$REPO_ROOT/third-party"
+THIRD_PARTY_DIR="$REPO_ROOT/ignored-area/third-party"
 OVERLAY_DIR="$REPO_ROOT/scripts/third-party"
 TARBALL_CACHE="$REPO_ROOT/references/_tarballs"
 
@@ -147,9 +147,10 @@ fetch_one() {
     done
 
     # Apply patches in sorted order (0001-*, 0002-*, ...).
-    if [ -d "$overlay/patches" ]; then
+    local patch_dir="$REPO_ROOT/patches/$name"
+    if [ -d "$patch_dir" ]; then
         local p
-        for p in "$overlay/patches"/*.patch; do
+        for p in "$patch_dir"/*.patch; do
             [ -e "$p" ] || continue
             log "applying patch $(basename "$p")"
             (cd "$dst" && patch -p1 --quiet < "$p")
@@ -159,8 +160,8 @@ fetch_one() {
     # Drop any pre-generated source files (e.g. libXt's StringDefs.c /
     # Shell.h, which upstream produces via `makestrs` at build time).
     # The tree layout under generated/ mirrors the target tree under
-    # third-party/<name>/, so a file at overlay/generated/include/X11/
-    # Shell.h lands at third-party/<name>/include/X11/Shell.h.
+    # ignored-area/third-party/<name>/, so a file at overlay/generated/include/X11/
+    # Shell.h lands at ignored-area/third-party/<name>/include/X11/Shell.h.
     if [ -d "$overlay/generated" ]; then
         log "overlaying generated files"
         cp -r "$overlay/generated/." "$dst/"
@@ -173,4 +174,4 @@ for row in "${LIBS[@]}"; do
     fetch_one "$1" "$2" "$3" "$4" "$5"
 done
 
-printf '\ndone. third-party/ is ready.\n'
+printf '\ndone. ignored-area/third-party/ is ready.\n'

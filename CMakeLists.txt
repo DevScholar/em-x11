@@ -26,16 +26,16 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(emx11_demo)
 
 add_subdirectory(native)
-add_subdirectory(third-party/libXt)
-add_subdirectory(third-party/libXmu)
-add_subdirectory(third-party/libXpm)
-add_subdirectory(third-party/libXaw)
-add_subdirectory(demos/hello)
-add_subdirectory(demos/xt-hello)
-add_subdirectory(demos/xcalc)
-add_subdirectory(demos/xeyes)
-add_subdirectory(demos/glxgears)
-# twm has no standalone demo page (session/ is the only harness that
+add_subdirectory(ignored-area/third-party/libXt)
+add_subdirectory(ignored-area/third-party/libXmu)
+add_subdirectory(ignored-area/third-party/libXpm)
+add_subdirectory(ignored-area/third-party/libXaw)
+add_subdirectory(examples/hello)
+add_subdirectory(examples/xt-hello)
+add_subdirectory(examples/xcalc)
+add_subdirectory(examples/xeyes)
+add_subdirectory(examples/glxgears)
+# twm has no standalone demo page (twm-session/ is the only harness that
 # launches it), but we still need its wasm artifact -- keep the build
 # recipe alive.
-add_subdirectory(demos/twm)
+add_subdirectory(examples/twm)

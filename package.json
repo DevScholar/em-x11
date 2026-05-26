@@ -25,8 +25,9 @@
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,json,md}\"",
+    "postinstall": "bash scripts/fetch-third-party.sh",
     "clean": "rimraf build dist",
-    "clean:all": "rimraf build dist node_modules"
+    "clean:all": "rimraf build dist node_modules ignored-area"
   },
   "devDependencies": {
     "@types/emscripten": "^1.39.10",

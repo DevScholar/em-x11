@@ -16,7 +16,6 @@ A WebAssembly implementation of the X11/Xlib C API that renders X windows to a b
 
 ```bash
 pnpm install
-bash scripts/fetch-third-party.sh
 ```
 
 # Build
@@ -37,4 +36,4 @@ The JS API surface is documented in [docs/api.md](docs/api.md).
 
 # License
 
-MIT. Third-party X.Org code under `third-party/` and `native/include/` retains its original MIT / X Consortium license.
+MIT. Third-party X.Org code under `ignored-area/third-party/` and `native/include/` retains its original MIT / X Consortium license.

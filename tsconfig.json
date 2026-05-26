@@ -30,6 +30,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "demos/**/*.ts"],
-  "exclude": ["node_modules", "dist", "build", "references", "native", "third-party"]
+  "include": ["src/**/*.ts", "examples/**/*.ts"],
+  "exclude": ["node_modules", "dist", "build", "references", "native", "ignored-area"]
 }

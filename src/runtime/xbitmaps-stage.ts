@@ -8,7 +8,7 @@
  * In a real installation that directory belongs to the xbitmaps
  * package, distributed independently of any one app.
  *
- * We mirror that distribution model: third-party/xbitmaps/ is the
+ * We mirror that distribution model: ignored-area/third-party/xbitmaps/ is the
  * verbatim X.Org tarball (fetched by scripts/fetch-third-party.sh).
  * This module imports every file under that tree at build time and
  * writes the actual xbm bitmaps into MEMFS at the canonical path
@@ -22,7 +22,7 @@
 import type { EmX11 } from '../api/emx11.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-const xbmFiles = import.meta.glob('../../third-party/xbitmaps/*', {
+const xbmFiles = import.meta.glob('../../ignored-area/third-party/xbitmaps/*', {
   query: '?raw',
   import: 'default',
   eager: true,

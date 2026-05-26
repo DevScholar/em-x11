@@ -4,19 +4,19 @@ import { resolve } from 'node:path';
 import { readdirSync, statSync, existsSync, cpSync } from 'node:fs';
 
 /**
- * Auto-discovers demos/<name>/index.html entries and prints their URLs
+ * Auto-discovers examples/<name>/index.html entries and prints their URLs
  * after Vite's own "Local" / "Network" URL block, so you don't have to
  * remember the paths.
  */
 function listDemoEntries(): { name: string; path: string }[] {
-  const demosDir = resolve(__dirname, 'demos');
-  if (!existsSync(demosDir)) return [];
-  return readdirSync(demosDir)
+  const examplesDir = resolve(__dirname, 'examples');
+  if (!existsSync(examplesDir)) return [];
+  return readdirSync(examplesDir)
     .filter((name) => {
-      const entry = resolve(demosDir, name, 'index.html');
-      return statSync(resolve(demosDir, name)).isDirectory() && existsSync(entry);
+      const entry = resolve(examplesDir, name, 'index.html');
+      return statSync(resolve(examplesDir, name)).isDirectory() && existsSync(entry);
     })
-    .map((name) => ({ name, path: `/demos/${name}/` }));
+    .map((name) => ({ name, path: `/examples/${name}/` }));
 }
 
 function printDemoUrls(): Plugin {
@@ -114,7 +114,7 @@ export default defineConfig({
       input: Object.fromEntries(
         [
           ['main', resolve(__dirname, 'index.html')],
-          ...listDemoEntries().map((d) => [d.name, resolve(__dirname, `demos/${d.name}/index.html`)]),
+          ...listDemoEntries().map((d) => [d.name, resolve(__dirname, `examples/${d.name}/index.html`)]),
         ],
       ),
     },
