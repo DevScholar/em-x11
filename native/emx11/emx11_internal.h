@@ -183,6 +183,7 @@ struct _XDisplay {
     int                        conn_id;
     XID                        xid_base;
     XID                        xid_mask;
+    int                        wakeup_fd;       /* write end of self-pipe */
 
     EmxWindow                  windows[EMX11_MAX_WINDOWS];
 

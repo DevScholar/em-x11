@@ -8,6 +8,7 @@
 #include "emx11_internal.h"
 
 #include <emscripten.h>
+#include <unistd.h>
 
 bool emx11_event_queue_push(Display *dpy, const XEvent *event) {
     unsigned int next_tail = (dpy->event_tail + 1) % EMX11_EVENT_QUEUE_CAPACITY;
@@ -17,6 +18,11 @@ bool emx11_event_queue_push(Display *dpy, const XEvent *event) {
     dpy->event_queue[dpy->event_tail] = *event;
     dpy->event_tail = next_tail;
     dpy->qlen = (int)emx11_event_queue_size(dpy);
+    /* Wake up any Select() blocking on dpy->fd (libXt's IoWait). */
+    if (dpy->wakeup_fd > 0) {
+        char byte = 1;
+        write(dpy->wakeup_fd, &byte, 1);
+    }
     return true;
 }
 
@@ -129,17 +135,26 @@ int XPending(Display *display) {
 }
 
 int XEventsQueued(Display *display, int mode) {
-    /* All three modes (QueuedAlready, QueuedAfterReading, QueuedAfterFlush)
-     * reduce to the same answer for us: there is no server, so flushing
-     * output and reading input are both no-ops and only the local queue
-     * matters. */
-    (void)mode;
+    /* In a real X connection, QueuedAfterReading reads bytes from the socket
+     * into the local queue. Our events arrive via emx11_event_queue_push
+     * (called by the JS host), but the self-pipe wakeup bytes accumulate on
+     * dpy->fd. Drain them here so the next Select() can block cleanly. */
+    if (mode != QueuedAlready && display->fd > 0) {
+        char buf[64];
+        while (read(display->fd, buf, sizeof(buf)) > 0) {}
+    }
     return (int)emx11_event_queue_size(display);
 }
 
 int XNextEvent(Display *display, XEvent *event_return) {
     if (emx11_event_queue_size(display) == 0) return 0;
     int ok = emx11_event_queue_pop(display, event_return) ? 1 : 0;
+    /* If the queue is now empty, drain wakeup bytes so the next Select()
+     * blocks cleanly (belt-and-suspenders with XEventsQueued drain). */
+    if (emx11_event_queue_size(display) == 0 && display->fd > 0) {
+        char buf[64];
+        while (read(display->fd, buf, sizeof(buf)) > 0) {}
+    }
     EM_ASM({
         var d = globalThis.emX11 && globalThis.emX11._debug;
         if (d && d.traceNext && $0) {

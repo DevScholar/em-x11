@@ -3,6 +3,8 @@
 #include <X11/Xutil.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define EMX11_SCREEN_WIDTH  1024
 #define EMX11_SCREEN_HEIGHT  768
@@ -105,6 +107,19 @@ Display *XOpenDisplay(const char *display_name) {
     }
 
     memset(&g_display, 0, sizeof(g_display));
+
+    /* Self-pipe: the read end replaces the (nonexistent) X socket fd so
+     * that libXt's Select() has something real to block on. When the host
+     * pushes an event into the C queue we write one byte to the write end,
+     * waking Select() immediately instead of waiting for its timeout. */
+    {
+        int p[2];
+        if (pipe(p) == 0) {
+            g_display.fd       = p[0];
+            g_display.wakeup_fd = p[1];
+            fcntl(p[0], F_SETFL, fcntl(p[0], F_GETFL) | O_NONBLOCK);
+        }
+    }
 
     /* Open a connection with the Host first: the returned XID range
      * must be in place before anything calls emx11_next_xid. */
