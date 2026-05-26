@@ -92,36 +92,18 @@ uses `app`, so the whole extracted tree gets mirrored verbatim into
 For a brand new client you would add a row to the array, run the
 script, and you are done with this step.
 
-## 3. Overlay files: `config.h` and `ORIGIN.txt`
+## 3. config.h via `emconfigure ./configure`
 
-Upstream xcalc is autotools-driven. Inside an `./configure` build it
-generates `config.h` from `config.h.in`. We do not run autoconf, so we
-hand-write a minimal replacement and **overlay** it on top of the
-extracted tarball every time the fetch script runs.
+Upstream xcalc is autotools-driven. Inside a standard `./configure` build it
+generates `config.h` from `config.h.in`. We let autotools do its job: the
+fetch script runs `emconfigure ./configure --host=wasm32-unknown-emscripten`
+against the extracted tarball, using a shared cache at
+[scripts/emx11-config.cache](../scripts/emx11-config.cache) to pre-seed
+every probe for the Emscripten cross-compilation environment.
 
-The overlay lives at [scripts/third-party/xcalc/config.h](../scripts/third-party/xcalc/config.h).
-It is short:
-
-```c
-#define HAVE_INTTYPES_H 1
-#define HAVE_STDINT_H   1
-/* ...the usual STDC_HEADERS pile... */
-#define HAVE_STRLCPY    1   /* musl exposes it; otherwise xcalc's
-                               static fallback collides */
-#define PACKAGE         "xcalc"
-#define PACKAGE_VERSION "1.1.3"
-/* etc. */
-```
-
-The rule of thumb: claim only the headers Emscripten's musl-derived
-libc actually has, and do not claim any optional features
-(`HAVE_LANGINFO_H`, `HAVE_GETPAGESIZE`, …). If a feature is missing
-the upstream code falls back to a portable path, which is exactly what
-we want.
-
-`ORIGIN.txt` is just metadata recording the upstream URL and version,
-for license/audit purposes. Copy the xeyes one if you are starting
-fresh.
+The resulting `config.h` is the real thing — not a hand-written approximation.
+If a new upstream package needs additional cache entries, add them to
+`emx11-config.cache` rather than writing a `config.h` by hand.
 
 ## 4. The demo's `CMakeLists.txt`
 

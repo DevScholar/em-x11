@@ -62,6 +62,13 @@ extern KeySym XkbKeycodeToKeysym(
     int group,
     int level);
 
+extern Bool XkbLookupKeySym(
+    Display *dpy,
+    KeyCode keycode,
+    unsigned int modifiers,
+    unsigned int *modifiers_return,
+    KeySym *keysym_return);
+
 extern Bool XkbSetDetectableAutoRepeat(
     Display *dpy,
     Bool detectable,

@@ -4,8 +4,8 @@
  *
  * The wasm exits no main() until the user closes the window; rotation
  * proceeds inside the patched event_loop, which yields a frame at a
- * time via emscripten_sleep(0) (see scripts/third-party/glxgears/
- * patches/0001-emscripten-yield.patch).
+ * time via emscripten_sleep(0) (the animation loop yields each frame
+ * through the Xlib event-polling path).
  */
 
 import { createEmX11 } from '../../src/index.js';

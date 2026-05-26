@@ -103,6 +103,18 @@ KeySym XkbKeycodeToKeysym(Display *dpy, unsigned int kc,
 #pragma GCC diagnostic pop
 }
 
+Bool XkbLookupKeySym(Display *dpy, KeyCode keycode,
+                     unsigned int modifiers, unsigned int *modifiers_return,
+                     KeySym *keysym_return) {
+    if (!dpy || !keysym_return) return False;
+    /* Level 1 (shifted) if ShiftMask is set in modifiers; else level 0. */
+    int level = (modifiers & ShiftMask) ? 1 : 0;
+    *keysym_return = XkbKeycodeToKeysym(dpy, (unsigned int)keycode, 0, level);
+    if (modifiers_return)
+        *modifiers_return = modifiers;
+    return True;
+}
+
 Bool XkbSetDetectableAutoRepeat(Display *dpy, Bool detectable,
                                 Bool *supported) {
     (void)dpy;

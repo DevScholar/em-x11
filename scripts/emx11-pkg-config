@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Dummy pkg-config for em-x11 configure. Satisfies PKG_CHECK_MODULES
+# probes for X11 libraries (x11, xproto, etc.) so configure doesn't
+# abort on missing X11 library detection.
+# We only need config.h from configure, not real link flags.
+#
+# Packages containing "xcb" are deliberately rejected: em-x11 is pure
+# Xlib, not XCB. This prevents configure from enabling the XCB/PRESENT
+# code path in apps like xeyes 1.3.1.
+
+# Check for xcb packages in all arguments and reject them
+for arg in "$@"; do
+    case "$arg" in
+        *xcb*) exit 1 ;;
+    esac
+done
+
+case "$1" in
+    --cflags|--libs|--libs-only-L|--libs-only-l) echo "" ;;
+    --modversion) echo "1.0" ;;
+    --exists) exit 0 ;;
+    --print-errors) shift; exit 0 ;;
+    --variable) echo "" ;;
+    *) exit 0 ;;
+esac
