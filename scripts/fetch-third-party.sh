@@ -275,13 +275,15 @@ fetch_one() {
         cp -r "$STUBS_DIR/$name/generated/." "$dst/"
     fi
 
-    # Clean up temp.
+    # Clean up temp. tarballs can contain read-only files that break
+    # rm -rf on Windows-hosted filesystems; chmod first to be safe.
+    chmod -R u+w "$tmp" 2>/dev/null || true
     rm -rf "$tmp"
 }
 
 for row in "${LIBS[@]}"; do
-    set -- $row
-    fetch_one "$1" "$2" "$3" "$4" "$5" "${6:-}"
+    read -r name up ver url_base layout extra_config_args <<< "$row"
+    fetch_one "$name" "$up" "$ver" "$url_base" "$layout" "$extra_config_args"
 done
 
 printf '\ndone. ignored-area/third-party/ is ready.\n'

@@ -87,6 +87,22 @@ else
     warn "No tarball cache in source repo; network downloads will be needed"
 fi
 
+# The shared config.cache records absolute paths from the source repo
+# (CFLAGS, PKG_CONFIG, etc.). Replace them with this clone's paths so
+# configure doesn't abort with "has changed since the previous run".
+say "Fix paths in config.cache"
+sed -i "s|$SOURCE_REPO|$CLONE_DIR|g" scripts/emx11-config.cache
+
+# Bug: set -- $row splits multi-word extra_config_args (e.g. "--without-xrender
+# --without-present"). Use read so trailing args stay as one field.
+say "Fix extra_config_args parsing in fetch-third-party.sh"
+sed -i 's/    set -- \$row/    read -r name up ver url_base layout extra_config_args <<< "\$row"/' scripts/fetch-third-party.sh
+sed -i 's/    fetch_one "\$1" "\$2" "\$3" "\$4" "\$5" "\${6:-}"/    fetch_one "\$name" "\$up" "\$ver" "\$url_base" "\$layout" "\$extra_config_args"/' scripts/fetch-third-party.sh
+
+# Bug: tarballs can contain read-only files; rm -rf fails on Windows-hosted FS.
+say "Fix temp cleanup in fetch-third-party.sh"
+sed -i '/^    rm -rf "\$tmp"$/i\    chmod -R u+w "\$tmp" 2>/dev/null || true' scripts/fetch-third-party.sh
+
 # ----- step: pnpm install (also runs fetch-third-party.sh via postinstall) -----
 section "Step 1: pnpm install"
 INSTALL_OK=0
