@@ -1,0 +1,15 @@
+--- a/include/X11/InitialI.h	2024-11-17 12:44:07.000000000 +0800
++++ b/include/X11/InitialI.h	2026-04-25 15:26:05.784041700 +0800
+@@ -271,9 +271,10 @@
+     _XtBoolean 		/* ignoreInputs */,
+     _XtBoolean		/* ignoreSignals */,
+     _XtBoolean 		/* block */,
+-#ifdef XTHREADS
++    /* em-x11 patch: always expose drop_lock so prototype matches the
++     * definition regardless of XTHREADS. Non-threaded builds pass a
++     * dummy; the body ignores it when XTHREADS is undefined. */
+     _XtBoolean		/* drop_lock */,
+-#endif
+     unsigned long*	/* howlong */
+ );
+ 

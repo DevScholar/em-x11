@@ -1,0 +1,18 @@
+blackbox — X11 Window Manager (bbidulock/blackboxwm 0.77)
+Upstream:  https://github.com/bbidulock/blackboxwm/releases/tag/0.77
+License:   MIT (COPYING in the extracted tree)
+
+The GitHub release tarball ships the full source tree (src/, lib/, data/,
+util/, doc/, po/). Our overlay supplies:
+
+  config.h
+      Replaces the autoheader-produced config.h. Disables SHAPE, MITSHM,
+      XFT, NLS, and WITH_FULLSCREEN — features that either pull in em-x11
+      gaps (SHAPE's XShapeCombineShape, MIT-SHM's shared memory) or are
+      irrelevant in a browser (NLS, fullscreen toggle).
+
+  version.h (generated/)
+      Replaces AC_CONFIG_FILES([version.h]). Hardcodes __blackbox_version
+      to "0.77" instead of going through autoconf substitution.
+
+No SM/ICE stubs needed — blackbox does not use X Session Management.

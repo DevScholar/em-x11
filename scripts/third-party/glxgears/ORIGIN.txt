@@ -1,0 +1,12 @@
+Upstream: mesa-demos
+Tarball: https://archive.mesa3d.org/demos/mesa-demos-9.0.0.tar.xz
+File:    src/xdemos/glxgears.c (extracted standalone; rest of mesa-demos discarded)
+
+License: MIT (see COPYING in this directory).
+
+Refresh by running `bash scripts/fetch-third-party.sh` from repo root;
+version is pinned in scripts/fetch-third-party.sh's LIBS table.
+
+Patches under scripts/third-party/glxgears/patches/ are applied in
+sorted order; their job is the minimum needed to run under em-x11
+without modifying the test logic itself.

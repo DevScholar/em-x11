@@ -1,0 +1,46 @@
+--- a/src/Shell.c	2024-11-17 12:44:07.000000000 +0800
++++ b/src/Shell.c	2026-04-25 15:26:05.629514600 +0800
+@@ -2020,9 +2020,7 @@
+ 
+     while (timeout > 0) {
+         if (_XtWaitForSomething(app, FALSE, TRUE, TRUE, TRUE, TRUE,
+-#ifdef XTHREADS
+-                                FALSE,
+-#endif
++                                FALSE, /* em-x11: drop_lock always passed */
+                                 &timeout) != -1) {
+             while (XCheckIfEvent(XtDisplay(w), event, isMine, (char *) &q)) {
+                 if (q.done)
+@@ -2636,9 +2634,12 @@
+                  ArgList args _X_UNUSED,
+                  Cardinal *num_args _X_UNUSED)
+ {
+-#ifndef XT_NO_SM
++    /* em-x11: cw/nw hoisted out of the XT_NO_SM guard because the
++     * session_id fixup block at the end of this function uses them
++     * regardless of session-manager support. */
+     SessionShellWidget nw = (SessionShellWidget) new;
+     SessionShellWidget cw = (SessionShellWidget) current;
++#ifndef XT_NO_SM
+     unsigned long set_mask = 0UL;
+     unsigned long unset_mask = 0UL;
+     Boolean initialize = False;
+@@ -2851,6 +2852,10 @@
+ 
+  *************************************************************************/
+ 
++/* em-x11: forward declarations below reference SM types
++ * (XtCheckpointToken, SmcConn, SmPointer) that only exist when
++ * XT_NO_SM is off. Move them under the same guard as the bodies. */
++#ifndef XT_NO_SM
+ #define XtSessionCheckpoint     0
+ #define XtSessionInteract       1
+ 
+@@ -2863,6 +2868,7 @@
+ static void XtCallDieCallbacks(SmcConn, SmPointer);
+ static void XtCallSaveCallbacks(SmcConn, SmPointer, int, Bool, int, Bool);
+ static void XtCallSaveCompleteCallbacks(SmcConn, SmPointer);
++#endif /* !XT_NO_SM */
+ 
+ #ifndef XT_NO_SM
+ static void

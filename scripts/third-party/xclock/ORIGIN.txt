@@ -1,0 +1,16 @@
+xclock 1.1.1 - X clock demo (analog/digital clock widget)
+
+Source: https://www.x.org/releases/individual/app/xclock-1.1.1.tar.xz
+Tarball: references/_tarballs/xclock-1.1.1.tar.xz (once fetched)
+Layout: app (flat — .c/.h at root of the extracted tree).
+Copied into third-party/xclock/: whole upstream tree, unmodified.
+
+License: MIT/X11 (see COPYING).
+
+Build: not yet wired. xclock is a roadmap v1 target — same story as
+xeyes; a future third-party/xclock/CMakeLists.txt will compile
+xclock.c / Clock.c and link against emx11 + libXt + libXaw.
+
+Upgrade procedure: bump the version in scripts/fetch-third-party.sh,
+drop a fresh tarball into references/_tarballs/ (or let curl fetch),
+and re-run the script.

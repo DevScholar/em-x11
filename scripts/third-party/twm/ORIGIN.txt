@@ -1,0 +1,27 @@
+twm (Tab Window Manager) -- X.Org app/twm 1.0.13.1
+Upstream:  https://www.x.org/releases/individual/app/twm-1.0.13.1.tar.xz
+License:   X Consortium / MIT (COPYING in the extracted tree)
+
+The tarball ships pre-generated gram.c / lex.c / deftwmrc.c so the build
+has no bison / flex / shell dependency. Our overlay supplies:
+
+  config.h
+      Replaces the autoheader-produced config.h. Minimal HAVE_* set
+      suitable for Emscripten; HAVE_XRANDR intentionally undefined
+      (twm's randr code paths would pull in xrandr which we don't
+      provide).
+
+  generated/include/X11/SM/SMlib.h
+      Header stub. session.h is #included transitively by twm.c,
+      add_window.c and menus.c; it in turn pulls <X11/SM/SMlib.h>.
+      The only SM symbol used in headers is the opaque SmcConn type,
+      which the stub provides.
+
+  generated/src/session_stub.c
+      Replacement for upstream's session.c. X Session Management is
+      irrelevant in a browser (no ICE/SM daemon, no .twmrc-session
+      files), so each SessionInit / GetWindowConfig / ReadWinConfigFile
+      / DestroySession entry is a no-op.
+
+The real session.c that ships in the tarball is copied in but NOT
+listed in demos/twm/CMakeLists.txt, so it never compiles.

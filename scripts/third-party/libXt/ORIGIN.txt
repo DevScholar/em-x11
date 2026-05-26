@@ -1,0 +1,16 @@
+libXt 1.3.1 - X Toolkit Intrinsics (Xt)
+
+Source: https://www.x.org/releases/individual/lib/libXt-1.3.1.tar.xz
+Tarball: references/_tarballs/libXt-1.3.1.tar.xz
+Extracted to: references/libXt-1.3.1/ (read-only reference copy)
+Copied into third-party/: src/, include/, COPYING (unmodified).
+
+License: MIT/X11 (see COPYING).
+
+Build: driven by third-party/libXt/CMakeLists.txt, not the upstream
+autotools. Links against emx11 (our Xlib replacement).
+
+Upgrade procedure: replace references/_tarballs/libXt-*.tar.xz with a
+newer upstream release, re-extract into references/, diff against
+third-party/libXt/ to pick up any patches we have applied locally, then
+re-copy src/ and include/.

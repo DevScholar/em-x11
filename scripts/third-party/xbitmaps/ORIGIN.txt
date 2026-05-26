@@ -1,0 +1,24 @@
+xbitmaps 1.1.4 - X.Org shared bitmap data (xbm).
+
+Source: https://www.x.org/releases/individual/data/xbitmaps-1.1.4.tar.xz
+Tarball: references/_tarballs/xbitmaps-1.1.4.tar.xz (once fetched)
+Layout: data (flat - all .xbm-ish files at the root of the extracted
+tree, no headers, no compiled artefacts).
+
+Copied into third-party/xbitmaps/: whole upstream tree, unmodified.
+
+License: MIT/X11 (see COPYING).
+
+Usage: not built. The session demo bulk-stages every file under this
+directory into MEMFS at /usr/include/X11/bitmaps/<name> via Vite's
+import.meta.glob, so any client that resolves the bitmap-file-path
+resource (Xt's XmuCvtStringToBitmap, etc.) finds the file.
+
+Why a separate package: in stock X.Org these bitmaps live in their
+own tarball (xbitmaps), independent of any one application. xcalc,
+xterm, xmh, xfd and others all reference filenames from this set;
+shipping it once at the demo level matches that distribution model.
+
+Upgrade procedure: bump the version in scripts/fetch-third-party.sh,
+drop a fresh tarball into references/_tarballs/ (or let curl fetch),
+and re-run the script.
