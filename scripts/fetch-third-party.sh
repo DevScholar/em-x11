@@ -12,8 +12,7 @@
 #   2. Extract into ignored-area/temp/<name>/ for processing
 #   3. Run emconfigure ./configure to generate config.h
 #   4. Copy the minimal build tree into ignored-area/third-party/<name>/
-#   5. Apply any patches from patches/<name>/
-#   6. Clean up ignored-area/temp/<name>/
+#   5. Clean up ignored-area/temp/<name>/
 #
 # The script is destructive: each run wipes ignored-area/third-party/<name>/
 # and ignored-area/temp/<name>/ before re-populating.
@@ -34,7 +33,6 @@ have() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 
 have curl
 have tar
-have patch
 
 # Each entry: name  upstream-prefix  version  url-base  layout
 #
@@ -50,6 +48,22 @@ have patch
 # Origin metadata (URL, license) is captured inline. All X.Org packages
 # are MIT/X11 licensed; glxgears is MIT via mesa-demos.
 LIBS=(
+    # xtrans 1.6.0 -- X11 transport abstraction headers
+    #   URL: https://www.x.org/releases/individual/lib/xtrans-1.6.0.tar.xz
+    "xtrans    xtrans    1.6.0    https://www.x.org/releases/individual/lib   lib"
+
+    # xorgproto 2025.1 -- X11 protocol headers
+    #   URL: https://www.x.org/releases/individual/proto/xorgproto-2025.1.tar.xz
+    "xorgproto xorgproto 2025.1   https://www.x.org/releases/individual/proto lib"
+
+    # libICE 1.1.2 -- X Inter-Client Exchange library
+    #   URL: https://www.x.org/releases/individual/lib/libICE-1.1.2.tar.xz
+    "libICE    libICE    1.1.2    https://www.x.org/releases/individual/lib   lib"
+
+    # libSM 1.2.6 -- X Session Management library
+    #   URL: https://www.x.org/releases/individual/lib/libSM-1.2.6.tar.xz
+    "libSM     libSM     1.2.6    https://www.x.org/releases/individual/lib   lib"
+
     # libXt 1.3.1 -- X Toolkit Intrinsics
     #   URL: https://www.x.org/releases/individual/lib/libXt-1.3.1.tar.xz
     "libXt     libXt     1.3.1    https://www.x.org/releases/individual/lib   lib"
@@ -227,11 +241,29 @@ fetch_one() {
             [ -f "$extracted/config.h" ] && cp    "$extracted/config.h" "$dst/config.h"
             [ -f "$extracted/COPYING" ]  && cp    "$extracted/COPYING"  "$dst/COPYING"
 
+            # Some packages (xtrans) have source and headers directly in the
+            # root directory instead of under src/ + include/.
+            local f
+            for f in "$extracted"/*.h "$extracted"/*.c "$extracted"/*.pc.in; do
+                [ -f "$f" ] && cp "$f" "$dst/"
+            done
+
             # Copy CMakeLists.txt for cmake-based compilation.
             if [ -f "$OVERLAY_DIR/$name/CMakeLists.txt" ]; then
                 cp "$OVERLAY_DIR/$name/CMakeLists.txt" "$dst/CMakeLists.txt"
             else
                 die "missing CMakeLists.txt for $name in cmake/third-party/$name/"
+            fi
+
+            # libXt: copy pre-generated files (StringDefs.c/StringDefs.h from
+            # util/makestrs, Shell.h from util) that the upstream tarball does
+            # not ship. These are checked into references/.
+            if [ "$name" = "libXt" ]; then
+                local refdir="$REPO_ROOT/references/libXt-1.3.1"
+                [ -f "$refdir/StringDefs.c" ] && cp "$refdir/StringDefs.c" "$dst/src/StringDefs.c"
+                [ -f "$refdir/StringDefs.h" ] && cp "$refdir/StringDefs.h" "$dst/src/StringDefs.h"
+                [ -f "$refdir/StringDefs.h" ] && cp "$refdir/StringDefs.h" "$dst/include/X11/StringDefs.h"
+                [ -f "$refdir/Shell.h" ] && cp "$refdir/Shell.h" "$dst/include/X11/Shell.h"
             fi
             ;;
         app)
@@ -252,17 +284,6 @@ fetch_one() {
             die "unknown layout '$layout' for $name"
             ;;
     esac
-
-    # Apply patches in sorted order.
-    local patch_dir="$REPO_ROOT/patches/$name"
-    if [ -d "$patch_dir" ]; then
-        local p
-        for p in "$patch_dir"/*.patch; do
-            [ -e "$p" ] || continue
-            log "applying patch $(basename "$p")"
-            (cd "$dst" && patch -p1 --quiet < "$p")
-        done
-    fi
 
     # Clean up temp. tarballs can contain read-only files that break
     # rm -rf on Windows-hosted filesystems; chmod first to be safe.

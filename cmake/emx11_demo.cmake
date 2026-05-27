@@ -95,7 +95,7 @@ function(emx11_finalize_demo target)
         endif()
     endforeach()
 
-    set(_runtime_methods ccall cwrap UTF8ToString ${EMX11_FD_EXTRA_RUNTIME_METHODS})
+    set(_runtime_methods ccall cwrap UTF8ToString FS ${EMX11_FD_EXTRA_RUNTIME_METHODS})
     set(_functions ${EMX11_RUNTIME_HOOKS} ${EMX11_FD_EXTRA_FUNCTIONS})
 
     # Build the ['_a','_b',...] literal Emscripten wants. list(JOIN)

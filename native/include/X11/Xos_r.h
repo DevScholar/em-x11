@@ -280,6 +280,39 @@ static __inline__ void _Xpw_copyPasswd(_Xgetpwparams p)
    (p).pwp = &(p).pws;
 }
 
+#elif defined(__EMSCRIPTEN__)
+/*
+ * Emscripten: struct passwd has only the five standard POSIX fields
+ * (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell).
+ * No pw_age, pw_comment, pw_class — those are SVR4/Solaris extensions.
+ */
+static __inline__ void _Xpw_copyPasswd(_Xgetpwparams p)
+{
+   memcpy(&(p).pws, (p).pwp, sizeof(struct passwd));
+
+   (p).pws.pw_name = (p).pwbuf;
+   (p).len = strlen((p).pwp->pw_name);
+   strcpy((p).pws.pw_name, (p).pwp->pw_name);
+
+   (p).pws.pw_passwd = (p).pws.pw_name + (p).len + 1;
+   (p).len = strlen((p).pwp->pw_passwd);
+   strcpy((p).pws.pw_passwd,(p).pwp->pw_passwd);
+
+   (p).pws.pw_gecos = (p).pws.pw_passwd + (p).len + 1;
+   (p).len = strlen((p).pwp->pw_gecos);
+   strcpy((p).pws.pw_gecos, (p).pwp->pw_gecos);
+
+   (p).pws.pw_dir = (p).pws.pw_gecos + (p).len + 1;
+   (p).len = strlen((p).pwp->pw_dir);
+   strcpy((p).pws.pw_dir, (p).pwp->pw_dir);
+
+   (p).pws.pw_shell = (p).pws.pw_dir + (p).len + 1;
+   (p).len = strlen((p).pwp->pw_shell);
+   strcpy((p).pws.pw_shell, (p).pwp->pw_shell);
+
+   (p).pwp = &(p).pws;
+}
+
 #else
 # define _Xpw_copyPasswd(p) \
    (memcpy(&(p).pws, (p).pwp, sizeof(struct passwd)), \

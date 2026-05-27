@@ -134,14 +134,13 @@ export class FSNamespace implements EmX11FS {
       (e) => e.data !== null || !DEFAULT_DIRS.includes(e.path),
     );
     return (mod) => {
-      /* Nothing staged -> don't even touch mod.FS. Accessing it on a
-       * wasm built without FS support calls abort() inside Emscripten's
-       * getter, which sets ABORT = true on the runtime BEFORE throwing
-       * -- so try/catch saves the JS exception but the wasm runtime is
-       * already poisoned and run() bails before main(). */
       if (!hasUserContent) return;
-      const fs = mod.FS;
-      if (!fs) {
+      /* Emscripten's FS getter calls abort() on programs that don't
+       * export it, which poisons the runtime even inside try/catch.
+       * Use getOwnPropertyDescriptor to detect the missing export
+       * without triggering the getter. */
+      const fsDesc = Object.getOwnPropertyDescriptor(mod, 'FS');
+      if (!fsDesc || !fsDesc.value) {
         if (!this.warnedNoFs) {
           this.warnedNoFs = true;
           console.warn(
@@ -152,6 +151,7 @@ export class FSNamespace implements EmX11FS {
         }
         return;
       }
+      const fs = fsDesc.value as EmscriptenModule['FS'];
       for (const e of snapshot) {
         if (e.data === null) {
           tryMkdir(fs, e.path);

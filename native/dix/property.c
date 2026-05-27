@@ -15,6 +15,8 @@
 #include "emx11_internal.h"
 #include "emx11_meta_layout.h"
 
+#include <X11/Xutil.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,6 +103,26 @@ int XDeleteProperty(Display *display, Window w, Atom property) {
     (void)display;
     emx11_js_delete_property(w, property);
     return 1;
+}
+
+Status XGetCommand(Display *display, Window w, char ***argv_return,
+                   int *argc_return) {
+    (void)display; (void)w;
+    if (argc_return) *argc_return = 0;
+    if (argv_return) *argv_return = NULL;
+    return 0;
+}
+
+Status XGetTextProperty(Display *display, Window window,
+                        XTextProperty *text_prop_return, Atom property) {
+    (void)display; (void)window; (void)property;
+    if (text_prop_return) {
+        text_prop_return->value    = NULL;
+        text_prop_return->encoding = None;
+        text_prop_return->format   = 0;
+        text_prop_return->nitems   = 0;
+    }
+    return 0;
 }
 
 Atom *XListProperties(Display *display, Window w, int *num_prop_return) {

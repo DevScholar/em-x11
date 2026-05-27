@@ -4,6 +4,10 @@
 # rely on our hand-written config.h (this dir) and em-x11's public X11
 # headers (native/include). No threads, no poll, no real I/O.
 #
+# SM is enabled (XT_NO_SM is OFF) so libICE + libSM are compiled and
+# linked; at runtime SmcOpenConnection fails gracefully and Xt falls
+# back to "no session manager".
+#
 # Warnings are turned down for this third-party tree: upstream Xt has
 # its own style (_Xconst, K&R-era casts) that trips -Wall heavy.
 
@@ -77,7 +81,7 @@ target_include_directories(Xt
 
 target_compile_definitions(Xt
     PRIVATE HAVE_CONFIG_H=1
-            XT_NO_SM=1              # skip session-manager hookup in Shell.c
+            XTHREADS
 )
 
 target_compile_options(Xt
@@ -86,7 +90,7 @@ target_compile_options(Xt
         -fvisibility=hidden
 )
 
-# Xt needs Xlib; hooking in em-x11 headers and link target.
-target_link_libraries(Xt PUBLIC X11)
+# Xt needs Xlib and SM/ICE; hooking in em-x11 headers and link targets.
+target_link_libraries(Xt PUBLIC X11 SM ICE)
 
 set_target_properties(Xt PROPERTIES OUTPUT_NAME "Xt")

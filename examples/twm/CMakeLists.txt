@@ -6,9 +6,9 @@
 # correctly hides this as a demo URL.
 set(TWM_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/twm/src")
 
-# Source list mirrors upstream Makefile.am's twm_SOURCES minus session.c,
-# which talks ICE/SM. We substitute session_stub.c (lives in this
-# directory, not in the third-party tree) in its place.
+# Source list mirrors upstream Makefile.am's twm_SOURCES. session.c uses
+# ICE/SM which we now build from real X.Org sources, so the session_stub is
+# no longer needed.
 add_executable(twm
     ${TWM_SRC_DIR}/add_window.c
     ${TWM_SRC_DIR}/cursor.c
@@ -23,7 +23,7 @@ add_executable(twm
     ${TWM_SRC_DIR}/menus.c
     ${TWM_SRC_DIR}/parse.c
     ${TWM_SRC_DIR}/resize.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/session_stub.c
+    ${TWM_SRC_DIR}/session.c
     ${TWM_SRC_DIR}/twm.c
     ${TWM_SRC_DIR}/util.c
     # Weak override of execvp/execv so f.restart can be honored by
@@ -54,6 +54,5 @@ target_compile_options(twm PRIVATE -w)
 emx11_finalize_demo(twm
     EXPORT_NAME createTwmModule
     LIBS Xmu Xt Xext X11
-    EXTRA_RUNTIME_METHODS FS
     EXTRA_FUNCTIONS _emx11_push_destroy_notify
 )
