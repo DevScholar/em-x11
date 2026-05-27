@@ -482,15 +482,17 @@ void emx11_push_motion_event(Window window, int x, int y,
      * Fall back to hit_test only when the host hint is None or names
      * a foreign window not in this Display's table.
      *
-     * During an implicit or active pointer grab crossing events are
-     * suppressed (xorg's CheckMotion is a no-op while a grab is
-     * active). Without this suppression, the JS hint window under
-     * the pointer (which differs from the grab window) causes a
-     * LeaveNotify on the grab window every motion tick -- twm's
-     * HandleButtonPress sees the LeaveNotify right after the
-     * ButtonPress, interprets it as "the pointer already left the
-     * title bar", and aborts the drag start. */
-    if (grab_window == None) {
+     * xorg's CheckMotion always updates the sprite window and fires
+     * DoEnterLeaveEvents when the pointer crosses a window boundary,
+     * regardless of grab state (dix/events.c:3239-3253). The grab
+     * only affects which client receives the events via
+     * CoreEnterLeaveEvent's TryClientEvents path, not whether they
+     * are generated. In em-x11's single-connection-per-process model
+     * all events go to the same client anyway, so we mirror xorg:
+     * always run update_pointer_window, always with NotifyNormal
+     * during implicit grab / NotifyGrab during active grab
+     * (emit_crossing checks active_grab). */
+    {
         Window cur_pw = window;
         if (cur_pw == None || !emx11_window_find(dpy, cur_pw)) {
             int lx_fb = 0, ly_fb = 0;
