@@ -8,14 +8,16 @@
 # and again after bumping a version in the LIBS table below.
 #
 # For each package:
-#   1. Download the official tarball (cached under references/_tarballs/)
+#   1. Download the official tarball (cached under ignored-area/tarballs/)
 #   2. Extract into ignored-area/temp/<name>/ for processing
 #   3. Run emconfigure ./configure to generate config.h
 #   4. Copy the minimal build tree into ignored-area/third-party/<name>/
 #   5. Clean up ignored-area/temp/<name>/
 #
 # The script is destructive: each run wipes ignored-area/third-party/<name>/
-# and ignored-area/temp/<name>/ before re-populating.
+# and ignored-area/temp/<name>/ before re-populating. On re-runs, libraries
+# that already have a .fetched sentinel are skipped — only missing or
+# version-bumped ones are rebuilt.
 
 set -euo pipefail
 
@@ -24,7 +26,7 @@ THIRD_PARTY_DIR="$REPO_ROOT/ignored-area/third-party"
 TEMP_DIR="$REPO_ROOT/ignored-area/temp"
 OVERLAY_DIR="$REPO_ROOT/cmake/third-party"
 CONFIG_CACHE="$REPO_ROOT/scripts/emx11-config.cache"
-TARBALL_CACHE="$REPO_ROOT/references/_tarballs"
+TARBALL_CACHE="$REPO_ROOT/ignored-area/tarballs"
 
 # Regenerate the config cache on every run so hardcoded absolute paths
 # from a previous machine or clone don't poison configure with "changes
@@ -238,16 +240,35 @@ fetch_one() {
 
     printf '==> %s %s\n' "$name" "$ver"
 
+    # Skip if already successfully fetched on a previous run.
+    if [ -f "$dst/.fetched" ]; then
+        log "already built, skipping"
+        return 0
+    fi
+
     rm -rf "$tmp"
     mkdir -p "$tmp"
 
-    # Download or use cached tarball.
+    # Download or use cached tarball. Retry up to 3 times on download failure.
     if [ -f "$TARBALL_CACHE/$tarball" ]; then
         log "using cached $tarball"
         cp "$TARBALL_CACHE/$tarball" "$tmp/$tarball"
     else
-        log "downloading $url"
-        curl -fsSL --retry 3 --retry-delay 2 -o "$tmp/$tarball" "$url"
+        local attempt=1
+        while [ $attempt -le 3 ]; do
+            log "downloading $url (attempt $attempt/3)"
+            if curl -fsSL --connect-timeout 30 --max-time 600 -o "$tmp/$tarball" "$url"; then
+                mkdir -p "$TARBALL_CACHE"
+                cp "$tmp/$tarball" "$TARBALL_CACHE/$tarball"
+                break
+            fi
+            if [ $attempt -eq 3 ]; then
+                die "download failed after 3 attempts: $url"
+            fi
+            warn "download failed, retrying in 3s..."
+            sleep 3
+            attempt=$((attempt + 1))
+        done
     fi
 
     log "extracting"
@@ -322,6 +343,9 @@ fetch_one() {
             die "unknown layout '$layout' for $name"
             ;;
     esac
+
+    # Mark as successfully fetched so re-runs skip this library.
+    touch "$dst/.fetched"
 
     # Clean up temp. tarballs can contain read-only files that break
     # rm -rf on Windows-hosted filesystems; chmod first to be safe.

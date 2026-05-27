@@ -79,10 +79,10 @@ done
 
 # Copy tarball cache so fetch-third-party.sh doesn't need network.
 say "Copy tarball cache from source repo"
-if [ -d "$SOURCE_REPO/references/_tarballs" ]; then
-    mkdir -p references/_tarballs
-    cp "$SOURCE_REPO/references/_tarballs/"* references/_tarballs/ 2>/dev/null || true
-    say "  -> $(ls references/_tarballs | wc -l) tarballs cached"
+if [ -d "$SOURCE_REPO/ignored-area/tarballs" ]; then
+    mkdir -p "$CLONE_DIR/ignored-area/tarballs"
+    cp "$SOURCE_REPO/ignored-area/tarballs/"* "$CLONE_DIR/ignored-area/tarballs/" 2>/dev/null || true
+    say "  -> $(ls "$CLONE_DIR/ignored-area/tarballs" | wc -l) tarballs cached"
 else
     warn "No tarball cache in source repo; network downloads will be needed"
 fi
