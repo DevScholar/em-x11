@@ -37,6 +37,8 @@ typedef struct {
     SmPropValue *vals;
 } SmProp;
 
+extern int SmcCloseConnection(SmcConn smcConn, int count, void *props);
+
 #ifdef __cplusplus
 }
 #endif

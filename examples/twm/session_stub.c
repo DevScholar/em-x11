@@ -3,11 +3,7 @@
  * The upstream translation unit handles X Session Management via ICE /
  * SMlib, which has no analogue in the browser: no session daemon, no
  * persistent per-session state files. Every entry point is therefore a
- * no-op that satisfies the linker without pulling in ICE/SM symbols.
- *
- * Upstream session.c is copied into third-party/twm/src/ by the fetch
- * script but is not listed in demos/twm/CMakeLists.txt, so it never
- * reaches the compiler. */
+ * no-op that satisfies the linker without pulling in ICE/SM symbols. */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -30,7 +26,6 @@ int GetWindowConfig(TwmWindow *theWindow,
                     short *icon_x, short *icon_y,
                     Bool *width_ever_changed_by_user,
                     Bool *height_ever_changed_by_user) {
-    /* No saved state: tell the caller there's nothing to restore. */
     (void)theWindow;
     (void)x; (void)y; (void)width; (void)height;
     (void)iconified; (void)icon_info_present;
@@ -46,8 +41,6 @@ void ReadWinConfigFile(char *filename) {
 void DestroySession(void) {
 }
 
-/* Dead at runtime: menus.c guards the one call site with `if (smcConn)`
- * and smcConn is always NULL here. Stubbed only to satisfy the linker. */
 int SmcCloseConnection(SmcConn smc, int count, void *props) {
     (void)smc; (void)count; (void)props;
     return 0;

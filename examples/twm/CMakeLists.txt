@@ -7,8 +7,8 @@
 set(TWM_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/twm/src")
 
 # Source list mirrors upstream Makefile.am's twm_SOURCES minus session.c,
-# which talks ICE/SM. We substitute session_stub.c (dropped into the
-# twm source dir by the overlay) in its place.
+# which talks ICE/SM. We substitute session_stub.c (lives in this
+# directory, not in the third-party tree) in its place.
 add_executable(twm
     ${TWM_SRC_DIR}/add_window.c
     ${TWM_SRC_DIR}/cursor.c
@@ -23,7 +23,7 @@ add_executable(twm
     ${TWM_SRC_DIR}/menus.c
     ${TWM_SRC_DIR}/parse.c
     ${TWM_SRC_DIR}/resize.c
-    ${TWM_SRC_DIR}/session_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/session_stub.c
     ${TWM_SRC_DIR}/twm.c
     ${TWM_SRC_DIR}/util.c
     # Weak override of execvp/execv so f.restart can be honored by
@@ -34,14 +34,12 @@ add_executable(twm
 
 target_compile_definitions(twm PRIVATE HAVE_CONFIG_H=1)
 
-# config.h sits at third-party/twm/ (one level above src/), and the
-# SMlib.h stub at third-party/twm/include/X11/SM/SMlib.h. Both need to
-# resolve via quoted "config.h" and <X11/SM/SMlib.h>. siconify.bm is
-# included from icons.c with a quoted name so it resolves out of the
-# source dir automatically.
+# config.h sits at third-party/twm/ (one level above src/). SMlib.h
+# resolves from native/include/X11/SM/SMlib.h via the X11 PUBLIC include
+# path. siconify.bm is included from icons.c with a quoted name so it
+# resolves out of the source dir automatically.
 target_include_directories(twm PRIVATE
     ${CMAKE_SOURCE_DIR}/ignored-area/third-party/twm
-    ${CMAKE_SOURCE_DIR}/ignored-area/third-party/twm/include
     ${TWM_SRC_DIR}
 )
 

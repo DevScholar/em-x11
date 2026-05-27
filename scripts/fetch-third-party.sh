@@ -13,8 +13,7 @@
 #   3. Run emconfigure ./configure to generate config.h
 #   4. Copy the minimal build tree into ignored-area/third-party/<name>/
 #   5. Apply any patches from patches/<name>/
-#   6. Apply any pre-generated stubs from stubs/<name>/
-#   7. Clean up ignored-area/temp/<name>/
+#   6. Clean up ignored-area/temp/<name>/
 #
 # The script is destructive: each run wipes ignored-area/third-party/<name>/
 # and ignored-area/temp/<name>/ before re-populating.
@@ -25,7 +24,6 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 THIRD_PARTY_DIR="$REPO_ROOT/ignored-area/third-party"
 TEMP_DIR="$REPO_ROOT/ignored-area/temp"
 OVERLAY_DIR="$REPO_ROOT/cmake/third-party"
-STUBS_DIR="$REPO_ROOT/stubs"
 CONFIG_CACHE="$REPO_ROOT/scripts/emx11-config.cache"
 TARBALL_CACHE="$REPO_ROOT/references/_tarballs"
 
@@ -54,7 +52,6 @@ have patch
 LIBS=(
     # libXt 1.3.1 -- X Toolkit Intrinsics
     #   URL: https://www.x.org/releases/individual/lib/libXt-1.3.1.tar.xz
-    #   Stubs: stubs/libXt/generated/ (StringDefs.c, StringDefs.h, Shell.h)
     "libXt     libXt     1.3.1    https://www.x.org/releases/individual/lib   lib"
 
     # libXaw 1.0.16 -- X Athena Widgets
@@ -88,7 +85,6 @@ LIBS=(
 
     # twm 1.0.13.1 -- Tab Window Manager
     #   URL: https://www.x.org/releases/individual/app/twm-1.0.13.1.tar.xz
-    #   Stubs: stubs/twm/generated/ (SMlib.h, session_stub.c)
     "twm       twm       1.0.13.1 https://www.x.org/releases/individual/app   app"
 
     # glxgears -- OpenGL gear demo from mesa-demos
@@ -266,13 +262,6 @@ fetch_one() {
             log "applying patch $(basename "$p")"
             (cd "$dst" && patch -p1 --quiet < "$p")
         done
-    fi
-
-    # Apply pre-generated stubs (files upstream normally produces via build
-    # tools like makestrs, or em-x11-specific replacements like SM stubs).
-    if [ -d "$STUBS_DIR/$name/generated" ]; then
-        log "applying generated stubs"
-        cp -r "$STUBS_DIR/$name/generated/." "$dst/"
     fi
 
     # Clean up temp. tarballs can contain read-only files that break

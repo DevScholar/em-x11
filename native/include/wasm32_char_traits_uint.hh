@@ -1,16 +1,11 @@
-/* std::char_traits<unsigned int> — needed because blackbox uses
- * std::basic_string<unsigned int> (ustring) for UCS-4 code points.
- *
- * libc++ only provides char_traits for char, wchar_t, char8_t, char16_t,
- * and char32_t. unsigned int is NOT char32_t (it's a distinct fundamental
- * type in C++), so this specialization is required for any code that
- * instantiates basic_string<unsigned int>.
- *
- * This header must be included before the first use of ustring — the
- * Util.hh patch ensures it. */
+/* std::char_traits<unsigned int> — libc++ only provides char_traits for
+ * char, wchar_t, char8_t, char16_t, and char32_t. unsigned int is NOT
+ * char32_t (it's a distinct fundamental type in C++), so this
+ * specialization is required for any code that instantiates
+ * basic_string<unsigned int>. */
 
-#ifndef EMX11_CHAR_TRAITS_UINT_HH
-#define EMX11_CHAR_TRAITS_UINT_HH
+#ifndef EMX11_WASM32_CHAR_TRAITS_UINT_HH
+#define EMX11_WASM32_CHAR_TRAITS_UINT_HH
 
 #ifdef __cplusplus
 
