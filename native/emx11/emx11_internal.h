@@ -479,6 +479,17 @@ extern void emx11_js_draw_string(Window id, int x, int y,
                                  unsigned long bg_color,
                                  int image_mode);
 
+/* Latin-1 variant: decodes `text` bytes as ISO 8859-1 instead of UTF-8.
+ * Core X11 fonts (XDrawString/XDrawImageString) pass font-encoded text,
+ * which is single-byte Latin-1 for Western fonts.  Xft paths use the
+ * UTF-8 variant above. */
+extern void emx11_js_draw_string_latin1(Window id, int x, int y,
+                                        const char *font_css,
+                                        const char *text, int length,
+                                        unsigned long fg_color,
+                                        unsigned long bg_color,
+                                        int image_mode);
+
 /* Query the browser for the real metrics of a CSS font, exported once
  * per XLoadQueryFont so we never have to approximate. Writes:
  *   *ascent    -- ceil(fontBoundingBoxAscent),  pixels
@@ -496,6 +507,10 @@ extern void emx11_js_measure_font(const char *font_css,
  * result matches what fillText will render pixel-for-pixel. */
 extern int emx11_js_measure_string(const char *font_css,
                                    const char *text, int length);
+
+/* Latin-1 variant for core X11 font measurement (XTextWidth). */
+extern int emx11_js_measure_string_latin1(const char *font_css,
+                                          const char *text, int length);
 
 /* SHAPE extension: push the new bounding rectangles to the compositor.
  * rects is an array of (x, y, width, height) int quadruples, length

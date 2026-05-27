@@ -497,6 +497,20 @@ EM_JS(void, emx11_js_draw_string, (unsigned int id, int x, int y, int fontPtr, i
     if (Host) Host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
 });
 
+/* Latin-1 variant for core X11 fonts (dixfonts.c dispatch_draw_string).
+ * XDrawString text is font-encoded, i.e. single-byte ISO 8859-1 for
+ * Western fonts. UTF8ToString would warn + garble on bytes 0x80-0xFF. */
+EM_JS(void, emx11_js_draw_string_latin1, (unsigned int id, int x, int y, int fontPtr, int textPtr, int length, unsigned int fg, unsigned int bg, int imageMode), {
+    var font = fontPtr !== 0 ? UTF8ToString(fontPtr) : '13px monospace';
+    var text = '';
+    if (length > 0 && textPtr !== 0) {
+        var u8 = HEAPU8;
+        for (var i = 0; i < length; i++) text += String.fromCharCode(u8[textPtr + i]);
+    }
+    var e = globalThis.emX11; var Host = e && e._bridge;
+    if (Host) Host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
+});
+
 /* measure_font and measure_string are pure-JS measurements with no
  * shared state with the host bridge. Their scratchpads (one canvas
  * context, two LRU-ish maps) live under `globalThis.emX11._caches`
@@ -574,6 +588,35 @@ EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
     if (!ctx) return length * 8;
     var css = fontPtr !== 0 ? UTF8ToString(fontPtr) : '13px monospace';
     var text = UTF8ToString(textPtr, length);
+    var key = css + '' + text;
+    var cache = caches.textCache;
+    var hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    ctx.font = css;
+    var w = Math.ceil(ctx.measureText(text).width);
+    if (cache.size >= 8192) cache.clear();
+    cache.set(key, w);
+    return w;
+});
+
+EM_JS(int, emx11_js_measure_string_latin1, (int fontPtr, int textPtr, int length), {
+    if (length <= 0 || textPtr === 0) return 0;
+    var e = globalThis.emX11;
+    var caches = e && (e._caches || (e._caches = {}));
+    if (caches && caches.measureCtx === undefined) {
+        var c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1)
+              : typeof document !== 'undefined' ? document.createElement('canvas') : null;
+        caches.measureCtx = c ? c.getContext('2d', { willReadFrequently: true }) : null;
+    }
+    if (caches && !caches.textCache) caches.textCache = new Map();
+    var ctx = caches ? caches.measureCtx : null;
+    if (!ctx) return length * 8;
+    var css = fontPtr !== 0 ? UTF8ToString(fontPtr) : '13px monospace';
+    var text = '';
+    if (textPtr !== 0) {
+        var u8 = HEAPU8;
+        for (var i = 0; i < length; i++) text += String.fromCharCode(u8[textPtr + i]);
+    }
     var key = css + '' + text;
     var cache = caches.textCache;
     var hit = cache.get(key);

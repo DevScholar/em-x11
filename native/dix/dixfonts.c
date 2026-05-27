@@ -356,7 +356,7 @@ int XTextWidth(XFontStruct *fs, _Xconst char *string, int count) {
      * for clients that poke at XFontStruct directly. */
     EmxFont *f = font_lookup(fs->fid);
     const char *css = f ? f->css : "13px sans-serif";
-    return emx11_js_measure_string(css, string, count);
+    return emx11_js_measure_string_latin1(css, string, count);
 }
 
 int XTextExtents(XFontStruct *fs, _Xconst char *string, int nchars,
@@ -386,8 +386,8 @@ static void dispatch_draw_string(Display *dpy, Drawable d, GC gc,
     if (!gc || !string || length <= 0) return;
     const char *css = gc->font != None ? emx11_font_css(gc->font) : NULL;
     if (!css) css = "13px sans-serif";
-    emx11_js_draw_string((Window)d, x, y, css, string, length,
-                         gc->foreground, gc->background, image_mode);
+    emx11_js_draw_string_latin1((Window)d, x, y, css, string, length,
+                                 gc->foreground, gc->background, image_mode);
 }
 
 int XDrawString(Display *dpy, Drawable d, GC gc,
