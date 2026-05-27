@@ -40,6 +40,17 @@ function printDemoUrls(): Plugin {
         }
         // eslint-disable-next-line no-console
         console.log('');
+
+        // Warn if native artifacts are missing.
+        const artifacts = resolve(__dirname, 'build/artifacts');
+        if (!existsSync(artifacts)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '\x1b[33m  build/artifacts/ not found. ' +
+              "Run 'pnpm build:native' first, otherwise demos will fail " +
+              'with "returned HTML instead of code".\x1b[0m\n',
+          );
+        }
       };
     },
   };

@@ -26,6 +26,11 @@ OVERLAY_DIR="$REPO_ROOT/cmake/third-party"
 CONFIG_CACHE="$REPO_ROOT/scripts/emx11-config.cache"
 TARBALL_CACHE="$REPO_ROOT/references/_tarballs"
 
+# Regenerate the config cache on every run so hardcoded absolute paths
+# from a previous machine or clone don't poison configure with "changes
+# in the environment can compromise the build" errors.
+rm -f "$CONFIG_CACHE"
+
 log()  { printf '    %s\n' "$*"; }
 warn() { printf '    WARNING: %s\n' "$*"; }
 die()  { printf 'fetch-third-party: %s\n' "$*" >&2; exit 1; }
