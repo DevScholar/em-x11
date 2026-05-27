@@ -39,6 +39,33 @@ have() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 have curl
 have tar
 
+check_host_tools() {
+    # Check for host build tools that the user must install themselves.
+    # This script only detects — it does NOT auto-install anything.
+    local missing=""
+
+    if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+        missing="$missing  cc / gcc / clang (host C compiler — needed to compile makestrs for libXt)\n"
+    fi
+    if ! command -v bison >/dev/null 2>&1; then
+        missing="$missing  bison (needed by some third-party configure scripts)\n"
+    fi
+
+    if [ -n "$missing" ]; then
+        printf 'fetch-third-party: the following host tools are required but not found:\n'
+        printf "$missing"
+        printf 'Please install them and re-run.\n'
+        printf '\n'
+        printf '  Debian/Ubuntu:  sudo apt install gcc bison\n'
+        printf '  Fedora/RHEL:    sudo dnf install gcc bison\n'
+        printf '  macOS:          xcode-select --install && brew install bison\n'
+        printf '  Arch:           sudo pacman -S gcc bison\n'
+        exit 1
+    fi
+}
+
+check_host_tools
+
 # Each entry: name  upstream-prefix  version  url-base  layout
 #
 # layout=lib  -> upstream library with src/ + include/.
@@ -260,15 +287,21 @@ fetch_one() {
                 die "missing CMakeLists.txt for $name in cmake/third-party/$name/"
             fi
 
-            # libXt: copy pre-generated files (StringDefs.c/StringDefs.h from
-            # util/makestrs, Shell.h from util) that the upstream tarball does
-            # not ship. These are checked into references/.
+            # libXt: generate StringDefs.c/StringDefs.h/Shell.h via makestrs.
+            # Upstream tarball ships util/makestrs.c + util/string.list but not
+            # the generated output; we compile makestrs with the host cc and run
+            # it to produce the files that the libXt CMakeLists.txt expects.
             if [ "$name" = "libXt" ]; then
-                local refdir="$REPO_ROOT/references/libXt-1.3.1"
-                [ -f "$refdir/StringDefs.c" ] && cp "$refdir/StringDefs.c" "$dst/src/StringDefs.c"
-                [ -f "$refdir/StringDefs.h" ] && cp "$refdir/StringDefs.h" "$dst/src/StringDefs.h"
-                [ -f "$refdir/StringDefs.h" ] && cp "$refdir/StringDefs.h" "$dst/include/X11/StringDefs.h"
-                [ -f "$refdir/Shell.h" ] && cp "$refdir/Shell.h" "$dst/include/X11/Shell.h"
+                log "compiling makestrs for libXt"
+                (cd "$extracted" && cc -o makestrs util/makestrs.c) \
+                    || die "host C compiler (cc/gcc/clang) required for makestrs — please install one and re-run"
+                log "running makestrs for libXt"
+                (cd "$extracted" && ./makestrs < util/string.list > StringDefs.c) \
+                    || die "makestrs failed"
+                cp "$extracted/StringDefs.c" "$dst/src/StringDefs.c"
+                cp "$extracted/StringDefs.h" "$dst/src/StringDefs.h"
+                cp "$extracted/StringDefs.h" "$dst/include/X11/StringDefs.h"
+                cp "$extracted/Shell.h"       "$dst/include/X11/Shell.h"
             fi
             ;;
         app)
