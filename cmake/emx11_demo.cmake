@@ -1,6 +1,6 @@
-# em-x11 demo helper -- one place for the boilerplate every wasm demo
-# needs: where to find libX11.a, the Emscripten link flags shared by
-# every demo, and the event-pump function exports the runtime must keep.
+# em-x11 demo helper — one place for the boilerplate every wasm demo
+# needs: MODULARIZE + EXPORT_ES6 + ASYNCIFY + event-pump exports + the
+# emscripten-ports link so libraries resolve without the -lX11 hijack.
 #
 # Usage from a demo:
 #
@@ -10,17 +10,15 @@
 #       LIBS Xaw Xmu Xt Xpm Xft Xrender fontconfig Xext X11
 #   )
 #
-# Each name in LIBS turns into a literal `-l<name>` on the wasm-ld
-# command line -- exactly what an autotools-built X program emits. The
-# helper also adds the matching `-L` (pointing at the artifacts dir
-# where libX11.a / libXft.a / ... land), and registers a CMake build
-# dependency on the same name so the archive is rebuilt before the
-# demo tries to link it.
+# Linking goes through the emscripten-ports script at
+# tools/ports/emx11.py. The port finds the pre-built static archives
+# in build/artifacts/ and returns their full filesystem paths to emcc,
+# bypassing emscripten's map_to_js_libs hijack.
 #
-# LIBS order matters the same way it does to a regular linker: list the
-# higher-level lib first (Xaw -> Xmu -> Xt -> Xpm -> Xft -> Xrender ->
-# fontconfig -> Xext -> X11). Symbols in earlier archives reference
-# symbols in later ones.
+# LIBS is informational — it documents the link order for readers but
+# doesn't control linking (the port script owns the full archive list).
+# Each named lib that has a CMake target is added as a build-order
+# dependency so archives are ready before the demo links.
 
 set(EMX11_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/native/include"
     CACHE INTERNAL "em-x11 public header root")
@@ -50,8 +48,8 @@ set(EMX11_RUNTIME_HOOKS
 #                     [EXTRA_RUNTIME_METHODS <name> ...]
 #                     [OUTPUT_DIR <dir>])
 #
-# Adds em-x11's include path / library search dir / per-demo Emscripten
-# settings, and emits `-l<libname>` for each entry in LIBS.
+# Wires a demo executable for the em-x11 runtime: include path, port-based
+# linking, Emscripten flags, and output location.
 function(emx11_finalize_demo target)
     set(options "")
     set(one_value EXPORT_NAME OUTPUT_DIR)
@@ -63,35 +61,27 @@ function(emx11_finalize_demo target)
     endif()
 
     target_include_directories(${target} PRIVATE ${EMX11_INCLUDE_DIR})
-    target_link_directories(${target} PRIVATE ${EMX11_LIB_DIR})
 
-    # Per-library wiring. For each name in LIBS:
-    #   - if a CMake target by that name exists (X11, Xt, Xmu, ...),
-    #     hand it to target_link_libraries. CMake substitutes
-    #     $<TARGET_FILE:foo> -- the absolute archive path -- which
-    #     emcc treats as "not a -l flag" and passes through to wasm-ld
-    #     unchanged. With proper build-order deps as a bonus.
-    #   - if no such target exists, emit `-l<name>`. Reserved only for
-    #     libs not in emcc's `map_to_js_libs` hijack list (see
-    #     emscripten/tools/link.py:2660 `library_map`). X11 and GL are
-    #     ON that list and would be silently eaten + replaced with
-    #     emscripten's libxlib.js / libwebgl.js shims -- DON'T pass
-    #     them as `-l` here, link the CMake target.
-    #
-    # The user-facing list still reads as a standard X link line
-    # (`LIBS Xaw Xmu Xt Xpm Xft Xrender fontconfig Xext X11`); the
-    # helper picks the right CMake plumbing per entry.
-    set(_emsdk_provided GL m c dl pthread embind)
+    # Port-based linking. emcc loads the port script which returns the
+    # full archive paths, avoiding the -lX11 -> libxlib.js hijack.
+    set(_port_script "${CMAKE_SOURCE_DIR}/tools/ports/emx11.py")
+    target_compile_options(${target} PRIVATE
+        "SHELL:--use-port=${_port_script}"
+    )
+    target_link_options(${target} PRIVATE
+        "SHELL:--use-port=${_port_script}"
+    )
+
+    # Propagate include paths from each named library target so headers
+    # like <X11/Intrinsic.h> (from Xt) and <X11/Xaw/Command.h> (from Xaw)
+    # resolve. add_dependencies ensures archives are built before the demo
+    # links; the port script owns the actual link line.
     foreach(libname IN LISTS EMX11_FD_LIBS)
         if(TARGET ${libname})
-            target_link_libraries(${target} PRIVATE ${libname})
-        elseif(libname IN_LIST _emsdk_provided)
-            target_link_libraries(${target} PRIVATE "-l${libname}")
-        else()
-            message(WARNING
-                "emx11_finalize_demo(${target}): no CMake target named '${libname}' "
-                "and not on the known-emsdk list -- emitting -l${libname} and hoping.")
-            target_link_libraries(${target} PRIVATE "-l${libname}")
+            target_include_directories(${target} PRIVATE
+                $<TARGET_PROPERTY:${libname},INTERFACE_INCLUDE_DIRECTORIES>
+            )
+            add_dependencies(${target} ${libname})
         endif()
     endforeach()
 

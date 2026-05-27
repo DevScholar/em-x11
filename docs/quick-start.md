@@ -74,38 +74,40 @@ on (libXt, libXaw, libXmu, libXpm) and the apps we ship as examples
 (xeyes, xcalc, twm, xclock) into `ignored-area/third-party/`. That
 directory is gitignored — it is fully reproducible from the script.
 
-## 2. Add xcalc to the fetch script
+## 2. The em-x11 port
 
-Open [scripts/fetch-third-party.sh](../scripts/fetch-third-party.sh)
-and look at the `LIBS` array. xcalc is already there:
+em-x11 ships an [emscripten-ports](https://emscripten.org/docs/compiling/Projects.html#embuilder-and-emscripten-ports)
+script at [`tools/ports/emx11.py`](../tools/ports/emx11.py). A
+**port** is a Python module that tells emcc how to fetch, build, and
+link a third-party library. em-x11's port handles all the internal
+details — where the headers live, how the static archives are named,
+and how to avoid emscripten's built-in `-lX11`→`libxlib.js` hijack —
+so you don't have to.
 
+The port is the canonical link path for all em-x11 demos. When you run
+`pnpm build:native`, every example's link command includes
+`--use-port=.../emx11.py`. The port finds the pre-built archives in
+`build/artifacts/` and returns their full filesystem paths to the
+linker, bypassing emscripten's `map_to_js_libs` substitution.
+
+For external projects that consume em-x11, the same port works
+standalone:
+
+```bash
+emcc myapp.c --use-port=/path/to/em-x11/tools/ports/emx11.py \
+    -s MODULARIZE=1 -s EXPORT_ES6=1 -s ASYNCIFY=1 \
+    -o myapp.js
 ```
-"xcalc   xcalc   1.1.3   https://www.x.org/releases/individual/app  app"
-```
 
-Two layouts are supported: `lib` (for libraries that ship `src/` and
-`include/` subdirectories) and `app` (for the flat tarball layout that
-X.Org applications use, with all `.c`/`.h` files at the root). xcalc
-uses `app`, so the whole extracted tree gets mirrored verbatim into
-`ignored-area/third-party/xcalc/`.
+The `--use-port` flag activates everything: include paths, library
+search, and the full archive list. You write standard Xlib code and
+emcc handles the rest.
 
-For a brand new client you would add a row to the array, run the
-script, and you are done with this step.
+For a minimal end-to-end example see
+[examples/hello/](../examples/hello/) — a 30-line Xlib program that
+opens a window and draws a rectangle.
 
-## 3. config.h via `emconfigure ./configure`
-
-Upstream xcalc is autotools-driven. Inside a standard `./configure` build it
-generates `config.h` from `config.h.in`. We let autotools do its job: the
-fetch script runs `emconfigure ./configure --host=wasm32-unknown-emscripten`
-against the extracted tarball, using a shared cache at
-[scripts/emx11-config.cache](../scripts/emx11-config.cache) to pre-seed
-every probe for the Emscripten cross-compilation environment.
-
-The resulting `config.h` is the real thing — not a hand-written approximation.
-If a new upstream package needs additional cache entries, add them to
-`emx11-config.cache` rather than writing a `config.h` by hand.
-
-## 4. The demo's `CMakeLists.txt`
+## 3. The demo's `CMakeLists.txt`
 
 Each X client gets its own subdirectory under `examples/`. For xcalc, that
 is [examples/xcalc/CMakeLists.txt](../examples/xcalc/CMakeLists.txt).
@@ -142,38 +144,25 @@ A few things to notice:
   (`-Wall -Wextra`) trip on patterns like unused `XtActionsRec`
   callback args. We only want strict warnings on em-x11's own code.
 - The link line reads like a standard Xaw program: `Xaw Xmu Xt Xpm
-  Xext X11`. em-x11 ships these as real, separately named static
-  archives (`libX11.a`, `libXaw.a`, ...), so anything you would write
-  on a Linux desktop translates over directly. Order matters the same
-  way it does to ld — higher-level first.
+  Xext X11`. The `LIBS` list documents the link order for readers
+  (higher-level first). The actual linking goes through the
+  emscripten-ports script — each name that has a CMake target is also
+  registered as a build-order dependency so archives are ready before
+  the demo links.
 - `emx11_finalize_demo` is the helper at
   [cmake/emx11_demo.cmake](../cmake/emx11_demo.cmake). It adds the
-  include path, the artifacts library-search dir, the Emscripten link
-  options every demo shares (`MODULARIZE`, `ASYNCIFY`,
-  `ALLOW_MEMORY_GROWTH`, ...), and the `EXPORTED_FUNCTIONS` /
-  `EXPORTED_RUNTIME_METHODS` lists the JS host's event router needs.
+  include path, wires `--use-port` into the emcc command line, and
+  sets the Emscripten link options every demo shares (`MODULARIZE`,
+  `ASYNCIFY`, `ALLOW_MEMORY_GROWTH`, ...) plus the `EXPORTED_FUNCTIONS`
+  / `EXPORTED_RUNTIME_METHODS` lists the JS host's event router needs.
 
-The helper internally translates each name in `LIBS` to the CMake
-target of the same name and links against `$<TARGET_FILE:foo>` — the
-full archive path. That detour exists because emcc's
-`process_libraries` silently substitutes its own JS shims for a few
-hijacked `-l<name>` flags (`X11`, `GL`, `SDL`, ...; see
-`tools/link.py:map_to_js_libs`); passing the absolute path avoids the
-hijack. From the demo author's side the link line still reads as
-standard `-l` X11 linking.
-
-Anything you would name with `EXTRA_RUNTIME_METHODS` (here `FS`,
-because the launcher writes `app-defaults/XCalc` into MEMFS) or
-`EXTRA_FUNCTIONS` (extra exports beyond the standard event-router
-hooks) gets appended to the helper's defaults.
-
-The helper also sets the artifact location:
+The helper sets the artifact location at
 `build/artifacts/xcalc/xcalc.js` and `xcalc.wasm`. The dev server
 serves `build/` at `/build/`, so the JS host loads
 `/build/artifacts/xcalc/xcalc.js`. Override with `OUTPUT_DIR <dir>` if
 your demo wants something different.
 
-## 5. Wire the demo into the top-level build
+## 4. Wire the demo into the top-level build
 
 Open [CMakeLists.txt](../CMakeLists.txt) and add:
 
@@ -184,7 +173,7 @@ add_subdirectory(examples/xcalc)
 (For xcalc it is already there.) Without that line, the new
 `CMakeLists.txt` is dead code.
 
-## 6. Stage `app-defaults/XCalc`
+## 5. Stage `app-defaults/XCalc`
 
 This is the part that bites every Xt port and is worth dwelling on.
 
@@ -236,7 +225,7 @@ If you forget this step the binary still launches, the window still
 appears, but you get a 0×0 Form widget with stacked Commands and no
 labels. That is the canonical "I forgot app-defaults" symptom.
 
-## 7. The demo page
+## 6. The demo page
 
 A demo is just an HTML entry point and a TypeScript module:
 
@@ -257,15 +246,16 @@ await launchXcalc(emX11);
 
 `createEmX11` boots the host (creates the canvas, registers DOM input
 listeners, primes `emX11.fs`'s default mounts at `/tmp /usr /etc /opt
-/var /home`). `launchXcalc` does the steps from §6.
+/var /home`). `launchXcalc` does the steps from §5.
 
-## 8. Build and run
+## 7. Build and run
 
 From the repo root:
 
 ```bash
-pnpm build      # configures + builds wasm artifacts (calls emcmake/emmake under the hood)
-pnpm dev        # vite dev server with hot reload
+pnpm build      # cmake configure + build + vite bundle
+pnpm dev        # vite dev server (http://localhost:5173)
+pnpm preview    # serve the production build from dist/
 ```
 
 Open `http://localhost:5173/examples/xcalc/` and you should see xcalc.
@@ -277,10 +267,14 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs). If
 the layout looks right but clicks do nothing, suspect that you forgot
 one of the `_emx11_push_*` exports.
 
-## 9. Things that go wrong, and what they mean
+`pnpm preview` serves the production build — the full `pnpm build`
+output minified and ready for deployment. All wasm artifacts are
+copied into `dist/build/artifacts/` automatically.
+
+## 8. Things that go wrong, and what they mean
 
 - **Window appears, but it is a stack of unlabelled buttons** — you
-  did not stage `app-defaults/XCalc`. See §6.
+  did not stage `app-defaults/XCalc`. See §5.
 - **All windows are pure black** — almost certainly a stale wasm
   artifact. The em-x11 host and the libemx11 inside the demo
   communicate via signature-tied EM_JS bridges; if you change a
@@ -300,8 +294,11 @@ one of the `_emx11_push_*` exports.
   the demos exercise. If your client pulls in Xrender, either link
   it in (see how Tk wires up `--enable-xft`) or stub it. xcalc does
   not need any of these.
+- **Port can't find em-x11 source** — set `EMX11_SRC` to the
+  absolute path of the em-x11 repository, or place the port script
+  under `<emx11>/tools/ports/emx11.py`.
 
-## 10. What to read next
+## 9. What to read next
 
 - [docs/api.md](api.md) — the full `createEmX11()` / `emX11.fs` /
   `emX11.spawn` surface, including IDBFS persistence and tar-mount
@@ -313,3 +310,6 @@ one of the `_emx11_push_*` exports.
   more involved launcher with `.twmrc` staging and a multi-client
   session, useful as a template if your port needs a window
   manager.
+- [tools/ports/emx11.py](../tools/ports/emx11.py) — the port script
+  itself, with comments explaining each hook in the emscripten-ports
+  API.
