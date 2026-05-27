@@ -100,8 +100,43 @@ sed -i 's/    set -- \$row/    read -r name up ver url_base layout extra_config_
 sed -i 's/    fetch_one "\$1" "\$2" "\$3" "\$4" "\$5" "\${6:-}"/    fetch_one "\$name" "\$up" "\$ver" "\$url_base" "\$layout" "\$extra_config_args"/' scripts/fetch-third-party.sh
 
 # Bug: tarballs can contain read-only files; rm -rf fails on Windows-hosted FS.
+# Make temp cleanup non-fatal so the build continues.
 say "Fix temp cleanup in fetch-third-party.sh"
 sed -i '/^    rm -rf "\$tmp"$/i\    chmod -R u+w "\$tmp" 2>/dev/null || true' scripts/fetch-third-party.sh
+sed -i 's/^    rm -rf "\$tmp"$/    rm -rf "\$tmp" || true/' scripts/fetch-third-party.sh
+
+# Bug: missing Xrandr.h stub; twm.c #includes it when HAVE_XRANDR is set.
+say "Create Xrandr.h stub"
+mkdir -p native/include/X11/extensions
+cat > native/include/X11/extensions/Xrandr.h << 'XRANDR_EOF'
+#ifndef _XRANDR_H_
+#define _XRANDR_H_
+#include <X11/extensions/randr.h>
+
+typedef struct {
+    int type;
+    unsigned long serial;
+    Bool send_event;
+    Display *display;
+    Window window;
+    Window root;
+    Time timestamp;
+    Time config_timestamp;
+    SizeID size_index;
+    Rotation rotation;
+    int width;
+    int height;
+} XRRScreenChangeNotifyEvent;
+
+void XRRSelectInput(Display *dpy, Window window, int mask);
+void XRRUpdateConfiguration(XEvent *event);
+#endif
+XRANDR_EOF
+
+# Bug: dummy pkg-config accepts xrandr; configure enables HAVE_XRANDR,
+# twm pulls in Xrandr API that em-x11 doesn't implement. Reject it.
+say "Reject xrandr in dummy pkg-config"
+sed -i 's/^        \*xcb\*) exit 1 ;;/        *xcb*) exit 1 ;;\n        *xrandr*) exit 1 ;;/' scripts/emx11-pkg-config
 
 # ----- step: pnpm install (also runs fetch-third-party.sh via postinstall) -----
 section "Step 1: pnpm install"

@@ -278,7 +278,7 @@ fetch_one() {
     # Clean up temp. tarballs can contain read-only files that break
     # rm -rf on Windows-hosted filesystems; chmod first to be safe.
     chmod -R u+w "$tmp" 2>/dev/null || true
-    rm -rf "$tmp"
+    rm -rf "$tmp" || true
 }
 
 for row in "${LIBS[@]}"; do
