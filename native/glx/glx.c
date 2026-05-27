@@ -20,8 +20,10 @@
 
 #include "emx11_internal.h"
 
+#include <GL/gl.h>
 #include <GL/glx.h>
 
+#include <emscripten.h>
 #include <emscripten/em_js.h>
 #include <emscripten/html5.h>
 #include <emscripten/html5_webgl.h>
@@ -304,7 +306,17 @@ void glXSwapBuffers(Display *dpy, GLXDrawable drawable) {
      * still has to re-issue glViewport on its own ConfigureNotify --
      * we just keep the destination buffer matched. */
     emx11_glx_match_drawable(ctx, ctx->dpy ? ctx->dpy : dpy, drawable);
+    /* Flush the LEGACY_GL_EMULATION immediate-mode buffer so all GL
+     * commands are committed to the OffscreenCanvas before we blit it
+     * into the X window backing surface. Without this the canvas may
+     * be blank/stale. */
+    glFlush();
     emx11_js_glx_swap_buffers(ctx->js_id, (unsigned int)drawable);
+    /* Yield to the browser so the compositor's requestAnimationFrame
+     * callback can fire and paint the backing surface to the display
+     * canvas. Without this the wasm render loop starves rAF and only
+     * the root window is ever visible. */
+    emscripten_sleep(0);
 }
 
 void glXWaitGL(void) { /* no-op; WebGL is implicitly flushed */ }
