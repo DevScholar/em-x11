@@ -20,6 +20,11 @@ export interface CreateEmX11Options {
    *  context, em-x11 creates one and appends it to `parent` (default
    *  `document.body`). */
   canvas?: HTMLCanvasElement | OffscreenCanvas;
+  /** When `canvas` is not provided, called to resolve the canvas at
+   *  construction time. pyodide-tk bridges `pyodide.canvas.getCanvas2D()`
+   *  through this so the Pyodide canvas API is the single source of truth.
+   *  If both `canvas` and `resolveCanvas` are set, `canvas` wins. */
+  resolveCanvas?: () => HTMLCanvasElement | OffscreenCanvas | undefined;
   /** DOM parent for an auto-created canvas. Ignored if `canvas` is
    *  provided or running in a worker. */
   parent?: HTMLElement;

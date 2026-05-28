@@ -136,10 +136,12 @@ function canvasOptions(opts: CreateEmX11Options): HostOptions {
   if (opts.parent !== undefined) out.parent = opts.parent;
   if (opts.width !== undefined) out.width = opts.width;
   if (opts.height !== undefined) out.height = opts.height;
-  if (opts.canvas instanceof OffscreenCanvas) {
-    out.surface = opts.canvas;
-  } else if (opts.canvas) {
-    out.element = opts.canvas;
+
+  const canvas = opts.canvas ?? opts.resolveCanvas?.();
+  if (canvas instanceof OffscreenCanvas) {
+    out.surface = canvas;
+  } else if (canvas) {
+    out.element = canvas;
   }
   return out;
 }
