@@ -84,6 +84,11 @@ export class InputBridge {
    *  ResizeCursor stay visible during a drag even as the pointer
    *  crosses other windows. Cleared by XUngrabPointer. */
   private grabCursor: string | null = null;
+  /** Worker-mode callback: when set, applyCursorFor() sends the resolved
+   *  CSS cursor here instead of writing el.style.cursor (which doesn't
+   *  exist on an OffscreenCanvas). The callback typically posts a
+   *  message to the main thread where the visible canvas lives. */
+  private cursorRemote: ((css: string) => void) | null = null;
   /** Active pointer grab: while non-null, every button + motion event
    *  routes to this module instead of going through passive grab /
    *  subscriber lookup. Mirrors the xserver ActivateGrab path. Set by
@@ -121,7 +126,6 @@ export class InputBridge {
    *  even when the pointer is not moving (twm sets several cursors at
    *  startup before the user touches the mouse). */
   refreshCanvasCursor(): void {
-    if (this.host.canvas.headless) return;
     const win = this.host.renderer.findWindowAt(this.pointerX, this.pointerY);
     this.applyCursorFor(win);
   }
@@ -132,6 +136,14 @@ export class InputBridge {
   setGrabCursor(cursorXid: number): void {
     this.grabCursor = cursorXid === 0 ? null : cursorXidToCss(cursorXid);
     this.refreshCanvasCursor();
+  }
+
+  /** Install a worker→main bridge for cursor changes. In headless mode
+   *  (OffscreenCanvas, worker), the resolved CSS cursor is sent to this
+   *  callback instead of being written to el.style.cursor. Typically
+   *  wired to postMessage a 'cursorChange' to the main thread. */
+  setCursorRemote(fn: ((css: string) => void) | null): void {
+    this.cursorRemote = fn;
   }
 
   /** Hidden-textarea overlay (text-input.ts) registers itself here so
@@ -195,7 +207,6 @@ export class InputBridge {
    *  inheritance (xserver/dix/cursor.c::CheckCursorConfinement walks
    *  toward root until it finds a window with a cursor set). */
   private applyCursorFor(winId: number | null): void {
-    if (this.host.canvas.headless) return;
     let css = 'default';
     if (this.grabCursor) {
       css = this.grabCursor;
@@ -206,6 +217,10 @@ export class InputBridge {
         if (cur.parent === 0) break;
         cur = this.host.renderer.windows.get(cur.parent);
       }
+    }
+    if (this.host.canvas.headless) {
+      this.cursorRemote?.(css);
+      return;
     }
     const el = this.host.canvas.element;
     if (el.style.cursor !== css) el.style.cursor = css;
