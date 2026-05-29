@@ -1,0 +1,14 @@
+# Based on emscripten's .clang-format (copied from Binaryen).
+# JavaScript section omitted — JS/TS formatting is handled by prettier.
+# Exclude vendored X11 protocol headers under native/include/ —
+# those follow upstream conventions, not emscripten style.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+PointerAlignment: Left
+IndentCaseLabels: true
+ContinuationIndentWidth: 2
+ConstructorInitializerIndentWidth: 2
+SpaceAfterTemplateKeyword: false
+BinPackArguments: false
+BinPackParameters: false
