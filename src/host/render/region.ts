@@ -191,3 +191,34 @@ export function intersects(a: Region, b: Region): boolean {
 export function contains(a: Region, b: Region): boolean {
   return subtract(b, a).length === 0;
 }
+
+/** Merge vertically adjacent rects that share x-offset and width into
+ *  taller rectangles, preserving the region invariant (disjoint rects).
+ *
+ *  ShapeCombineMask decomposes a pixmap mask into row-wise horizontal
+ *  runs (h=1 each).  A 200×200 circular eye produces ~200 rects per eye
+ *  through that path; after coalescing they collapse to a single rect per
+ *  contiguous vertical column-run.  The result is typically O(num_regions)
+ *  instead of O(height), which keeps downstream region arithmetic and
+ *  compositor clip paths fast. */
+export function coalesce(r: Region): Region {
+  if (r.length <= 1) return r.slice();
+  /* Sort: primary by y (ascending), secondary by x (ascending). */
+  const sorted = [...r].sort((a, b) => a.ay - b.ay || a.ax - b.ax);
+  const out: Rect[] = [];
+  for (const rc of sorted) {
+    let merged = false;
+    /* Try to extend an existing rect whose bottom edge abuts our top
+     * edge and whose horizontal strip matches exactly. */
+    for (let i = 0; i < out.length; i++) {
+      const o = out[i]!;
+      if (o.ax === rc.ax && o.w === rc.w && o.ay + o.h === rc.ay) {
+        out[i] = { ax: o.ax, ay: o.ay, w: o.w, h: o.h + rc.h };
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) out.push(rc);
+  }
+  return out;
+}

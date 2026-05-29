@@ -25,6 +25,13 @@ var LibraryEmX11 = {
   $EmX11Host__postset: 'EmX11Host.init();',
   $EmX11Host: {
     bridge: null,
+    /** Emscripten Module reference, captured during init() when it is
+     *  guaranteed to be live. Bridge functions must use this.module and
+     *  NEVER bare `Module` — in some Emscripten build modes (MODULARIZE +
+     *  EXPORT_ES6 with certain optimiser passes) bare `Module` inside a
+     *  library function body resolves to undefined at call time even
+     *  though bracket notation inside __postset sees it. */
+    module: null,
     caches: {},
     debug: {
       traceHit: false,
@@ -39,6 +46,8 @@ var LibraryEmX11 = {
     },
 
     init: function() {
+      // Capture Module now — it IS live inside __postset evaluation.
+      this.module = Module;
       // If the user pre-installed a Host via Module['emx11Host'], use it.
       if (Module['emx11Host']) {
         this.bridge = Module['emx11Host'];
@@ -125,7 +134,7 @@ var LibraryEmX11 = {
       HEAPU32[maskPtr >> 2] = 0x001FFFFF;
       return;
     }
-    var info = h.openDisplay(Module);
+    var info = h.openDisplay(EmX11Host.module);
     HEAP32[connIdPtr >> 2] = info.connId | 0;
     HEAPU32[basePtr >> 2] = info.xidBase >>> 0;
     HEAPU32[maskPtr >> 2] = info.xidMask >>> 0;
@@ -620,13 +629,13 @@ var LibraryEmX11 = {
     if (h) h.onShapeSelectInput(connId, window, mask);
   },
 
-  emx11_js_copy_area__sig: 'viiiiiiiii',
+  emx11_js_copy_area__sig: 'viiiiiiii',
   emx11_js_copy_area: function(srcId, dstId, srcX, srcY, w, h, dstX, dstY) {
     var h = EmX11Host.get();
     if (h) h.onCopyArea(srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY);
   },
 
-  emx11_js_copy_plane__sig: 'viiiiiiiiiiiii',
+  emx11_js_copy_plane__sig: 'viiiiiiiiiiii',
   emx11_js_copy_plane: function(srcId, dstId, srcX, srcY, w, h, dstX, dstY, plane, fg, bg, applyBg) {
     var h = EmX11Host.get();
     if (h) h.onCopyPlane(srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY, plane >>> 0, fg >>> 0, bg >>> 0, applyBg !== 0);
@@ -735,7 +744,7 @@ var LibraryEmX11 = {
 
   /* ---- window management ------------------------------------------------ */
 
-  emx11_js_window_create__sig: 'viiiiiiiiiiii',
+  emx11_js_window_create__sig: 'viiiiiiiiiii',
   emx11_js_window_create: function(connId, id, parent, x, y, w, h, borderWidth, borderPixel, bgType, bgValue) {
     var h = EmX11Host.get();
     if (h) h.onWindowCreate(connId, id, parent, x, y, w, h, borderWidth, borderPixel, bgType, bgValue);
@@ -857,7 +866,7 @@ var LibraryEmX11 = {
     if (!h || !h.glx) return 0;
     var info = h.glx.createContext(width | 0, height | 0);
     if (!info) return 0;
-    Module.specialHTMLTargets[info.targetId] = info.canvas;
+    EmX11Host.module.specialHTMLTargets[info.targetId] = info.canvas;
     stringToUTF8(info.targetId, outTargetIdPtr, outTargetIdLen);
     return info.id | 0;
   },
@@ -877,8 +886,8 @@ var LibraryEmX11 = {
     var h = EmX11Host.get();
     if (!h || !h.glx) return;
     var targetId = h.glx.targetIdOf(id | 0);
-    if (targetId && Module.specialHTMLTargets) {
-      delete Module.specialHTMLTargets[targetId];
+    if (targetId && EmX11Host.module.specialHTMLTargets) {
+      delete EmX11Host.module.specialHTMLTargets[targetId];
     }
     h.glx.destroyContext(id | 0);
   },

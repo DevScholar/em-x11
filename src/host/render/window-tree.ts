@@ -14,6 +14,7 @@ import { MAX_PARENT_WALK } from '../constants.js';
 import { paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
 import {
   EMPTY_REGION,
+  coalesce as regionCoalesce,
   intersect as regionIntersect,
   subtract as regionSubtract,
   union as regionUnion,
@@ -52,6 +53,7 @@ export function addWindow(
     backgroundPixmap: null,
     mapped: false,
     shape: null,
+    shapeMask: null,
     /* Clip lists start empty: an unmapped window has nothing visible.
      * `recomputeClipsAll` populates them when the window (or an
      * ancestor) maps. */
@@ -104,10 +106,9 @@ function allocBacking(width: number, height: number): {
  *    incremental Mark/Validate path. Our scale (~10 mapped windows
  *    in demos) makes the perf delta a non-issue and the from-scratch
  *    version is dramatically easier to verify against the source.
- *  - Bounding-rect approximation for shaped windows: a shaped window
- *    contributes its full bounding rect to occlusion, never its
- *    shape geometry. Conservative -- over-occludes through shape
- *    holes, never under-occludes.
+ *  - SHAPE integration: `borderSize` and `winSize` use the window's
+ *    shape rects (when set) so the shaped silhouette — not the full
+ *    bounding rect — occludes lower siblings.
  *  - No ParentRelative / Composite / RANDR / multi-screen handling. */
 export function recomputeClipsAll(r: RendererState): void {
   /* Pre-pass: anything not currently mapped (or any descendant of an
@@ -432,6 +433,17 @@ export function configureWindow(
     }
     win.width = w;
     win.height = h;
+    /* Invalidate the shape mask so it is rebuilt at the new size on
+     * the next compositor frame (or here if there's a shape set). */
+    if (win.shape) {
+      if (!win.shapeMask || win.shapeMask.width !== w || win.shapeMask.height !== h) {
+        win.shapeMask = new OffscreenCanvas(Math.max(1, w), Math.max(1, h));
+      }
+      const mctx = win.shapeMask.getContext('2d')!;
+      mctx.clearRect(0, 0, win.shapeMask.width, win.shapeMask.height);
+      mctx.fillStyle = '#fff';
+      for (const s of win.shape) mctx.fillRect(s.x, s.y, s.w, s.h);
+    }
   }
   recomputeClipsAll(r);
   /* Resize-grew is handled implicitly: the grown strips were unioned
@@ -622,18 +634,40 @@ export function absOrigin(r: RendererState, win: ManagedWindow): { ax: number; a
 export function setWindowShape(r: RendererState, id: number, rects: ShapeRect[]): Map<number, Region> {
   const w = r.windows.get(id);
   if (!w) return new Map();
-  if (!w.mapped) {
-    w.shape = rects.length > 0 ? rects : null;
-    return new Map();
+
+  /* Coalesce row-wise runs into larger vertical strips.  ShapeCombineMask
+   * produces 1-pixel-tall horizontal runs; a 200×200 circular eye yields
+   * ~200 rects per eye.  Merging vertically brings this down to 1–2 rects
+   * per contiguous column-run and keeps region arithmetic + compositor
+   * clip paths fast. */
+  const shapeRects = regionCoalesce(
+    rects.map((s) => ({ ax: s.x, ay: s.y, w: s.w, h: s.h })),
+  );
+
+  w.shape = shapeRects.length > 0
+    ? shapeRects.map((r) => ({ x: r.ax, y: r.ay, w: r.w, h: r.h }))
+    : null;
+
+  /* Generate the cached alpha mask for the compositor: white where the
+   * shape is visible, transparent elsewhere.  The compositor pre-composites
+   * the backing through this mask ("destination‑in") so it doesn't need to
+   * build clip paths from rects every frame.  Mutter / KWin use the same
+   * "shape region → mask texture → shader" pipeline. */
+  if (w.shape) {
+    if (!w.shapeMask || w.shapeMask.width !== w.width || w.shapeMask.height !== w.height) {
+      w.shapeMask = new OffscreenCanvas(Math.max(1, w.width), Math.max(1, w.height));
+    }
+    const mctx = w.shapeMask.getContext('2d')!;
+    mctx.clearRect(0, 0, w.shapeMask.width, w.shapeMask.height);
+    mctx.fillStyle = '#fff';
+    for (const s of w.shape) mctx.fillRect(s.x, s.y, s.w, s.h);
+  } else {
+    w.shapeMask = null;
   }
-  /* Shape integrated into borderSize/winSize: the diff pipeline now
-   * captures who newly sees through (lower-z siblings exposed in the
-   * shape "holes") and who newly hides behind shape edges. xorg
-   * Xext/shape.c calls `(*pScreen->ResizeWindow)` after SetShape,
-   * which runs the full Mark/Validate/HandleExposures dance --
-   * snapshotClips / paintExposedRegions is our equivalent. */
+
+  if (!w.mapped) return new Map();
+
   const oldClips = snapshotClips(r);
-  w.shape = rects.length > 0 ? rects : null;
   recomputeClipsAll(r);
   return paintExposedRegions(r, oldClips);
 }

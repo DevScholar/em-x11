@@ -54,6 +54,11 @@ export interface ManagedWindow {
   /** SHAPE bounding rectangles (window-local coords). `null` means
    *  unshaped -- the window is a plain rectangle of (width, height). */
   shape: ShapeRect[] | null;
+  /** Cached alpha mask for shaped windows: white where the shape is
+   *  visible, transparent elsewhere (window-local coords, width×height).
+   *  Generated once in `setWindowShape`, consumed by the compositor.
+   *  `null` means unshaped or mask not yet generated. */
+  shapeMask: OffscreenCanvas | null;
   /** Visible content area in absolute canvas coords, mirroring
    *  xserver `pWin->clipList` (xserver/include/windowstr.h). Empty
    *  when the window is unmapped, has an unmapped ancestor, or is

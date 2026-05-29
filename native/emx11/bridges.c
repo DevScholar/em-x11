@@ -158,7 +158,7 @@ EM_JS(int, emx11_js_get_window_shape_count, (unsigned int id), {
   if (!host)
     return -1;
   var rects = host.getWindowShape(id >>> 0);
-  if (rects == = null || rects == = undefined)
+  if (rects == null || rects == undefined)
     return -1;
   /* Stash for the immediate-following fetch so we don't re-query. */
   var caches = Module['emx11Caches'] || (Module['emx11Caches'] = {});
@@ -173,7 +173,7 @@ EM_JS(int,
         var caches = Module['emx11Caches'];
         var stashed = caches && caches.shapeStash;
         var rects =
-          (stashed&& stashed.id == = (id >>> 0)) ? stashed.rects : null;
+          (stashed && stashed.id == (id >>> 0)) ? stashed.rects : null;
         if (caches)
           caches.shapeStash = null;
         if (!rects) {
@@ -219,7 +219,7 @@ EM_JS(int,
         var caches = Module['emx11Caches'];
         var stashed = caches && caches.childrenStash;
         var kids =
-          (stashed&& stashed.parent == = (parent >>> 0)) ? stashed.kids : null;
+          (stashed && stashed.parent == (parent >>> 0)) ? stashed.kids : null;
         if (caches)
           caches.childrenStash = null;
         if (!kids) {
@@ -257,7 +257,7 @@ EM_JS(void,
         host.onGrabButton(window >>> 0,
                           button >>> 0,
                           modifiers >>> 0,
-                          owner_events != = 0,
+                          owner_events != 0,
                           event_mask >>> 0,
                           pointer_mode | 0,
                           keyboard_mode | 0,
@@ -299,7 +299,7 @@ EM_JS(void,
       {
         var host = Module['emx11Host'];
         if (host)
-          host.onGrabPointer(conn_id >>> 0, window >>> 0, owner_events != = 0);
+          host.onGrabPointer(conn_id >>> 0, window >>> 0, owner_events != 0);
       });
 
 EM_JS(void, emx11_js_ungrab_pointer, (void), {
@@ -399,11 +399,11 @@ EM_JS(void, emx11_js_xim_set_spot, (unsigned int window, int x, int y), {
  * with the supplied argv. */
 EM_JS(void, emx11_js_exec_self, (int conn_id, int argv_ptrs, int argc), {
   var args = [];
-  if (argv_ptrs != = 0 && argc > 0) {
+  if (argv_ptrs != 0 && argc > 0) {
     var base = argv_ptrs >> 2;
     for (var i = 0; i < argc; i++) {
       var p = HEAPU32[base + i] >>> 0;
-      args.push(p == = 0 ? '' : UTF8ToString(p));
+      args.push(p == 0 ? '' : UTF8ToString(p));
     }
   }
   var host = Module['emx11Host'];
@@ -414,13 +414,13 @@ EM_JS(void, emx11_js_exec_self, (int conn_id, int argv_ptrs, int argc), {
 /* --- atom ---------------------------------------------------------------- */
 
 EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {
-  if (namePtr == = 0)
+  if (namePtr == 0)
     return 0;
   var name = UTF8ToString(namePtr);
   var host = Module['emx11Host'];
   if (!host)
     return 0;
-  return host.internAtom(name, onlyIfExists != = 0) >>> 0;
+  return host.internAtom(name, onlyIfExists != 0) >>> 0;
 });
 
 EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
@@ -428,7 +428,7 @@ EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
   if (!host)
     return 0;
   var name = host.getAtomName(atom >>> 0);
-  if (name == = null)
+  if (name == null)
     return 0;
   return stringToNewUTF8(name);
 });
@@ -475,12 +475,12 @@ EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {
    * we fall through to the direct DOM path -- works in main-thread
    * Hosts (em-x11 demos, tcldide). */
   var host = Module['emx11Host'];
-  if (host&& typeof host.clipboardWriteRemote == = 'function') {
+  if (host && typeof host.clipboardWriteRemote == 'function') {
     host.clipboardWriteRemote(copy);
     return;
   }
-  if (typeof navigator == = 'undefined' || !navigator.clipboard ||
-                            !navigator.clipboard.writeText) {
+  if (typeof navigator == 'undefined' || !navigator.clipboard ||
+      !navigator.clipboard.writeText) {
     console.warn('[emx11] clipboard write: API unavailable');
     return;
   }
@@ -567,7 +567,7 @@ EM_JS(void,
        unsigned int color),
       {
         var pts = [];
-        if (count > 0 && ptsPtr != = 0) {
+        if (count > 0 && ptsPtr != 0) {
           var base = ptsPtr >> 2;
           for (var i = 0; i < count; i++) {
             pts.push({x : HEAP32[base + i * 2], y : HEAP32[base + i * 2 + 1]});
@@ -583,7 +583,7 @@ EM_JS(void,
       (unsigned int id, int ptsPtr, int count, int mode, unsigned int color),
       {
         var pts = [];
-        if (count > 0 && ptsPtr != = 0) {
+        if (count > 0 && ptsPtr != 0) {
           var base = ptsPtr >> 2;
           for (var i = 0; i < count; i++) {
             pts.push({x : HEAP32[base + i * 2], y : HEAP32[base + i * 2 + 1]});
@@ -608,9 +608,9 @@ EM_JS(void,
        unsigned int bg,
        int imageMode),
       {
-        var font = fontPtr != = 0 ? UTF8ToString(fontPtr) : '13px monospace';
+        var font = fontPtr != 0 ? UTF8ToString(fontPtr) : '13px monospace';
         var text =
-          length > 0 && textPtr != = 0 ? UTF8ToString(textPtr, length) : '';
+          length > 0 && textPtr != 0 ? UTF8ToString(textPtr, length) : '';
         var host = Module['emx11Host'];
         if (host)
           host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
@@ -631,9 +631,9 @@ EM_JS(void,
        unsigned int bg,
        int imageMode),
       {
-        var font = fontPtr != = 0 ? UTF8ToString(fontPtr) : '13px monospace';
+        var font = fontPtr != 0 ? UTF8ToString(fontPtr) : '13px monospace';
         var text = '';
-        if (length > 0 && textPtr != = 0) {
+        if (length > 0 && textPtr != 0) {
           var u8 = HEAPU8;
           for (var i = 0; i < length; i++)
             text += String.fromCharCode(u8[textPtr + i]);
@@ -654,11 +654,11 @@ EM_JS(
   {
     var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
     var caches = C;
-    if (caches&& caches.measureCtx == = undefined) {
-      var c = typeof OffscreenCanvas !=
-        = 'undefined' ? new OffscreenCanvas(1, 1)
-                      : typeof document !=
-                        = 'undefined' ? document.createElement('canvas') : null;
+    if (caches && caches.measureCtx == undefined) {
+      var c = typeof OffscreenCanvas != 'undefined' ? new OffscreenCanvas(1, 1)
+              : typeof document != 'undefined'
+                ? document.createElement('canvas')
+                : null;
       caches.measureCtx =
         c ? c.getContext('2d', {willReadFrequently : true}) : null;
     }
@@ -719,15 +719,14 @@ EM_JS(
   });
 
 EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
-  if (length <= 0 || textPtr == = 0)
+  if (length <= 0 || textPtr == 0)
     return 0;
   var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
   var caches = C;
-  if (caches&& caches.measureCtx == = undefined) {
-    var c = typeof OffscreenCanvas !=
-      = 'undefined' ? new OffscreenCanvas(1, 1)
-                    : typeof document !=
-                      = 'undefined' ? document.createElement('canvas') : null;
+  if (caches && caches.measureCtx == undefined) {
+    var c = typeof OffscreenCanvas != 'undefined' ? new OffscreenCanvas(1, 1)
+            : typeof document != 'undefined' ? document.createElement('canvas')
+                                             : null;
     caches.measureCtx =
       c ? c.getContext('2d', {willReadFrequently : true}) : null;
   }
@@ -736,12 +735,12 @@ EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
   var ctx = caches ? caches.measureCtx : null;
   if (!ctx)
     return length * 8;
-  var css = fontPtr != = 0 ? UTF8ToString(fontPtr) : '13px monospace';
+  var css = fontPtr != 0 ? UTF8ToString(fontPtr) : '13px monospace';
   var text = UTF8ToString(textPtr, length);
   var key = css + '' + text;
   var cache = caches.textCache;
   var hit = cache.get(key);
-  if (hit != = undefined)
+  if (hit != undefined)
     return hit;
   ctx.font = css;
   var w = Math.ceil(ctx.measureText(text).width);
@@ -751,61 +750,62 @@ EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
   return w;
 });
 
-EM_JS(
-  int, emx11_js_measure_string_latin1, (int fontPtr, int textPtr, int length), {
-    if (length <= 0 || textPtr == = 0)
-      return 0;
-    var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
-    var caches = C;
-    if (caches&& caches.measureCtx == = undefined) {
-      var c = typeof OffscreenCanvas !=
-        = 'undefined' ? new OffscreenCanvas(1, 1)
-                      : typeof document !=
-                        = 'undefined' ? document.createElement('canvas') : null;
-      caches.measureCtx =
-        c ? c.getContext('2d', {willReadFrequently : true}) : null;
-    }
-    if (caches && !caches.textCache)
-      caches.textCache = new Map();
-    var ctx = caches ? caches.measureCtx : null;
-    if (!ctx)
-      return length * 8;
-    var css = fontPtr != = 0 ? UTF8ToString(fontPtr) : '13px monospace';
-    var text = '';
-    if (textPtr != = 0) {
-      var u8 = HEAPU8;
-      for (var i = 0; i < length; i++)
-        text += String.fromCharCode(u8[textPtr + i]);
-    }
-    var key = css + '' + text;
-    var cache = caches.textCache;
-    var hit = cache.get(key);
-    if (hit != = undefined)
-      return hit;
-    ctx.font = css;
-    var w = Math.ceil(ctx.measureText(text).width);
-    if (cache.size >= 8192)
-      cache.clear();
-    cache.set(key, w);
-    return w;
-  });
+EM_JS(int,
+      emx11_js_measure_string_latin1,
+      (int fontPtr, int textPtr, int length),
+      {
+        if (length <= 0 || textPtr == 0)
+          return 0;
+        var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
+        var caches = C;
+        if (caches && caches.measureCtx == undefined) {
+          var c =
+            typeof OffscreenCanvas != 'undefined' ? new OffscreenCanvas(1, 1)
+            : typeof document != 'undefined' ? document.createElement('canvas')
+                                             : null;
+          caches.measureCtx =
+            c ? c.getContext('2d', {willReadFrequently : true}) : null;
+        }
+        if (caches && !caches.textCache)
+          caches.textCache = new Map();
+        var ctx = caches ? caches.measureCtx : null;
+        if (!ctx)
+          return length * 8;
+        var css = fontPtr != 0 ? UTF8ToString(fontPtr) : '13px monospace';
+        var text = '';
+        if (textPtr != 0) {
+          var u8 = HEAPU8;
+          for (var i = 0; i < length; i++)
+            text += String.fromCharCode(u8[textPtr + i]);
+        }
+        var key = css + '' + text;
+        var cache = caches.textCache;
+        var hit = cache.get(key);
+        if (hit != undefined)
+          return hit;
+        ctx.font = css;
+        var w = Math.ceil(ctx.measureText(text).width);
+        if (cache.size >= 8192)
+          cache.clear();
+        cache.set(key, w);
+        return w;
+      });
 
 EM_JS(int, emx11_js_parse_color, (int namePtr, int rPtr, int gPtr, int bPtr), {
   /* Pure-JS color parse; reuses the shared measureCtx under emX11._caches. */
-  if (namePtr == = 0)
+  if (namePtr == 0)
     return 0;
   var name = UTF8ToString(namePtr);
-  if (typeof CSS != = 'undefined' && CSS.supports &&
-                      !CSS.supports('color', name)) {
+  if (typeof CSS != 'undefined' && CSS.supports &&
+      !CSS.supports('color', name)) {
     return 0;
   }
   var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
   var caches = C;
-  if (caches&& caches.measureCtx == = undefined) {
-    var c = typeof OffscreenCanvas !=
-      = 'undefined' ? new OffscreenCanvas(1, 1)
-                    : typeof document !=
-                      = 'undefined' ? document.createElement('canvas') : null;
+  if (caches && caches.measureCtx == undefined) {
+    var c = typeof OffscreenCanvas != 'undefined' ? new OffscreenCanvas(1, 1)
+            : typeof document != 'undefined' ? document.createElement('canvas')
+                                             : null;
     caches.measureCtx =
       c ? c.getContext('2d', {willReadFrequently : true}) : null;
   }
@@ -815,7 +815,7 @@ EM_JS(int, emx11_js_parse_color, (int namePtr, int rPtr, int gPtr, int bPtr), {
   ctx.fillStyle = '#010203';
   var sentinel = ctx.fillStyle;
   ctx.fillStyle = name;
-  if (ctx.fillStyle == = sentinel)
+  if (ctx.fillStyle == sentinel)
     return 0;
   ctx.clearRect(0, 0, 1, 1);
   ctx.fillRect(0, 0, 1, 1);
@@ -906,7 +906,7 @@ EM_JS(void,
                            plane >>> 0,
                            fg >>> 0,
                            bg >>> 0,
-                           applyBg != = 0);
+                           applyBg != 0);
       });
 
 EM_JS(void,
@@ -924,8 +924,9 @@ EM_JS(void,
        unsigned int fg,
        unsigned int bg),
       {
-        var data = dataLen > 0 && dataPtr !=
-          = 0 ? HEAPU8.slice(dataPtr, dataPtr + dataLen) : new Uint8Array(0);
+        var data = dataLen > 0 && dataPtr != 0
+                     ? HEAPU8.slice(dataPtr, dataPtr + dataLen)
+                     : new Uint8Array(0);
         var host = Module['emx11Host'];
         if (host)
           host.onPutImage(dstId >>> 0,
@@ -953,9 +954,8 @@ EM_JS(int,
        int dataPtr,
        int nelements),
       {
-        var unit =
-          format == = 8 ? 1 : format == = 16 ? 2 : format == = 32 ? 4 : 0;
-        if (unit == = 0)
+        var unit = format == 8 ? 1 : format == 16 ? 2 : format == 32 ? 4 : 0;
+        if (unit == 0)
           return 0;
         var bytes = unit * (nelements | 0);
         var data = bytes > 0 ? HEAPU8.slice(dataPtr, dataPtr + bytes)
@@ -991,7 +991,7 @@ EM_JS(void,
                                    longOffset | 0,
                                    longLength | 0,
                                    false);
-        if (r2 == = null)
+        if (r2 == null)
           return;
         HEAP32[base + 6] = 1;
         HEAP32[base + 0] = r2.found ? 1 : 0;
@@ -1033,18 +1033,19 @@ EM_JS(void,
         var stash = caches0 ? caches0.propStash : null;
         if (caches0)
           caches0.propStash = null;
-        var data = (stash&& stash.w == = (w >>> 0)&& stash.atom ==
-                    = (atom >>> 0)&& stash.reqType ==
-                    = (reqType >>> 0)&& stash.longOffset ==
-                    = (longOffset | 0)&& stash.longLength == = (longLength | 0))
-                     ? stash.data
-                     : null;
+        var data =
+          (stash && stash.w == (w >>> 0) && stash.atom == (atom >>> 0) &&
+           stash.reqType == (reqType >>> 0) &&
+           stash.longOffset == (longOffset | 0) &&
+           stash.longLength == (longLength | 0))
+            ? stash.data
+            : null;
         if (data && data.length > 0) {
           /* Use cached from preceding PeekMeta. */
           var n = Math.min(data.length, capacity | 0);
           HEAPU8.set(data.subarray ? data.subarray(0, n) : data.slice(0, n),
                      dstPtr);
-          if (deleteFlag != = 0) {
+          if (deleteFlag != 0) {
             var host = Module['emx11Host'];
             if (host)
               host.deleteProperty(w >>> 0, atom >>> 0);
@@ -1059,8 +1060,8 @@ EM_JS(void,
                                     reqType >>> 0,
                                     longOffset | 0,
                                     longLength | 0,
-                                    deleteFlag != = 0);
-        if (!r3 || !r3.found || r3.data.length == = 0)
+                                    deleteFlag != 0);
+        if (!r3 || !r3.found || r3.data.length == 0)
           return;
         var n3 = Math.min(r3.data.length, capacity | 0);
         HEAPU8.set(r3.data.subarray(0, n3), dstPtr);
@@ -1200,7 +1201,7 @@ EM_JS(void,
 EM_JS(void, emx11_js_set_override_redirect, (unsigned int id, int flag), {
   var host = Module['emx11Host'];
   if (host)
-    host.onSetOverrideRedirect(id, flag != = 0);
+    host.onSetOverrideRedirect(id, flag != 0);
 });
 
 EM_JS(void,
@@ -1238,7 +1239,7 @@ EM_JS(void, emx11_js_set_grab_cursor, (unsigned int cursor), {
 
 EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
   var rects = [];
-  if (count > 0 && rectsPtr != = 0) {
+  if (count > 0 && rectsPtr != 0) {
     var base = rectsPtr >> 2;
     for (var i = 0; i < count; i++) {
       rects.push({
@@ -1292,9 +1293,9 @@ EM_JS(int,
  * replicate that init manually -- but only AFTER make_context_current binds
  * GLctx, otherwise GLImmediate.init reads `undefined.getParameter`. */
 EM_JS(void, emx11_js_glx_legacy_init_once, (void), {
-  if (typeof GLImmediate == = 'undefined' || GLImmediate.initted)
+  if (typeof GLImmediate == 'undefined' || GLImmediate.initted)
     return;
-  if (typeof Browser == = 'undefined')
+  if (typeof Browser == 'undefined')
     return;
   Browser.useWebGL = true;
   if (Browser.moduleContextCreatedCallbacks) {

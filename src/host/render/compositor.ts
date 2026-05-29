@@ -100,31 +100,67 @@ function walk(
   parentClip: Region,
 ): void {
   if (!win.mapped) return;
-  /* The window's "paint shape" in absolute coords: bounding rect
-   * intersected with shape rects when shaped. Border ring lives
-   * OUTSIDE this region (in parent-clip area only). */
   const myShape = paintShape(r, win);
   const myCompositeClip = regionIntersect(myShape, parentClip);
-  /* Border ring is allowed to paint anywhere inside parent-clip that
-   * lies between the window's bounding outer edge and content rect.
-   * No sibling-occluder subtraction (z-order overdraw handles it). */
   if (win.borderWidth > 0) {
     paintBorderRing(r, ctx, win, parentClip);
   }
   if (!regionIsEmpty(myCompositeClip)) {
     const { ax, ay } = absOrigin(r, win);
-    ctx.save();
-    ctx.beginPath();
-    for (const rc of myCompositeClip) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
-    ctx.clip();
-    ctx.drawImage(win.backingSurface as unknown as CanvasImageSource, ax, ay);
-    ctx.restore();
+    if (win.shapeMask) {
+      paintShapedWindow(ctx, win, ax, ay, parentClip);
+    } else {
+      ctx.save();
+      ctx.beginPath();
+      for (const rc of myCompositeClip) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+      ctx.clip();
+      ctx.drawImage(win.backingSurface as unknown as CanvasImageSource, ax, ay);
+      ctx.restore();
+    }
   }
-  /* Recurse: children paint over their parent's content, with
-   * myCompositeClip as their ancestor cone. */
   for (const child of sortedMappedChildren(r, win.id)) {
     walk(r, ctx, child, myCompositeClip);
   }
+}
+
+/** Reusable temp canvas for shaped-window pre-composite pass. Resized
+ *  on demand; cleared before each use. */
+let _tempCanvas: OffscreenCanvas | null = null;
+function tempCanvas(w: number, h: number): OffscreenCanvas {
+  const tw = Math.max(w, 1), th = Math.max(h, 1);
+  if (!_tempCanvas || _tempCanvas.width < tw || _tempCanvas.height < th) {
+    _tempCanvas = new OffscreenCanvas(tw, th);
+  }
+  return _tempCanvas;
+}
+
+/** Pre-composite a shaped window: draw its backing onto a temp canvas,
+ *  mask with the cached shapeMask (destination-in), then blit the
+ *  result through parentClip onto the root canvas. This replaces the
+ *  O(N) rect clip-path approach with a single drawImage call, matching
+ *  how Mutter/KWin pre-render shape into an alpha-mask texture. */
+function paintShapedWindow(
+  ctx: RootCanvasContext,
+  win: ManagedWindow,
+  ax: number,
+  ay: number,
+  parentClip: Region,
+): void {
+  const mask = win.shapeMask!;
+  const w = win.width, h = win.height;
+  const temp = tempCanvas(w, h);
+  const tctx = temp.getContext('2d')!;
+  tctx.clearRect(0, 0, w, h);
+  tctx.drawImage(win.backingSurface as unknown as CanvasImageSource, 0, 0);
+  tctx.globalCompositeOperation = 'destination-in';
+  tctx.drawImage(mask, 0, 0);
+  tctx.globalCompositeOperation = 'source-over';
+  ctx.save();
+  ctx.beginPath();
+  for (const rc of parentClip) ctx.rect(rc.ax, rc.ay, rc.w, rc.h);
+  ctx.clip();
+  ctx.drawImage(temp as unknown as CanvasImageSource, ax, ay);
+  ctx.restore();
 }
 
 /** Window's paint area in absolute coords: content rect, shape-clipped

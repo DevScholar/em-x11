@@ -616,7 +616,7 @@ void emx11_push_motion_event(
       if (d && d.traceCMot) {
         console.log('[c-mot] conn=' + $0 + ' rx=' + $1 + ' ry=' + $2 +
                     ' hint=' + ($3 >>> 0) + ' path=' +
-                    ($4 != = null ? UTF8ToString($4) : '?') + ' target=' +
+                    ($4 != null ? UTF8ToString($4) : '?') + ' target=' +
                     ($5 >>> 0) + ' activeGrab=' + ($6 ? 'Y' : 'N') +
                     ' targetMask=0x' + ($7 >>> 0).toString(16) +
                     ' implicitGrab=' + ($8 ? 'Y' : 'N'));

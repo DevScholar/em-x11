@@ -220,11 +220,10 @@ export class GcManager {
     const data = image.data;
     const rects: ShapeRect[] = [];
 
-    /* Row-wise run-length encoding: each horizontal run of "set" pixels
-     * becomes one 1-pixel-tall rectangle. Two eyes @ 200x200 generate
-     * roughly 2 * 2 * radius rects; fine for the renderer's clip path.
-     * We could do better with a proper region coalescing pass, but every
-     * frame re-applies the clip, so O(h) rects per shape change is OK. */
+    /* Row-wise RLE: each horizontal run becomes one 1-pixel-tall rect.
+     * setWindowShape coalesces adjacent column-runs before caching the
+     * shape mask, and the compositor uses that mask (not the raw rects)
+     * for clipping — so the O(height) rects here are harmless. */
     for (let y = 0; y < pm.height; y++) {
       let runStart = -1;
       for (let x = 0; x < pm.width; x++) {
