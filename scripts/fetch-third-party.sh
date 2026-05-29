@@ -21,6 +21,11 @@
 
 set -euo pipefail
 
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "ERROR: This project requires Linux. Run from WSL, not Git Bash or Windows."
+  exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 THIRD_PARTY_DIR="$REPO_ROOT/ignored-area/third-party"
 TEMP_DIR="$REPO_ROOT/ignored-area/temp"

@@ -3,6 +3,11 @@
 # developer gets an early warning rather than a late pre-commit failure.
 set -euo pipefail
 
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "ERROR: This project requires Linux. Run from WSL, not Git Bash or Windows."
+  exit 1
+fi
+
 if command -v clang-format &>/dev/null; then
   echo "  clang-format: $(clang-format --version 2>&1 | head -1)"
 else
