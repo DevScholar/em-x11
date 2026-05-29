@@ -157,10 +157,10 @@ export class GrabManager {
     return w.parent === 0 ? null : w.parent;
   }
 
-  /** Dump every registered grab. Reachable from JS as
-   *  `globalThis.emX11.debug.dumpGrabs()` once createEmX11 has wired
-   *  the public debug namespace. If the table is empty, twm never
-   *  registered its grabs (or our XGrabButton stub still wins). */
+  /** Dump every registered grab. Publish the session to
+   *  globalThis and call from DevTools: `app.debug.dumpGrabs()`.
+   *  If the table is empty, twm never registered its grabs
+   *  (or our XGrabButton stub still wins). */
   dump(): void {
     const total = [...this.byWindow.values()].reduce((n, l) => n + l.length, 0);
     console.log(`[grabs] ${total} entries on ${this.byWindow.size} windows`);

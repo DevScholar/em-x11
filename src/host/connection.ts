@@ -259,7 +259,7 @@ export class ConnectionManager {
     return { connId: pending.connId, module };
   }
 
-  open(): { connId: number; xidBase: number; xidMask: number } {
+  open(rawModule: ModuleCcallSurface): { connId: number; xidBase: number; xidMask: number } {
     const connId = ++this.nextConnId;
     const xidBase = connId * XID_PER_CONN;
     const xidMask = XID_MASK;
@@ -267,7 +267,7 @@ export class ConnectionManager {
       connId,
       xidBase,
       xidMask,
-      module: this.defaultModule,
+      module: rawModule,
       ownedWindows: new Set(),
     });
     if (this.pendingLaunch) this.pendingLaunch.connId = connId;

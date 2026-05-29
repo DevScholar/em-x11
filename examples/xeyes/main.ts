@@ -1,11 +1,14 @@
 /**
- * xeyes demo harness. Single-thread mode: the wasm runs on the main
- * JS thread alongside the em-x11 host. No workers, no OffscreenCanvas.
+ * xeyes demo harness — Layer 2 (single program).
+ *
+ * initEmX11 creates the Host; we spread moduleOverrides into the
+ * Emscripten factory.  No child_process needed for a single wasm
+ * program.
  */
 
-import { createEmX11 } from '../../src/index.js';
+import { initEmX11 } from '../../src/index.js';
 
-const emX11 = await createEmX11({ width: 1024, height: 768 });
+const x11 = await initEmX11({ width: 1024, height: 768 });
 
-const xeyes = emX11.child_process.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });
-await xeyes.ready;
+const factory = (await import('/build/artifacts/xeyes/xeyes.js')).default;
+await factory({ ...x11.moduleOverrides, thisProgram: 'xeyes' });

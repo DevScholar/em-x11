@@ -118,20 +118,24 @@ export interface Point {
 }
 
 /**
- * The em-x11 global namespace, installed on `globalThis` before wasm
- * starts so that C code (via EM_JS bridges in native/emx11/bridges.c)
- * can reach TS-side state. Populated cooperatively:
+ * The em-x11 Host interface. The TypeScript Host class in
+ * src/host/index.ts implements this so the C-side EM_JS bridges
+ * (native/emx11/bridges.c) and the JS library
+ * (native/src/lib/library_emx11.js) share one dispatch table.
  *
- *   - createEmX11() installs the public surface (fs, spawn, display,
- *     debug, dlopen) directly on this object.
- *   - Host.attachToBridge() (called by createEmX11) installs `_bridge`
- *     pointing at the Host facade EM_JS reads from.
- *
- * Everything em-x11 puts on the global object lives under this single
- * namespace -- no scattered `__EMX11_*` globals.
+ * The Host is passed to the wasm Module via Module['emx11Host']
+ * (flat Module property, per emscripten convention), set by
+ * initEmX11() / createEmX11() through moduleOverrides.
+ * library_emx11.js reads it in $EmX11Host.init() at startup.
  */
+/** Legacy type bundle for the internal Host slots. These are now set
+ * on Module['emx11Host'] / Module['emx11Caches'] / Module['emx11Debug']
+ * (flat Module properties per emscripten convention), not on a
+ * globalThis namespace. The types remain so Host and the JS library
+ * share the same shape; only the access path changed. */
 export interface EmX11Global {
-  /** Host facade dispatched into by every EM_JS body. */
+  /** Host facade dispatched into by every EM_JS body.
+   *  Set via Module['emx11Host'] by initEmX11 / createEmX11. */
   _bridge?: EmX11Host;
   /** Bridge-owned scratchpads (font measure ctx, font cache, text
    *  cache, property stash). Lazy-initialised by the bridges
@@ -183,7 +187,7 @@ export interface EmX11Host {
    *  an XID range per x11protocol.txt §869/§935. Every XID the C side
    *  later hands out is `xidBase | (counter & xidMask)`, and ranges
    *  across connections never overlap. */
-  openDisplay(): { connId: number; xidBase: number; xidMask: number };
+  openDisplay(rawModule: { ccall: (...args: unknown[]) => unknown }): { connId: number; xidBase: number; xidMask: number };
   /** XCloseDisplay entry. Host drops the connection and releases any
    *  windows / pixmaps / atoms it owned. */
   closeDisplay(connId: number): void;
@@ -504,10 +508,5 @@ declare global {
   };
 }
 
-// Backward-compat: EmX11Global is deprecated, retained for existing
-// callers that still reference globalThis.emX11 directly.
-export interface EmX11Global {
-  _bridge?: import('./emscripten.js').EmX11Host;
-  _caches?: Record<string, unknown>;
-  _debug?: Record<string, boolean>;
-}
+// The Host is passed via Module['emx11Host'] (flat Module property,
+// per emscripten convention).  See library_emx11.js $EmX11Host.init().

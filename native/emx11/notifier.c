@@ -29,67 +29,74 @@
  * are stable across Tcl 8.6.x.
  */
 
-#include <stdio.h>
-#include <limits.h>
 #include <emscripten.h>
+#include <limits.h>
+#include <stdio.h>
 
-typedef void *ClientData;
-typedef struct Tcl_Time { long sec; long usec; } Tcl_Time;
+typedef void* ClientData;
+typedef struct Tcl_Time {
+  long sec;
+  long usec;
+} Tcl_Time;
 typedef void Tcl_FileProc(ClientData clientData, int mask);
 typedef struct Tcl_NotifierProcs {
-    void  (*setTimerProc)(const Tcl_Time *timePtr);
-    int   (*waitForEventProc)(const Tcl_Time *timePtr);
-    void  (*createFileHandlerProc)(int fd, int mask, Tcl_FileProc *proc, ClientData cd);
-    void  (*deleteFileHandlerProc)(int fd);
-    void *(*initNotifierProc)(void);
-    void  (*finalizeNotifierProc)(ClientData cd);
-    void  (*alertNotifierProc)(ClientData cd);
-    void  (*serviceModeHookProc)(int mode);
+  void (*setTimerProc)(const Tcl_Time* timePtr);
+  int (*waitForEventProc)(const Tcl_Time* timePtr);
+  void (*createFileHandlerProc)(int fd,
+                                int mask,
+                                Tcl_FileProc* proc,
+                                ClientData cd);
+  void (*deleteFileHandlerProc)(int fd);
+  void* (*initNotifierProc)(void);
+  void (*finalizeNotifierProc)(ClientData cd);
+  void (*alertNotifierProc)(ClientData cd);
+  void (*serviceModeHookProc)(int mode);
 } Tcl_NotifierProcs;
 
-extern void Tcl_SetNotifier(Tcl_NotifierProcs *procs);
+extern void Tcl_SetNotifier(Tcl_NotifierProcs* procs);
 
-#define TCL_READABLE (1<<1)
+#define TCL_READABLE (1 << 1)
 
 #define MAX_FILE_HANDLERS 8
 typedef struct {
-    int fd;
-    int mask;
-    Tcl_FileProc *proc;
-    ClientData cd;
-    int in_use;
+  int fd;
+  int mask;
+  Tcl_FileProc* proc;
+  ClientData cd;
+  int in_use;
 } FileHandler;
 static FileHandler g_handlers[MAX_FILE_HANDLERS];
 
-static void track_CreateFileHandler(int fd, int mask, Tcl_FileProc *proc, ClientData cd) {
-    for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
-        if (g_handlers[i].in_use && g_handlers[i].fd == fd) {
-            g_handlers[i].mask = mask;
-            g_handlers[i].proc = proc;
-            g_handlers[i].cd   = cd;
-            return;
-        }
+static void
+track_CreateFileHandler(int fd, int mask, Tcl_FileProc* proc, ClientData cd) {
+  for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
+    if (g_handlers[i].in_use && g_handlers[i].fd == fd) {
+      g_handlers[i].mask = mask;
+      g_handlers[i].proc = proc;
+      g_handlers[i].cd = cd;
+      return;
     }
-    for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
-        if (!g_handlers[i].in_use) {
-            g_handlers[i].in_use = 1;
-            g_handlers[i].fd   = fd;
-            g_handlers[i].mask = mask;
-            g_handlers[i].proc = proc;
-            g_handlers[i].cd   = cd;
-            return;
-        }
+  }
+  for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
+    if (!g_handlers[i].in_use) {
+      g_handlers[i].in_use = 1;
+      g_handlers[i].fd = fd;
+      g_handlers[i].mask = mask;
+      g_handlers[i].proc = proc;
+      g_handlers[i].cd = cd;
+      return;
     }
-    fprintf(stderr, "em-x11: file handler table full (fd=%d dropped)\n", fd);
+  }
+  fprintf(stderr, "em-x11: file handler table full (fd=%d dropped)\n", fd);
 }
 
 static void track_DeleteFileHandler(int fd) {
-    for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
-        if (g_handlers[i].in_use && g_handlers[i].fd == fd) {
-            g_handlers[i].in_use = 0;
-            return;
-        }
+  for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
+    if (g_handlers[i].in_use && g_handlers[i].fd == fd) {
+      g_handlers[i].in_use = 0;
+      return;
     }
+  }
 }
 
 /* Bridges to the JS host. The host registers two callbacks via
@@ -102,60 +109,67 @@ static void track_DeleteFileHandler(int fd) {
  * alert()      — wake the host pump ASAP (analogous to writing to
  *                a self-pipe to break select()). */
 EM_JS(void, emx11_js_notifier_set_timer, (int ms), {
-    var b = globalThis.emX11 && globalThis.emX11._bridge;
-    if (b && b.onTclSetTimer) b.onTclSetTimer(ms);
+  var b = globalThis.emX11 && globalThis.emX11._bridge;
+  if (b && b.onTclSetTimer)
+    b.onTclSetTimer(ms);
 });
 
 EM_JS(void, emx11_js_notifier_alert, (void), {
-    var b = globalThis.emX11 && globalThis.emX11._bridge;
-    if (b && b.onTclAlertNotifier) b.onTclAlertNotifier();
+  var b = globalThis.emX11 && globalThis.emX11._bridge;
+  if (b && b.onTclAlertNotifier)
+    b.onTclAlertNotifier();
 });
 
-static void real_SetTimer(const Tcl_Time *t) {
-    if (t == NULL) {
-        emx11_js_notifier_set_timer(-1);
-        return;
-    }
-    long ms = t->sec * 1000L + t->usec / 1000L;
-    if (ms < 0) ms = 0;
-    if (ms > INT_MAX) ms = INT_MAX;
-    emx11_js_notifier_set_timer((int)ms);
+static void real_SetTimer(const Tcl_Time* t) {
+  if (t == NULL) {
+    emx11_js_notifier_set_timer(-1);
+    return;
+  }
+  long ms = t->sec * 1000L + t->usec / 1000L;
+  if (ms < 0)
+    ms = 0;
+  if (ms > INT_MAX)
+    ms = INT_MAX;
+  emx11_js_notifier_set_timer((int)ms);
 }
 
-static void  real_AlertNotifier(ClientData cd)      { (void)cd; emx11_js_notifier_alert(); }
-static void *nop_InitNotifier(void)                 { return (void *)1; }
-static void  nop_FinalizeNotifier(ClientData cd)    { (void)cd; }
-static void  nop_ServiceModeHook(int mode)          { (void)mode; }
+static void real_AlertNotifier(ClientData cd) {
+  (void)cd;
+  emx11_js_notifier_alert();
+}
+static void* nop_InitNotifier(void) { return (void*)1; }
+static void nop_FinalizeNotifier(ClientData cd) { (void)cd; }
+static void nop_ServiceModeHook(int mode) { (void)mode; }
 
-static int yield_WaitForEvent(const Tcl_Time *timePtr) {
-    /* Poll path (timePtr={0,0}) is what Tcl_DoOneEvent(TCL_DONT_WAIT)
-     * takes; the JS host pump drives that, so we must NOT yield to JS
-     * here -- a re-entrant pump tick would corrupt state. Just drain.
-     * Block path (timePtr==NULL) yields with emscripten_sleep so the
-     * browser stays responsive; not used by the event-driven pump but
-     * safe if something does call Tcl_DoOneEvent without TCL_DONT_WAIT. */
-    int polling = (timePtr && timePtr->sec == 0 && timePtr->usec == 0);
-    if (!polling) {
-        emscripten_sleep(1);
+static int yield_WaitForEvent(const Tcl_Time* timePtr) {
+  /* Poll path (timePtr={0,0}) is what Tcl_DoOneEvent(TCL_DONT_WAIT)
+   * takes; the JS host pump drives that, so we must NOT yield to JS
+   * here -- a re-entrant pump tick would corrupt state. Just drain.
+   * Block path (timePtr==NULL) yields with emscripten_sleep so the
+   * browser stays responsive; not used by the event-driven pump but
+   * safe if something does call Tcl_DoOneEvent without TCL_DONT_WAIT. */
+  int polling = (timePtr && timePtr->sec == 0 && timePtr->usec == 0);
+  if (!polling) {
+    emscripten_sleep(1);
+  }
+  for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
+    if (g_handlers[i].in_use && (g_handlers[i].mask & TCL_READABLE)) {
+      g_handlers[i].proc(g_handlers[i].cd, TCL_READABLE);
     }
-    for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
-        if (g_handlers[i].in_use && (g_handlers[i].mask & TCL_READABLE)) {
-            g_handlers[i].proc(g_handlers[i].cd, TCL_READABLE);
-        }
-    }
-    return 0;
+  }
+  return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
 void emx11_install_browser_notifier(void) {
-    static Tcl_NotifierProcs procs;
-    procs.setTimerProc           = real_SetTimer;
-    procs.waitForEventProc       = yield_WaitForEvent;
-    procs.createFileHandlerProc  = track_CreateFileHandler;
-    procs.deleteFileHandlerProc  = track_DeleteFileHandler;
-    procs.initNotifierProc       = nop_InitNotifier;
-    procs.finalizeNotifierProc   = nop_FinalizeNotifier;
-    procs.alertNotifierProc      = real_AlertNotifier;
-    procs.serviceModeHookProc    = nop_ServiceModeHook;
-    Tcl_SetNotifier(&procs);
+  static Tcl_NotifierProcs procs;
+  procs.setTimerProc = real_SetTimer;
+  procs.waitForEventProc = yield_WaitForEvent;
+  procs.createFileHandlerProc = track_CreateFileHandler;
+  procs.deleteFileHandlerProc = track_DeleteFileHandler;
+  procs.initNotifierProc = nop_InitNotifier;
+  procs.finalizeNotifierProc = nop_FinalizeNotifier;
+  procs.alertNotifierProc = real_AlertNotifier;
+  procs.serviceModeHookProc = nop_ServiceModeHook;
+  Tcl_SetNotifier(&procs);
 }

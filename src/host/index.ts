@@ -179,8 +179,8 @@ export class Host implements EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void {
     this.gc.onInit(screenWidth, screenHeight);
   }
-  openDisplay(): { connId: number; xidBase: number; xidMask: number } {
-    return this.connection.open();
+  openDisplay(rawModule: { ccall: (...args: unknown[]) => unknown }): { connId: number; xidBase: number; xidMask: number } {
+    return this.connection.open(rawModule);
   }
   closeDisplay(connId: number): void {
     this.connection.close(connId);

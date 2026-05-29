@@ -10,6 +10,8 @@
  *   Layer 2 (single program): initEmX11()
  *     import { initEmX11 } from '@devscholar/em-x11';
  *     const x11 = await initEmX11({ canvas, width: 1024, height: 768 });
+ *     const factory = (await import('./myapp.js')).default;
+ *     await factory({ ...x11.moduleOverrides });
  *     // x11.display, x11.debug, no child_process concept
  *
  *   Layer 3 (multi-process): createEmX11()

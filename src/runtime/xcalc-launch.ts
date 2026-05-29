@@ -8,12 +8,12 @@
  * xcalc requires /usr/lib/X11/app-defaults/XCalc staged into MEMFS
  * before main() runs — without it XtGetResources finds nothing, widgets
  * realize with their compile-time defaults (0x0 Forms, stacked Commands),
- * and the calculator is unreadable. Stage via emX11.fs and let the
- * spawn-time replay drop it into the new Module's MEMFS.
+ * and the calculator is unreadable. The xcalc wasm is built with
+ * Emscripten's --preload-file so the .data package is loaded
+ * automatically at Module init; the launcher doesn't need to stage
+ * anything.
  */
 
-// eslint-disable-next-line
-import xcalcAppDefaults from '../../ignored-area/third-party/xcalc/app-defaults/XCalc?raw';
 import type { EmX11 } from '../api/emx11.js';
 import type { Process } from '../api/types.js';
 
@@ -27,7 +27,6 @@ export async function launchXcalc(
   options: LaunchXcalcOptions = {},
 ): Promise<Process> {
   const base = options.artifactBase ?? '/build/artifacts/xcalc';
-  emX11.fs.writeFileSync('/usr/lib/X11/app-defaults/XCalc', xcalcAppDefaults);
   /* `XCalc.iconPixmap: calculator` in the app-defaults pushes the
    * string "calculator" through XmuCvtStringToBitmap, which probes
    * /usr/include/X11/bitmaps/. The session demo stages the whole

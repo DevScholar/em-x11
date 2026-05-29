@@ -18,6 +18,11 @@
  *
  *   const x11 = await initEmX11({ canvas: myCanvas, width: 1024, height: 768 });
  *   console.log('Root window:', x11.display.rootWindowId);
+ *
+ *   // Load the wasm module — spread moduleOverrides so the C-side
+ *   // bridges find the Host on Module['emx11Host'].
+ *   const factory = (await import('./myapp.js')).default;
+ *   await factory({ ...x11.moduleOverrides });
  */
 
 import { Host } from '../host/index.js';
@@ -41,6 +46,14 @@ export interface InitEmX11Options {
 export interface EmX11Session {
   readonly display: EmX11Display;
   readonly debug: EmX11Debug;
+  /** Module overrides to spread into the Emscripten factory call.
+   *  Passes the Host to Module['emx11Host'] and suppresses the
+   *  default Host auto-start.  Usage:
+   *
+   *    const factory = (await import('./myapp.js')).default;
+   *    await factory({ ...x11.moduleOverrides, ...otherOverrides });
+   */
+  readonly moduleOverrides: { emx11Host: Host; emx11NoAutoStart: true };
   /** @internal Escape hatch onto the internal Host. */
   readonly _host: Host;
   /** Tear down DOM listeners and IME overlay.  Idempotent. */
@@ -69,6 +82,10 @@ export function initEmX11(options: InitEmX11Options = {}): Promise<EmX11Session>
   return Promise.resolve({
     display,
     debug,
+    moduleOverrides: {
+      emx11Host: host,
+      emx11NoAutoStart: true,
+    },
     _host: host,
     dispose: () => host.dispose(),
   });

@@ -46,11 +46,14 @@ _PORT_LIBS = [
 def needed(settings):
     """Return True when -sUSE_EMX11 or --use-port=emx11 is active.
 
-    The getattr guard avoids crashing when USE_EMX11 hasn't been added
-    to upstream settings.js yet (pre-contribution).  Once the setting
-    lands, this can be simplified to `return settings.USE_EMX11`.
+    Emscripten >= 5.0.0 asserts in settings.__getattr__ when an unknown
+    key is read in limited-settings mode, so the usual getattr default
+    doesn't help.  Catch the assertion and treat it as False.
     """
-    return getattr(settings, 'USE_EMX11', False)
+    try:
+        return getattr(settings, 'USE_EMX11', False)
+    except AssertionError:
+        return False
 
 
 def get_lib_name(settings):
@@ -227,14 +230,22 @@ def process_args(ports):
 
 
 def process_dependencies(settings):
-    """Ensure runtime symbols the JS library needs are exported."""
-    settings.EXPORTED_RUNTIME_METHODS.append('ccall')
-    settings.EXPORTED_RUNTIME_METHODS.append('cwrap')
-    settings.EXPORTED_RUNTIME_METHODS.append('UTF8ToString')
-    settings.EXPORTED_RUNTIME_METHODS.append('stringToUTF8')
-    settings.EXPORTED_RUNTIME_METHODS.append('stringToNewUTF8')
-    settings.EXPORTED_RUNTIME_METHODS.append('FS')
-    settings.EXPORTED_RUNTIME_METHODS.append('specialHTMLTargets')
+    """Ensure runtime symbols the JS library needs are exported.
+
+    Emscripten >= 5.0.0 may call this during the compile phase where
+    settings is in limited mode and rejects writes.  Silently skip in
+    that case — the symbols will be set during the link phase instead.
+    """
+    try:
+        settings.EXPORTED_RUNTIME_METHODS.append('ccall')
+        settings.EXPORTED_RUNTIME_METHODS.append('cwrap')
+        settings.EXPORTED_RUNTIME_METHODS.append('UTF8ToString')
+        settings.EXPORTED_RUNTIME_METHODS.append('stringToUTF8')
+        settings.EXPORTED_RUNTIME_METHODS.append('stringToNewUTF8')
+        settings.EXPORTED_RUNTIME_METHODS.append('FS')
+        settings.EXPORTED_RUNTIME_METHODS.append('specialHTMLTargets')
+    except AssertionError:
+        pass
 
 
 def show():

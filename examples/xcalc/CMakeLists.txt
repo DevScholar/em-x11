@@ -18,12 +18,12 @@ target_include_directories(xcalc PRIVATE ${XCALC_SRC_DIR})
 # Third-party code: opt out of our strict warnings.
 target_compile_options(xcalc PRIVATE -w)
 
-# FS is needed so the runtime can stage /usr/lib/X11/app-defaults/XCalc
-# into MEMFS via preRun before Xt's XtResolvePathname looks for it.
-# Without app-defaults, xcalc's button layout collapses to widget
-# defaults and the UI is unreadable.
+# xcalc needs /usr/lib/X11/app-defaults/XCalc in MEMFS before main()
+# runs, otherwise XtGetResources returns nothing and the button layout
+# collapses to widget defaults.  Use Emscripten's --preload-file so the
+# glue loads the file automatically — no JS-side preRun hook needed.
 emx11_finalize_demo(xcalc
     EXPORT_NAME createXcalcModule
     LIBS Xaw Xmu Xt Xpm Xext X11
-    EXTRA_RUNTIME_METHODS FS
+    PRELOAD_FILES "${XCALC_SRC_DIR}/app-defaults/XCalc@/usr/lib/X11/app-defaults/XCalc"
 )

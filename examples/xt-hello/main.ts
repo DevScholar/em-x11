@@ -1,11 +1,14 @@
 /**
- * xt-hello demo harness. Single-thread mode: the wasm runs on the main
- * JS thread alongside the em-x11 host. No workers, no OffscreenCanvas.
+ * xt-hello demo harness — Layer 2 (single program).
+ *
+ * initEmX11 creates the Host; we spread moduleOverrides into the
+ * Emscripten factory.  No child_process needed for a single wasm
+ * program.
  */
 
-import { createEmX11 } from '../../src/index.js';
+import { initEmX11 } from '../../src/index.js';
 
-const emX11 = await createEmX11({ width: 1024, height: 768 });
+const x11 = await initEmX11({ width: 1024, height: 768 });
 
-const xtHello = emX11.child_process.spawn('/build/artifacts/xt-hello/xt-hello', { thisProgram: 'xt-hello' });
-await xtHello.ready;
+const factory = (await import('/build/artifacts/xt-hello/xt-hello.js')).default;
+await factory({ ...x11.moduleOverrides, thisProgram: 'xt-hello' });

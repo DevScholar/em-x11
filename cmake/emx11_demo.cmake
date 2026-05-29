@@ -46,6 +46,7 @@ set(EMX11_RUNTIME_HOOKS
 #                     [LIBS <libname> ...]
 #                     [EXTRA_FUNCTIONS <sym> ...]
 #                     [EXTRA_RUNTIME_METHODS <name> ...]
+#                     [PRELOAD_FILES <src@target> ...]
 #                     [OUTPUT_DIR <dir>])
 #
 # Wires a demo executable for the em-x11 runtime: include path, port-based
@@ -53,7 +54,7 @@ set(EMX11_RUNTIME_HOOKS
 function(emx11_finalize_demo target)
     set(options "")
     set(one_value EXPORT_NAME OUTPUT_DIR)
-    set(multi_value LIBS EXTRA_FUNCTIONS EXTRA_RUNTIME_METHODS)
+    set(multi_value LIBS EXTRA_FUNCTIONS EXTRA_RUNTIME_METHODS PRELOAD_FILES)
     cmake_parse_arguments(EMX11_FD "${options}" "${one_value}" "${multi_value}" ${ARGN})
 
     if(NOT EMX11_FD_EXPORT_NAME)
@@ -64,10 +65,10 @@ function(emx11_finalize_demo target)
 
     # Port-based linking. emcc loads the port script which returns the
     # full archive paths, avoiding the -lX11 -> libxlib.js hijack.
+    # Only pass --use-port at link time — at compile time the port's
+    # process_args() may return linker-only flags (--js-library,
+    # --pre-js) that clang doesn't understand.
     set(_port_script "${CMAKE_SOURCE_DIR}/tools/ports/emx11.py")
-    target_compile_options(${target} PRIVATE
-        "SHELL:--use-port=${_port_script}"
-    )
     target_link_options(${target} PRIVATE
         "SHELL:--use-port=${_port_script}"
     )
@@ -86,6 +87,13 @@ function(emx11_finalize_demo target)
     if(EXISTS "${_host_bundle}")
         target_link_options(${target} PRIVATE "SHELL:--pre-js=${_host_bundle}")
     endif()
+
+    # --preload-file embeds files into a .data package that Emscripten's
+    # glue loads automatically before main(). Each entry is a <src>@<target>
+    # pair where src is a build-machine path and target is the MEMFS path.
+    foreach(pf IN LISTS EMX11_FD_PRELOAD_FILES)
+        target_link_options(${target} PRIVATE "SHELL:--preload-file ${pf}")
+    endforeach()
 
     # Propagate include paths from each named library target so headers
     # like <X11/Intrinsic.h> (from Xt) and <X11/Xaw/Command.h> (from Xaw)

@@ -1,18 +1,13 @@
 /**
- * twm-session harness.
+ * twm-session demo harness — Layer 3 (multi-process).
  *
- * Single-thread mode: twm + xeyes + xcalc all run on the main JS
- * thread alongside the em-x11 host. em.child_process.spawn is serialized — twm
- * boots first, arms SubstructureRedirectMask on root, and only then
- * xeyes / xcalc are launched so their MapRequest is intercepted by
- * twm.
+ * This is the ONLY example that uses createEmX11 + child_process.spawn.
+ * Multiple X clients (twm, xeyes, xcalc) share one display; twm boots
+ * first and arms SubstructureRedirectMask on root so subsequent
+ * MapRequests are intercepted by the window manager.
  *
- * glxgears intentionally omitted: its rAF-driven animation and
- * per-frame logging drown out other demo signal.
- *
- * `globalThis.emX11` is also populated by createEmX11 for console
- * debugging (`emX11.debug.dumpWindows()`, `emX11._host` for the
- * unstable internal escape hatch).
+ * For single-program use-cases (hello, xeyes, xcalc standalone, etc.)
+ * prefer Layer 1 (emcc -sUSE_EMX11) or Layer 2 (initEmX11).
  */
 
 import { createEmX11 } from '../../src/index.js';
@@ -22,14 +17,13 @@ import { stageXbitmaps } from '../../src/runtime/xbitmaps-stage.js';
 
 const emX11 = await createEmX11({ width: 1024, height: 768 });
 
-/* Stage the shared xbm package once for the whole session: every spawn
- * inherits MEMFS via the replay hook, so any client that resolves a
- * bitmap-file-path resource (xcalc -> "calculator", xfd -> ..., etc.)
+/* Stage the shared xbm package once — every spawn inherits MEMFS via the
+ * replay hook, so any client that resolves a bitmap-file-path resource
  * finds the file without per-app fixups. */
 stageXbitmaps(emX11);
 
-/* twm first so its SubstructureRedirect on root lands before subsequent
- * child_process.spawn calls; launchTwm awaits waitForSubstructureRedirect internally. */
+/* twm first: launchTwm awaits waitForSubstructureRedirect internally so
+ * subsequent spawns' MapRequests land on an armed WM. */
 await launchTwm(emX11);
 
 const xeyes = emX11.child_process.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });

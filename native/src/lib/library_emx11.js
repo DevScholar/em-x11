@@ -125,7 +125,7 @@ var LibraryEmX11 = {
       HEAPU32[maskPtr >> 2] = 0x001FFFFF;
       return;
     }
-    var info = h.openDisplay();
+    var info = h.openDisplay(Module);
     HEAP32[connIdPtr >> 2] = info.connId | 0;
     HEAPU32[basePtr >> 2] = info.xidBase >>> 0;
     HEAPU32[maskPtr >> 2] = info.xidMask >>> 0;
