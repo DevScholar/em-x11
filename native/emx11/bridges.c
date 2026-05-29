@@ -48,54 +48,54 @@ void emx11_bridges_link_anchor(void) {}
 /* --- core ---------------------------------------------------------------- */
 
 EM_JS(void, emx11_js_init, (int screenWidth, int screenHeight), {
-  var h = Module['emx11Host'];
-  if (h)
-    h.onInit(screenWidth, screenHeight);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onInit(screenWidth, screenHeight);
 });
 
 EM_JS(void, emx11_js_open_display, (int connIdPtr, int basePtr, int maskPtr), {
-  var h = Module['emx11Host'];
-  if (!h) {
+  var host = Module['emx11Host'];
+  if (!host) {
     HEAP32[connIdPtr >> 2] = 0;
     HEAPU32[basePtr >> 2] = 0;
     HEAPU32[maskPtr >> 2] = 0x001FFFFF;
     return;
   }
-  var info = h.openDisplay(Module);
+  var info = host.openDisplay(Module);
   HEAP32[connIdPtr >> 2] = info.connId | 0;
   HEAPU32[basePtr >> 2] = info.xidBase >>> 0;
   HEAPU32[maskPtr >> 2] = info.xidMask >>> 0;
 });
 
 EM_JS(void, emx11_js_close_display, (int connId), {
-  var h = Module['emx11Host'];
-  if (h)
-    h.closeDisplay(connId);
+  var host = Module['emx11Host'];
+  if (host)
+    host.closeDisplay(connId);
 });
 
 EM_JS(unsigned int, emx11_js_get_root_window, (void), {
-  var h = Module['emx11Host'];
-  if (!h)
+  var host = Module['emx11Host'];
+  if (!host)
     return 0;
-  return h.getRootWindow() >>> 0;
+  return host.getRootWindow() >>> 0;
 });
 
 EM_JS(void, emx11_js_flush, (void), {
-  var h = Module['emx11Host'];
-  if (h)
-    h.onFlush();
+  var host = Module['emx11Host'];
+  if (host)
+    host.onFlush();
 });
 
 /* Hot read: XQueryPointer fires at 50ms cadence per xeyes + on every
  * pointer-related Xt dispatch. */
 EM_JS(void, emx11_js_pointer_xy, (int xPtr, int yPtr), {
-  var h = Module['emx11Host'];
-  if (!h) {
+  var host = Module['emx11Host'];
+  if (!host) {
     HEAP32[xPtr >> 2] = 0;
     HEAP32[yPtr >> 2] = 0;
     return;
   }
-  var pt = h.getPointerXY();
+  var pt = host.getPointerXY();
   HEAP32[xPtr >> 2] = pt.x | 0;
   HEAP32[yPtr >> 2] = pt.y | 0;
 });
@@ -106,12 +106,12 @@ EM_JS(void, emx11_js_pointer_xy, (int xPtr, int yPtr), {
  * 6 OVERRIDE, 7 BORDER_WIDTH). */
 EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
   var out = outPtr >> 2;
-  var h = Module['emx11Host'];
-  if (!h) {
+  var host = Module['emx11Host'];
+  if (!host) {
     HEAP32[out + 0] = 0;
     return;
   }
-  var a = h.getWindowAttrs(id >>> 0);
+  var a = host.getWindowAttrs(id >>> 0);
   if (!a) {
     HEAP32[out + 0] = 0;
     return;
@@ -130,12 +130,12 @@ EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
  * 1 AX, 2 AY). */
 EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
   var out = outPtr >> 2;
-  var h = Module['emx11Host'];
-  if (!h) {
+  var host = Module['emx11Host'];
+  if (!host) {
     HEAP32[out + 0] = 0;
     return;
   }
-  var o = h.getWindowAbsOrigin(id >>> 0);
+  var o = host.getWindowAbsOrigin(id >>> 0);
   if (!o) {
     HEAP32[out + 0] = 0;
     return;
@@ -154,10 +154,10 @@ EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
  * client (xeyes) -- without it, twm's frame stays rectangular and the
  * shape's hole doesn't pass clicks through. */
 EM_JS(int, emx11_js_get_window_shape_count, (unsigned int id), {
-  var h = Module['emx11Host'];
-  if (!h)
+  var host = Module['emx11Host'];
+  if (!host)
     return -1;
-  var rects = h.getWindowShape(id >>> 0);
+  var rects = host.getWindowShape(id >>> 0);
   if (rects == = null || rects == = undefined)
     return -1;
   /* Stash for the immediate-following fetch so we don't re-query. */
@@ -177,10 +177,10 @@ EM_JS(int,
         if (caches)
           caches.shapeStash = null;
         if (!rects) {
-          var h = Module['emx11Host'];
-          if (!h)
+          var host = Module['emx11Host'];
+          if (!host)
             return 0;
-          rects = h.getWindowShape(id >>> 0);
+          rects = host.getWindowShape(id >>> 0);
           if (!rects)
             return 0;
         }
@@ -201,10 +201,10 @@ EM_JS(int,
  * matching shape: count first, then fetch into a sized buffer. The
  * count-call stashes the array so the fetch doesn't re-query. */
 EM_JS(int, emx11_js_get_window_children_count, (unsigned int parent), {
-  var h = Module['emx11Host'];
-  if (!h)
+  var host = Module['emx11Host'];
+  if (!host)
     return 0;
-  var kids = h.getWindowChildren(parent >>> 0);
+  var kids = host.getWindowChildren(parent >>> 0);
   if (!kids)
     return 0;
   var caches = Module['emx11Caches'] || (Module['emx11Caches'] = {});
@@ -223,10 +223,10 @@ EM_JS(int,
         if (caches)
           caches.childrenStash = null;
         if (!kids) {
-          var h = Module['emx11Host'];
-          if (!h)
+          var host = Module['emx11Host'];
+          if (!host)
             return 0;
-          kids = h.getWindowChildren(parent >>> 0);
+          kids = host.getWindowChildren(parent >>> 0);
           if (!kids)
             return 0;
         }
@@ -251,27 +251,27 @@ EM_JS(void,
        unsigned int confine_to,
        unsigned int cursor),
       {
-        var h = Module['emx11Host'];
-        if (!h)
+        var host = Module['emx11Host'];
+        if (!host)
           return;
-        h.onGrabButton(window >>> 0,
-                       button >>> 0,
-                       modifiers >>> 0,
-                       owner_events != = 0,
-                       event_mask >>> 0,
-                       pointer_mode | 0,
-                       keyboard_mode | 0,
-                       confine_to >>> 0,
-                       cursor >>> 0);
+        host.onGrabButton(window >>> 0,
+                          button >>> 0,
+                          modifiers >>> 0,
+                          owner_events != = 0,
+                          event_mask >>> 0,
+                          pointer_mode | 0,
+                          keyboard_mode | 0,
+                          confine_to >>> 0,
+                          cursor >>> 0);
       });
 
 EM_JS(void,
       emx11_js_ungrab_button,
       (unsigned int window, unsigned int button, unsigned int modifiers),
       {
-        var h = Module['emx11Host'];
-        if (h)
-          h.onUngrabButton(window >>> 0, button >>> 0, modifiers >>> 0);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onUngrabButton(window >>> 0, button >>> 0, modifiers >>> 0);
       });
 
 /* --- active pointer grabs (XGrabPointer / XUngrabPointer) ----------------
@@ -297,15 +297,15 @@ EM_JS(void,
       emx11_js_grab_pointer,
       (unsigned int conn_id, unsigned int window, int owner_events),
       {
-        var h = Module['emx11Host'];
-        if (h)
-          h.onGrabPointer(conn_id >>> 0, window >>> 0, owner_events != = 0);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onGrabPointer(conn_id >>> 0, window >>> 0, owner_events != = 0);
       });
 
 EM_JS(void, emx11_js_ungrab_pointer, (void), {
-  var h = Module['emx11Host'];
-  if (h)
-    h.onUngrabPointer();
+  var host = Module['emx11Host'];
+  if (host)
+    host.onUngrabPointer();
 });
 
 /* --- deferred pointer-window repoll (XMapWindow / XUnmapWindow) ----------
@@ -330,9 +330,9 @@ EM_JS(void, emx11_js_ungrab_pointer, (void), {
  * the browser via emscripten_sleep. Per-conn coalescing collapses
  * burst maps (Tk widget realize) into one repoll.                          */
 EM_JS(void, emx11_js_schedule_repoll, (unsigned int conn_id), {
-  var h = Module['emx11Host'];
-  if (h)
-    h.onScheduleRepoll(conn_id >>> 0);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onScheduleRepoll(conn_id >>> 0);
 });
 
 EMSCRIPTEN_KEEPALIVE
@@ -358,9 +358,9 @@ void emx11_repoll_pointer_window_hint_now(unsigned long cur_hint) {
  * events never reach the app. None (0) / PointerRoot (1) clear the
  * override.                                                                 */
 EM_JS(void, emx11_js_set_input_focus, (unsigned int window), {
-  var h = Module['emx11Host'];
-  if (h && h.onSetInputFocus)
-    h.onSetInputFocus(window >>> 0);
+  var host = Module['emx11Host'];
+  if (host && host.onSetInputFocus)
+    host.onSetInputFocus(window >>> 0);
 });
 
 /* --- XIM (xim.c) --------------------------------------------------------- *
@@ -372,21 +372,21 @@ EM_JS(void, emx11_js_set_input_focus, (unsigned int window), {
  * OS IME actually anchors candidate windows on. See src/host/text-input.ts. */
 
 EM_JS(void, emx11_js_xim_set_focus, (unsigned int window), {
-  var h = Module['emx11Host'];
-  if (h && h.onXimSetFocus)
-    h.onXimSetFocus(window >>> 0);
+  var host = Module['emx11Host'];
+  if (host && host.onXimSetFocus)
+    host.onXimSetFocus(window >>> 0);
 });
 
 EM_JS(void, emx11_js_xim_clear_focus, (void), {
-  var h = Module['emx11Host'];
-  if (h && h.onXimClearFocus)
-    h.onXimClearFocus();
+  var host = Module['emx11Host'];
+  if (host && host.onXimClearFocus)
+    host.onXimClearFocus();
 });
 
 EM_JS(void, emx11_js_xim_set_spot, (unsigned int window, int x, int y), {
-  var h = Module['emx11Host'];
-  if (h && h.onXimSetSpot)
-    h.onXimSetSpot(window >>> 0, x | 0, y | 0);
+  var host = Module['emx11Host'];
+  if (host && host.onXimSetSpot)
+    host.onXimSetSpot(window >>> 0, x | 0, y | 0);
 });
 
 /* --- exec self (twm F_RESTART) ------------------------------------------
@@ -406,9 +406,9 @@ EM_JS(void, emx11_js_exec_self, (int conn_id, int argv_ptrs, int argc), {
       args.push(p == = 0 ? '' : UTF8ToString(p));
     }
   }
-  var h = Module['emx11Host'];
-  if (h && h.onExecSelf)
-    h.onExecSelf(conn_id | 0, args);
+  var host = Module['emx11Host'];
+  if (host && host.onExecSelf)
+    host.onExecSelf(conn_id | 0, args);
 });
 
 /* --- atom ---------------------------------------------------------------- */
@@ -417,17 +417,17 @@ EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {
   if (namePtr == = 0)
     return 0;
   var name = UTF8ToString(namePtr);
-  var h = Module['emx11Host'];
-  if (!h)
+  var host = Module['emx11Host'];
+  if (!host)
     return 0;
-  return h.internAtom(name, onlyIfExists != = 0) >>> 0;
+  return host.internAtom(name, onlyIfExists != = 0) >>> 0;
 });
 
 EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
-  var h = Module['emx11Host'];
-  if (!h)
+  var host = Module['emx11Host'];
+  if (!host)
     return 0;
-  var name = h.getAtomName(atom >>> 0);
+  var name = host.getAtomName(atom >>> 0);
   if (name == = null)
     return 0;
   return stringToNewUTF8(name);
@@ -474,9 +474,9 @@ EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {
    * which holds the DOM + clipboard permission. Without the hook
    * we fall through to the direct DOM path -- works in main-thread
    * Hosts (em-x11 demos, tcldide). */
-  var B = Module['emx11Host'];
-  if (B&& typeof B.clipboardWriteRemote == = 'function') {
-    B.clipboardWriteRemote(copy);
+  var host = Module['emx11Host'];
+  if (host&& typeof host.clipboardWriteRemote == = 'function') {
+    host.clipboardWriteRemote(copy);
     return;
   }
   if (typeof navigator == = 'undefined' || !navigator.clipboard ||
@@ -495,18 +495,18 @@ EM_JS(void,
       emx11_js_clear_area,
       (unsigned int id, int x, int y, int w, int h),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onClearArea(id, x, y, w, h);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onClearArea(id, x, y, w, h);
       });
 
 EM_JS(void,
       emx11_js_fill_rect,
       (unsigned int id, int x, int y, int w, int h, unsigned int color),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onFillRect(id, x, y, w, h, color);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onFillRect(id, x, y, w, h, color);
       });
 
 EM_JS(void,
@@ -519,9 +519,9 @@ EM_JS(void,
        unsigned int color,
        int lineWidth),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onDrawLine(id, x1, y1, x2, y2, color, lineWidth);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onDrawLine(id, x1, y1, x2, y2, color, lineWidth);
       });
 
 EM_JS(void,
@@ -536,9 +536,9 @@ EM_JS(void,
        unsigned int color,
        int lineWidth),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onDrawArc(id, x, y, w, h, angle1, angle2, color, lineWidth);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onDrawArc(id, x, y, w, h, angle1, angle2, color, lineWidth);
       });
 
 EM_JS(void,
@@ -552,9 +552,9 @@ EM_JS(void,
        int angle2,
        unsigned int color),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onFillArc(id, x, y, w, h, angle1, angle2, color);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onFillArc(id, x, y, w, h, angle1, angle2, color);
       });
 
 EM_JS(void,
@@ -573,9 +573,9 @@ EM_JS(void,
             pts.push({x : HEAP32[base + i * 2], y : HEAP32[base + i * 2 + 1]});
           }
         }
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onFillPolygon(id, pts, shape, mode, color);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onFillPolygon(id, pts, shape, mode, color);
       });
 
 EM_JS(void,
@@ -589,9 +589,9 @@ EM_JS(void,
             pts.push({x : HEAP32[base + i * 2], y : HEAP32[base + i * 2 + 1]});
           }
         }
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onDrawPoints(id, pts, mode, color);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onDrawPoints(id, pts, mode, color);
       });
 
 /* --- font ---------------------------------------------------------------- */
@@ -611,9 +611,9 @@ EM_JS(void,
         var font = fontPtr != = 0 ? UTF8ToString(fontPtr) : '13px monospace';
         var text =
           length > 0 && textPtr != = 0 ? UTF8ToString(textPtr, length) : '';
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
       });
 
 /* Latin-1 variant for core X11 fonts (dixfonts.c dispatch_draw_string).
@@ -638,9 +638,9 @@ EM_JS(void,
           for (var i = 0; i < length; i++)
             text += String.fromCharCode(u8[textPtr + i]);
         }
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
       });
 
 /* measure_font and measure_string are pure-JS measurements with no
@@ -832,33 +832,33 @@ EM_JS(void,
       emx11_js_pixmap_create,
       (unsigned int id, int width, int height, int depth),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onPixmapCreate(id, width, height, depth);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onPixmapCreate(id, width, height, depth);
       });
 
 EM_JS(void, emx11_js_pixmap_destroy, (unsigned int id), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onPixmapDestroy(id);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onPixmapDestroy(id);
 });
 
 EM_JS(void,
       emx11_js_shape_combine_mask,
       (unsigned int destId, unsigned int srcId, int xOff, int yOff, int op),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onShapeCombineMask(destId, srcId, xOff, yOff, op);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onShapeCombineMask(destId, srcId, xOff, yOff, op);
       });
 
 EM_JS(void,
       emx11_js_shape_select_input,
       (int connId, unsigned int window, unsigned int mask),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onShapeSelectInput(connId, window, mask);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onShapeSelectInput(connId, window, mask);
       });
 
 EM_JS(void,
@@ -872,9 +872,9 @@ EM_JS(void,
        int dstX,
        int dstY),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onCopyArea(
+        var host = Module['emx11Host'];
+        if (host)
+          host.onCopyArea(
             srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY);
       });
 
@@ -893,9 +893,9 @@ EM_JS(void,
        unsigned int bg,
        int applyBg),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onCopyPlane(srcId >>> 0,
+        var host = Module['emx11Host'];
+        if (host)
+          host.onCopyPlane(srcId >>> 0,
                            dstId >>> 0,
                            srcX,
                            srcY,
@@ -926,9 +926,9 @@ EM_JS(void,
       {
         var data = dataLen > 0 && dataPtr !=
           = 0 ? HEAPU8.slice(dataPtr, dataPtr + dataLen) : new Uint8Array(0);
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onPutImage(dstId >>> 0,
+        var host = Module['emx11Host'];
+        if (host)
+          host.onPutImage(dstId >>> 0,
                           dstX,
                           dstY,
                           w,
@@ -960,10 +960,10 @@ EM_JS(int,
         var bytes = unit * (nelements | 0);
         var data = bytes > 0 ? HEAPU8.slice(dataPtr, dataPtr + bytes)
                              : new Uint8Array(0);
-        var Host = Module['emx11Host'];
-        if (!Host)
+        var host = Module['emx11Host'];
+        if (!host)
           return -1;
-        var ok = Host.changeProperty(
+        var ok = host.changeProperty(
           w >>> 0, atom >>> 0, type >>> 0, format | 0, mode | 0, data);
         return ok ? 1 : 0;
       });
@@ -982,10 +982,10 @@ EM_JS(void,
         var base = metaPtr >> 2;
         for (var i = 0; i < 8; i++)
           HEAP32[base + i] = 0;
-        var Host = Module['emx11Host'];
-        if (!Host)
+        var host = Module['emx11Host'];
+        if (!host)
           return;
-        var r2 = Host.peekProperty(w >>> 0,
+        var r2 = host.peekProperty(w >>> 0,
                                    atom >>> 0,
                                    reqType >>> 0,
                                    longOffset | 0,
@@ -1045,16 +1045,16 @@ EM_JS(void,
           HEAPU8.set(data.subarray ? data.subarray(0, n) : data.slice(0, n),
                      dstPtr);
           if (deleteFlag != = 0) {
-            var Host = Module['emx11Host'];
-            if (Host)
-              Host.deleteProperty(w >>> 0, atom >>> 0);
+            var host = Module['emx11Host'];
+            if (host)
+              host.deleteProperty(w >>> 0, atom >>> 0);
           }
           return;
         }
-        var Host2 = Module['emx11Host'];
-        if (!Host2)
+        var host2 = Module['emx11Host'];
+        if (!host2)
           return;
-        var r3 = Host2.peekProperty(w >>> 0,
+        var r3 = host2.peekProperty(w >>> 0,
                                     atom >>> 0,
                                     reqType >>> 0,
                                     longOffset | 0,
@@ -1067,26 +1067,26 @@ EM_JS(void,
       });
 
 EM_JS(void, emx11_js_delete_property, (unsigned int w, unsigned int atom), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.deleteProperty(w >>> 0, atom >>> 0);
+  var host = Module['emx11Host'];
+  if (host)
+    host.deleteProperty(w >>> 0, atom >>> 0);
 });
 
 EM_JS(int, emx11_js_list_properties_count, (unsigned int w), {
-  var Host = Module['emx11Host'];
-  if (!Host)
+  var host = Module['emx11Host'];
+  if (!host)
     return 0;
-  return Host.listProperties(w >>> 0).length;
+  return host.listProperties(w >>> 0).length;
 });
 
 EM_JS(int,
       emx11_js_list_properties_fetch,
       (unsigned int w, int dstPtr, int capacity),
       {
-        var Host = Module['emx11Host'];
-        if (!Host)
+        var host = Module['emx11Host'];
+        if (!host)
           return 0;
-        var atoms2 = Host.listProperties(w >>> 0);
+        var atoms2 = host.listProperties(w >>> 0);
         var n2 = Math.min(atoms2.length, capacity | 0);
         var base2 = dstPtr >> 2;
         for (var j = 0; j < n2; j++)
@@ -1110,9 +1110,9 @@ EM_JS(void,
        int bgType,
        unsigned int bgValue),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onWindowCreate(connId,
+        var host = Module['emx11Host'];
+        if (host)
+          host.onWindowCreate(connId,
                               id,
                               parent,
                               x,
@@ -1129,111 +1129,111 @@ EM_JS(void,
       emx11_js_window_set_border,
       (unsigned int id, int borderWidth, unsigned int borderPixel),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onWindowSetBorder(id, borderWidth, borderPixel);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onWindowSetBorder(id, borderWidth, borderPixel);
       });
 
 EM_JS(void,
       emx11_js_window_set_bg,
       (unsigned int id, int bgType, unsigned int bgValue),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onWindowSetBg(id, bgType, bgValue);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onWindowSetBg(id, bgType, bgValue);
       });
 
 EM_JS(void,
       emx11_js_window_configure,
       (int connId, unsigned int id, int x, int y, int w, int h),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onWindowConfigure(connId, id, x, y, w, h);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onWindowConfigure(connId, id, x, y, w, h);
       });
 
 EM_JS(void, emx11_js_window_set_bit_gravity, (unsigned int id, int gravity), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowSetBitGravity(id, gravity);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowSetBitGravity(id, gravity);
 });
 
 EM_JS(void, emx11_js_window_map, (int connId, unsigned int id), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowMap(connId, id);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowMap(connId, id);
 });
 
 EM_JS(void, emx11_js_window_unmap, (int connId, unsigned int id), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowUnmap(connId, id);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowUnmap(connId, id);
 });
 
 EM_JS(void, emx11_js_window_destroy, (unsigned int id), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowDestroy(id);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowDestroy(id);
 });
 
 EM_JS(void, emx11_js_window_raise, (unsigned int id), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowRaise(id);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowRaise(id);
 });
 
 EM_JS(void, emx11_js_window_lower, (unsigned int id), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowLower(id);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowLower(id);
 });
 
 EM_JS(void,
       emx11_js_select_input,
       (int connId, unsigned int id, unsigned int mask),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onSelectInput(connId, id, mask >>> 0);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onSelectInput(connId, id, mask >>> 0);
       });
 
 EM_JS(void, emx11_js_set_override_redirect, (unsigned int id, int flag), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onSetOverrideRedirect(id, flag != = 0);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onSetOverrideRedirect(id, flag != = 0);
 });
 
 EM_JS(void,
       emx11_js_reparent_window,
       (unsigned int id, unsigned int parent, int x, int y),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onReparentWindow(id, parent, x, y);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onReparentWindow(id, parent, x, y);
       });
 
 EM_JS(void,
       emx11_js_window_set_bg_pixmap,
       (unsigned int id, unsigned int pmId),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onWindowSetBgPixmap(id, pmId);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onWindowSetBgPixmap(id, pmId);
       });
 
 EM_JS(void,
       emx11_js_window_set_cursor,
       (unsigned int id, unsigned int cursor),
       {
-        var Host = Module['emx11Host'];
-        if (Host)
-          Host.onWindowSetCursor(id, cursor);
+        var host = Module['emx11Host'];
+        if (host)
+          host.onWindowSetCursor(id, cursor);
       });
 
 EM_JS(void, emx11_js_set_grab_cursor, (unsigned int cursor), {
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onSetGrabCursor(cursor);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onSetGrabCursor(cursor);
 });
 
 EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
@@ -1249,9 +1249,9 @@ EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
       });
     }
   }
-  var Host = Module['emx11Host'];
-  if (Host)
-    Host.onWindowShape(id, rects);
+  var host = Module['emx11Host'];
+  if (host)
+    host.onWindowShape(id, rects);
 });
 
 /* --- GLX (libGL via emscripten LEGACY_GL_EMULATION on per-context
@@ -1267,10 +1267,10 @@ EM_JS(int,
       emx11_js_glx_create_context,
       (int width, int height, int outTargetIdPtr, int outTargetIdLen),
       {
-        var h = Module['emx11Host'];
-        if (!h || !h.glx)
+        var host = Module['emx11Host'];
+        if (!host || !host.glx)
           return 0;
-        var info = h.glx.createContext(width | 0, height | 0);
+        var info = host.glx.createContext(width | 0, height | 0);
         if (!info)
           return 0;
         /* Module.specialHTMLTargets is exported via EXPORTED_RUNTIME_METHODS
@@ -1303,26 +1303,26 @@ EM_JS(void, emx11_js_glx_legacy_init_once, (void), {
 });
 
 EM_JS(void, emx11_js_glx_destroy_context, (int id), {
-  var h = Module['emx11Host'];
-  if (!h || !h.glx)
+  var host = Module['emx11Host'];
+  if (!host || !host.glx)
     return;
-  var targetId = h.glx.targetIdOf(id | 0);
+  var targetId = host.glx.targetIdOf(id | 0);
   if (targetId && Module.specialHTMLTargets) {
     delete Module.specialHTMLTargets[targetId];
   }
-  h.glx.destroyContext(id | 0);
+  host.glx.destroyContext(id | 0);
 });
 
 EM_JS(void, emx11_js_glx_swap_buffers, (int id, unsigned int drawable), {
-  var h = Module['emx11Host'];
-  if (!h || !h.glx)
+  var host = Module['emx11Host'];
+  if (!host || !host.glx)
     return;
-  h.glx.swapBuffers(id | 0, drawable >>> 0);
+  host.glx.swapBuffers(id | 0, drawable >>> 0);
 });
 
 EM_JS(void, emx11_js_glx_resize, (int id, int width, int height), {
-  var h = Module['emx11Host'];
-  if (!h || !h.glx)
+  var host = Module['emx11Host'];
+  if (!host || !host.glx)
     return;
-  h.glx.resize(id | 0, width | 0, height | 0);
+  host.glx.resize(id | 0, width | 0, height | 0);
 });

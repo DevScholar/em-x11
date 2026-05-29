@@ -217,25 +217,26 @@ export class ConnectionManager {
         `em-x11: wasm at ${opts.glueUrl} finished loading without calling XOpenDisplay`,
       );
     }
-    conn.module = module;
+    /* Wrap ccall so ExitStatus throws from wasm event handlers trigger
+     * connection cleanup. Store a ModuleCcallSurface wrapper on conn.module
+     * rather than mutating module.ccall in place: if any code captured the
+     * original module.ccall reference before this assignment, it would
+     * bypass exit handling and leave dangling host-side state. */
     const rawCcall = module.ccall.bind(module);
-    const wrappedCcall = (
-      name: string,
-      ret: string | null,
-      argTypes: string[],
-      args: unknown[],
-    ): unknown => {
-      try {
-        return rawCcall(name, ret, argTypes, args);
-      } catch (err) {
-        if (err && (err as { name?: string }).name === 'ExitStatus') {
-          handleExit();
-          return undefined;
+    const safeModule: ModuleCcallSurface = {
+      ccall(name, ret, argTypes, args) {
+        try {
+          return rawCcall(name, ret, argTypes, args);
+        } catch (err) {
+          if (err && (err as { name?: string }).name === 'ExitStatus') {
+            handleExit();
+            return undefined;
+          }
+          throw err;
         }
-        throw err;
-      }
+      },
     };
-    (module as { ccall: EmscriptenModule['ccall'] }).ccall = wrappedCcall;
+    conn.module = safeModule;
     /* Push the user's keyboard layout into the client's keysym_table
      * before any KeyPress is dispatched (Xt caches the keymap on first
      * key event; missed entries become invisible forever -- see
