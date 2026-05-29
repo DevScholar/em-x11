@@ -1,25 +1,16 @@
 /*
- * em-x11 host bridges, embedded as EM_JS so libemx11 is self-contained
- * (embedded in a wasm custom section, readable by dlopen).
+ * em-x11 host bridges, embedded as EM_JS for the SIDE_MODULE path
+ * (Pyodide dlopen).  In the static-link path (-sUSE_EMX11) the JS
+ * library at native/src/lib/library_emx11.js overrides these EM_JS
+ * bodies.
  *
- * Each bridge talks to a single EmX11 instance installed at
- * `globalThis.emX11` -- the wasm client and the host run in the
- * same JS context (main thread or, for pyodide-tk, the same Worker).
+ * Host reference: every bridge reads Module['emx11Host'] (a flat
+ * Module property, per emscripten convention).  Internal caches
+ * live under Module['emx11Caches']; debug flags under
+ * Module['emx11Debug'].
  *
- * Layout under `globalThis.emX11`:
- *   _bridge   -- the Host facade (onWindowCreate, onFillRect, ...)
- *                that every EM_JS body below dispatches into.
- *   _caches   -- shared scratchpads owned by the bridges themselves
- *                (measure ctx, font cache, text cache, property stash).
- *                Lazy-initialised on first use.
- *   _debug    -- runtime trace flags toggled from JS / DevTools
- *                (e.g. _debug.traceHit). The bridges don't touch them;
- *                hit-test.ts on the JS side does.
- *
- * Everything the C side ever reads sits under `globalThis.emX11`
- * with a leading underscore -- nothing scattered across separate
- * top-level globals. Public surface (em.fs, em.spawn, em.display,
- * em.debug) lives unprefixed on the same object.
+ * Public API (em.fs, em.spawn, em.display) is on the TypeScript
+ * Host object, not on Module.
  *
  * The earlier dual-mode design (multi-thread "channel" mode via
  * MessagePort RPC + SharedArrayBuffer hot reads, in addition to this
@@ -57,12 +48,12 @@ void emx11_bridges_link_anchor(void) {}
 /* --- core ---------------------------------------------------------------- */
 
 EM_JS(void, emx11_js_init, (int screenWidth, int screenHeight), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h) h.onInit(screenWidth, screenHeight);
 });
 
 EM_JS(void, emx11_js_open_display, (int connIdPtr, int basePtr, int maskPtr), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) {
         HEAP32[connIdPtr >> 2] = 0;
         HEAPU32[basePtr >> 2] = 0;
@@ -76,25 +67,25 @@ EM_JS(void, emx11_js_open_display, (int connIdPtr, int basePtr, int maskPtr), {
 });
 
 EM_JS(void, emx11_js_close_display, (int connId), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h) h.closeDisplay(connId);
 });
 
 EM_JS(unsigned int, emx11_js_get_root_window, (void), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) return 0;
     return h.getRootWindow() >>> 0;
 });
 
 EM_JS(void, emx11_js_flush, (void), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h) h.onFlush();
 });
 
 /* Hot read: XQueryPointer fires at 50ms cadence per xeyes + on every
  * pointer-related Xt dispatch. */
 EM_JS(void, emx11_js_pointer_xy, (int xPtr, int yPtr), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) {
         HEAP32[xPtr >> 2] = 0;
         HEAP32[yPtr >> 2] = 0;
@@ -111,7 +102,7 @@ EM_JS(void, emx11_js_pointer_xy, (int xPtr, int yPtr), {
  * 6 OVERRIDE, 7 BORDER_WIDTH). */
 EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
     var out = outPtr >> 2;
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) { HEAP32[out + 0] = 0; return; }
     var a = h.getWindowAttrs(id >>> 0);
     if (!a) { HEAP32[out + 0] = 0; return; }
@@ -129,7 +120,7 @@ EM_JS(void, emx11_js_get_window_attrs, (unsigned int id, int outPtr), {
  * 1 AX, 2 AY). */
 EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
     var out = outPtr >> 2;
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) { HEAP32[out + 0] = 0; return; }
     var o = h.getWindowAbsOrigin(id >>> 0);
     if (!o) { HEAP32[out + 0] = 0; return; }
@@ -147,24 +138,23 @@ EM_JS(void, emx11_js_get_window_abs_origin, (unsigned int id, int outPtr), {
  * client (xeyes) -- without it, twm's frame stays rectangular and the
  * shape's hole doesn't pass clicks through. */
 EM_JS(int, emx11_js_get_window_shape_count, (unsigned int id), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) return -1;
     var rects = h.getWindowShape(id >>> 0);
     if (rects === null || rects === undefined) return -1;
     /* Stash for the immediate-following fetch so we don't re-query. */
-    var caches = e._caches || (e._caches = {});
+    var caches = Module['emx11Caches'] || (Module['emx11Caches'] = {});
     caches.shapeStash = { id: id >>> 0, rects: rects };
     return rects.length | 0;
 });
 
 EM_JS(int, emx11_js_get_window_shape_rects, (unsigned int id, int dstPtr, int capacity), {
-    var e = globalThis.emX11;
-    var caches = e && e._caches;
+    var caches = Module['emx11Caches'];
     var stashed = caches && caches.shapeStash;
     var rects = (stashed && stashed.id === (id >>> 0)) ? stashed.rects : null;
     if (caches) caches.shapeStash = null;
     if (!rects) {
-        var h = e && e._bridge;
+        var h = Module['emx11Host'];
         if (!h) return 0;
         rects = h.getWindowShape(id >>> 0);
         if (!rects) return 0;
@@ -186,23 +176,22 @@ EM_JS(int, emx11_js_get_window_shape_rects, (unsigned int id, int dstPtr, int ca
  * matching shape: count first, then fetch into a sized buffer. The
  * count-call stashes the array so the fetch doesn't re-query. */
 EM_JS(int, emx11_js_get_window_children_count, (unsigned int parent), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) return 0;
     var kids = h.getWindowChildren(parent >>> 0);
     if (!kids) return 0;
-    var caches = e._caches || (e._caches = {});
+    var caches = Module['emx11Caches'] || (Module['emx11Caches'] = {});
     caches.childrenStash = { parent: parent >>> 0, kids: kids };
     return kids.length | 0;
 });
 
 EM_JS(int, emx11_js_get_window_children, (unsigned int parent, int dstPtr, int capacity), {
-    var e = globalThis.emX11;
-    var caches = e && e._caches;
+    var caches = Module['emx11Caches'];
     var stashed = caches && caches.childrenStash;
     var kids = (stashed && stashed.parent === (parent >>> 0)) ? stashed.kids : null;
     if (caches) caches.childrenStash = null;
     if (!kids) {
-        var h = e && e._bridge;
+        var h = Module['emx11Host'];
         if (!h) return 0;
         kids = h.getWindowChildren(parent >>> 0);
         if (!kids) return 0;
@@ -221,7 +210,7 @@ EM_JS(void, emx11_js_grab_button,
        int pointer_mode, int keyboard_mode,
        unsigned int confine_to, unsigned int cursor),
       {
-          var e = globalThis.emX11; var h = e && e._bridge;
+          var h = Module['emx11Host'];
           if (!h) return;
           h.onGrabButton(
               window >>> 0, button >>> 0, modifiers >>> 0,
@@ -233,7 +222,7 @@ EM_JS(void, emx11_js_grab_button,
 EM_JS(void, emx11_js_ungrab_button,
       (unsigned int window, unsigned int button, unsigned int modifiers),
       {
-          var e = globalThis.emX11; var h = e && e._bridge;
+          var h = Module['emx11Host'];
           if (h) h.onUngrabButton(window >>> 0, button >>> 0, modifiers >>> 0);
       });
 
@@ -259,12 +248,12 @@ EM_JS(void, emx11_js_ungrab_button,
 EM_JS(void, emx11_js_grab_pointer,
       (unsigned int conn_id, unsigned int window, int owner_events),
       {
-          var e = globalThis.emX11; var h = e && e._bridge;
+          var h = Module['emx11Host'];
           if (h) h.onGrabPointer(conn_id >>> 0, window >>> 0, owner_events !== 0);
       });
 
 EM_JS(void, emx11_js_ungrab_pointer, (void), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h) h.onUngrabPointer();
 });
 
@@ -290,7 +279,7 @@ EM_JS(void, emx11_js_ungrab_pointer, (void), {
  * the browser via emscripten_sleep. Per-conn coalescing collapses
  * burst maps (Tk widget realize) into one repoll.                          */
 EM_JS(void, emx11_js_schedule_repoll, (unsigned int conn_id), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h) h.onScheduleRepoll(conn_id >>> 0);
 });
 
@@ -315,7 +304,7 @@ void emx11_repoll_pointer_window_hint_now(unsigned long cur_hint) {
  * events never reach the app. None (0) / PointerRoot (1) clear the
  * override.                                                                 */
 EM_JS(void, emx11_js_set_input_focus, (unsigned int window), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h && h.onSetInputFocus) h.onSetInputFocus(window >>> 0);
 });
 
@@ -328,17 +317,17 @@ EM_JS(void, emx11_js_set_input_focus, (unsigned int window), {
  * OS IME actually anchors candidate windows on. See src/host/text-input.ts. */
 
 EM_JS(void, emx11_js_xim_set_focus, (unsigned int window), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h && h.onXimSetFocus) h.onXimSetFocus(window >>> 0);
 });
 
 EM_JS(void, emx11_js_xim_clear_focus, (void), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h && h.onXimClearFocus) h.onXimClearFocus();
 });
 
 EM_JS(void, emx11_js_xim_set_spot, (unsigned int window, int x, int y), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h && h.onXimSetSpot) h.onXimSetSpot(window >>> 0, x | 0, y | 0);
 });
 
@@ -359,7 +348,7 @@ EM_JS(void, emx11_js_exec_self, (int conn_id, int argv_ptrs, int argc), {
             args.push(p === 0 ? '' : UTF8ToString(p));
         }
     }
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (h && h.onExecSelf) h.onExecSelf(conn_id | 0, args);
 });
 
@@ -368,13 +357,13 @@ EM_JS(void, emx11_js_exec_self, (int conn_id, int argv_ptrs, int argc), {
 EM_JS(unsigned int, emx11_js_intern_atom, (int namePtr, int onlyIfExists), {
     if (namePtr === 0) return 0;
     var name = UTF8ToString(namePtr);
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) return 0;
     return h.internAtom(name, onlyIfExists !== 0) >>> 0;
 });
 
 EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h) return 0;
     var name = h.getAtomName(atom >>> 0);
     if (name === null) return 0;
@@ -392,23 +381,23 @@ EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
  * to Tk; document `paste` events also fill the cache synchronously via
  * ClipboardEvent.clipboardData. Cache lives at
  *
- *   globalThis.__emx11ClipboardBytes : Uint8Array | null
+ *   Module['emx11ClipboardBytes'] : Uint8Array | null
  *
  * Both halves read it synchronously. _fetch clears the cache so a stale
  * value can't bleed into the next paste.
  */
 EM_JS(int, emx11_js_clipboard_read_begin, (void), {
-    var bytes = globalThis.__emx11ClipboardBytes;
+    var bytes = Module['emx11ClipboardBytes'];
     if (!bytes) return -1;
     return bytes.length | 0;
 });
 
 EM_JS(int, emx11_js_clipboard_read_fetch, (int dstPtr, int capacity), {
-    var bytes = globalThis.__emx11ClipboardBytes;
+    var bytes = Module['emx11ClipboardBytes'];
     if (!bytes) return 0;
     var n = Math.min(bytes.length, capacity) | 0;
     HEAPU8.set(bytes.subarray(0, n), dstPtr);
-    globalThis.__emx11ClipboardBytes = null;
+    Module['emx11ClipboardBytes'] = null;
     return n;
 });
 
@@ -420,7 +409,7 @@ EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {
      * which holds the DOM + clipboard permission. Without the hook
      * we fall through to the direct DOM path -- works in main-thread
      * Hosts (em-x11 demos, tcldide). */
-    var e = globalThis.emX11; var B = e && e._bridge;
+    var B = Module['emx11Host'];
     if (B && typeof B.clipboardWriteRemote === 'function') {
         B.clipboardWriteRemote(copy);
         return;
@@ -440,27 +429,27 @@ EM_JS(void, emx11_js_clipboard_write_utf8, (int dataPtr, int len), {
 /* --- draw ---------------------------------------------------------------- */
 
 EM_JS(void, emx11_js_clear_area, (unsigned int id, int x, int y, int w, int h), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onClearArea(id, x, y, w, h);
 });
 
 EM_JS(void, emx11_js_fill_rect, (unsigned int id, int x, int y, int w, int h, unsigned int color), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onFillRect(id, x, y, w, h, color);
 });
 
 EM_JS(void, emx11_js_draw_line, (unsigned int id, int x1, int y1, int x2, int y2, unsigned int color, int lineWidth), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onDrawLine(id, x1, y1, x2, y2, color, lineWidth);
 });
 
 EM_JS(void, emx11_js_draw_arc, (unsigned int id, int x, int y, int w, int h, int angle1, int angle2, unsigned int color, int lineWidth), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onDrawArc(id, x, y, w, h, angle1, angle2, color, lineWidth);
 });
 
 EM_JS(void, emx11_js_fill_arc, (unsigned int id, int x, int y, int w, int h, int angle1, int angle2, unsigned int color), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onFillArc(id, x, y, w, h, angle1, angle2, color);
 });
 
@@ -472,7 +461,7 @@ EM_JS(void, emx11_js_fill_polygon, (unsigned int id, int ptsPtr, int count, int 
             pts.push({ x: HEAP32[base + i * 2], y: HEAP32[base + i * 2 + 1] });
         }
     }
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onFillPolygon(id, pts, shape, mode, color);
 });
 
@@ -484,7 +473,7 @@ EM_JS(void, emx11_js_draw_points, (unsigned int id, int ptsPtr, int count, int m
             pts.push({ x: HEAP32[base + i * 2], y: HEAP32[base + i * 2 + 1] });
         }
     }
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onDrawPoints(id, pts, mode, color);
 });
 
@@ -493,7 +482,7 @@ EM_JS(void, emx11_js_draw_points, (unsigned int id, int ptsPtr, int count, int m
 EM_JS(void, emx11_js_draw_string, (unsigned int id, int x, int y, int fontPtr, int textPtr, int length, unsigned int fg, unsigned int bg, int imageMode), {
     var font = fontPtr !== 0 ? UTF8ToString(fontPtr) : '13px monospace';
     var text = length > 0 && textPtr !== 0 ? UTF8ToString(textPtr, length) : '';
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
 });
 
@@ -507,17 +496,17 @@ EM_JS(void, emx11_js_draw_string_latin1, (unsigned int id, int x, int y, int fon
         var u8 = HEAPU8;
         for (var i = 0; i < length; i++) text += String.fromCharCode(u8[textPtr + i]);
     }
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onDrawString(id, x, y, font, text, fg, bg, imageMode);
 });
 
 /* measure_font and measure_string are pure-JS measurements with no
  * shared state with the host bridge. Their scratchpads (one canvas
- * context, two LRU-ish maps) live under `globalThis.emX11._caches`
+ * context, two LRU-ish maps) live under Module['emx11Caches']
  * so every bridge-owned bit of state stays in one namespace. */
 EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, int maxWidthPtr, int widthsPtr), {
-    var e = globalThis.emX11;
-    var caches = e && (e._caches || (e._caches = {}));
+    var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
+    var caches = C;
     if (caches && caches.measureCtx === undefined) {
         var c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1)
               : typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -576,8 +565,8 @@ EM_JS(void, emx11_js_measure_font, (int fontPtr, int ascentPtr, int descentPtr, 
 
 EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
     if (length <= 0 || textPtr === 0) return 0;
-    var e = globalThis.emX11;
-    var caches = e && (e._caches || (e._caches = {}));
+    var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
+    var caches = C;
     if (caches && caches.measureCtx === undefined) {
         var c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1)
               : typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -601,8 +590,8 @@ EM_JS(int, emx11_js_measure_string, (int fontPtr, int textPtr, int length), {
 
 EM_JS(int, emx11_js_measure_string_latin1, (int fontPtr, int textPtr, int length), {
     if (length <= 0 || textPtr === 0) return 0;
-    var e = globalThis.emX11;
-    var caches = e && (e._caches || (e._caches = {}));
+    var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
+    var caches = C;
     if (caches && caches.measureCtx === undefined) {
         var c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1)
               : typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -636,8 +625,8 @@ EM_JS(int, emx11_js_parse_color, (int namePtr, int rPtr, int gPtr, int bPtr), {
         !CSS.supports('color', name)) {
         return 0;
     }
-    var e = globalThis.emX11;
-    var caches = e && (e._caches || (e._caches = {}));
+    var C = Module['emx11Caches'] || (Module['emx11Caches'] = {});
+    var caches = C;
     if (caches && caches.measureCtx === undefined) {
         var c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(1, 1)
               : typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -661,32 +650,32 @@ EM_JS(int, emx11_js_parse_color, (int namePtr, int rPtr, int gPtr, int bPtr), {
 /* --- pixmap -------------------------------------------------------------- */
 
 EM_JS(void, emx11_js_pixmap_create, (unsigned int id, int width, int height, int depth), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onPixmapCreate(id, width, height, depth);
 });
 
 EM_JS(void, emx11_js_pixmap_destroy, (unsigned int id), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onPixmapDestroy(id);
 });
 
 EM_JS(void, emx11_js_shape_combine_mask, (unsigned int destId, unsigned int srcId, int xOff, int yOff, int op), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onShapeCombineMask(destId, srcId, xOff, yOff, op);
 });
 
 EM_JS(void, emx11_js_shape_select_input, (int connId, unsigned int window, unsigned int mask), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onShapeSelectInput(connId, window, mask);
 });
 
 EM_JS(void, emx11_js_copy_area, (unsigned int srcId, unsigned int dstId, int srcX, int srcY, int w, int h, int dstX, int dstY), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onCopyArea(srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY);
 });
 
 EM_JS(void, emx11_js_copy_plane, (unsigned int srcId, unsigned int dstId, int srcX, int srcY, int w, int h, int dstX, int dstY, unsigned int plane, unsigned int fg, unsigned int bg, int applyBg), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onCopyPlane(srcId >>> 0, dstId >>> 0, srcX, srcY, w, h, dstX, dstY, plane >>> 0, fg >>> 0, bg >>> 0, applyBg !== 0);
 });
 
@@ -694,7 +683,7 @@ EM_JS(void, emx11_js_put_image, (unsigned int dstId, int dstX, int dstY, int w, 
     var data = dataLen > 0 && dataPtr !== 0
         ? HEAPU8.slice(dataPtr, dataPtr + dataLen)
         : new Uint8Array(0);
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onPutImage(dstId >>> 0, dstX, dstY, w, h, format, depth, bytesPerLine, data, fg >>> 0, bg >>> 0);
 });
 
@@ -707,7 +696,7 @@ EM_JS(int, emx11_js_change_property, (unsigned int w, unsigned int atom, unsigne
     var data = bytes > 0
         ? HEAPU8.slice(dataPtr, dataPtr + bytes)
         : new Uint8Array(0);
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (!Host) return -1;
     var ok = Host.changeProperty(w >>> 0, atom >>> 0, type >>> 0, format | 0, mode | 0, data);
     return ok ? 1 : 0;
@@ -718,7 +707,7 @@ EM_JS(void, emx11_js_get_property_meta, (unsigned int w, unsigned int atom, unsi
      *         5 DATA_LEN, 6 PRESENT, 7 reserved. Total 8 ints. */
     var base = metaPtr >> 2;
     for (var i = 0; i < 8; i++) HEAP32[base + i] = 0;
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (!Host) return;
     var r2 = Host.peekProperty(w >>> 0, atom >>> 0, reqType >>> 0,
                                longOffset | 0, longLength | 0, false);
@@ -736,7 +725,7 @@ EM_JS(void, emx11_js_get_property_meta, (unsigned int w, unsigned int atom, unsi
      * longOffset, longLength) so a re-entrant peekProperty (e.g. via
      * internAtom or another bridge that runs between the meta and the data
      * call) can't smuggle a different property's bytes into our reply. */
-    var caches2 = e._caches || (e._caches = {});
+    var caches2 = Module['emx11Caches'] || (Module['emx11Caches'] = {});
     caches2.propStash = {
         w: w >>> 0, atom: atom >>> 0, reqType: reqType >>> 0,
         longOffset: longOffset | 0, longLength: longLength | 0,
@@ -745,8 +734,8 @@ EM_JS(void, emx11_js_get_property_meta, (unsigned int w, unsigned int atom, unsi
 });
 
 EM_JS(void, emx11_js_get_property_data, (unsigned int w, unsigned int atom, unsigned int reqType, int longOffset, int longLength, int deleteFlag, int dstPtr, int capacity), {
-    var e0 = globalThis.emX11;
-    var caches0 = e0 && e0._caches;
+    var C0 = Module['emx11Caches'] || (Module['emx11Caches'] = {});
+    var caches0 = C0;
     var stash = caches0 ? caches0.propStash : null;
     if (caches0) caches0.propStash = null;
     var data = (stash &&
@@ -761,12 +750,12 @@ EM_JS(void, emx11_js_get_property_data, (unsigned int w, unsigned int atom, unsi
         var n = Math.min(data.length, capacity | 0);
         HEAPU8.set(data.subarray ? data.subarray(0, n) : data.slice(0, n), dstPtr);
         if (deleteFlag !== 0) {
-            var e = globalThis.emX11; var Host = e && e._bridge;
+            var Host = Module['emx11Host'];
             if (Host) Host.deleteProperty(w >>> 0, atom >>> 0);
         }
         return;
     }
-    var e2 = globalThis.emX11; var Host2 = e2 && e2._bridge;
+    var Host2 = Module['emx11Host'];
     if (!Host2) return;
     var r3 = Host2.peekProperty(w >>> 0, atom >>> 0, reqType >>> 0,
                                 longOffset | 0, longLength | 0, deleteFlag !== 0);
@@ -776,18 +765,18 @@ EM_JS(void, emx11_js_get_property_data, (unsigned int w, unsigned int atom, unsi
 });
 
 EM_JS(void, emx11_js_delete_property, (unsigned int w, unsigned int atom), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.deleteProperty(w >>> 0, atom >>> 0);
 });
 
 EM_JS(int, emx11_js_list_properties_count, (unsigned int w), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (!Host) return 0;
     return Host.listProperties(w >>> 0).length;
 });
 
 EM_JS(int, emx11_js_list_properties_fetch, (unsigned int w, int dstPtr, int capacity), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (!Host) return 0;
     var atoms2 = Host.listProperties(w >>> 0);
     var n2 = Math.min(atoms2.length, capacity | 0);
@@ -799,82 +788,82 @@ EM_JS(int, emx11_js_list_properties_fetch, (unsigned int w, int dstPtr, int capa
 /* --- window -------------------------------------------------------------- */
 
 EM_JS(void, emx11_js_window_create, (int connId, unsigned int id, unsigned int parent, int x, int y, int w, int h, int borderWidth, unsigned int borderPixel, int bgType, unsigned int bgValue), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowCreate(connId, id, parent, x, y, w, h, borderWidth, borderPixel, bgType, bgValue);
 });
 
 EM_JS(void, emx11_js_window_set_border, (unsigned int id, int borderWidth, unsigned int borderPixel), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowSetBorder(id, borderWidth, borderPixel);
 });
 
 EM_JS(void, emx11_js_window_set_bg, (unsigned int id, int bgType, unsigned int bgValue), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowSetBg(id, bgType, bgValue);
 });
 
 EM_JS(void, emx11_js_window_configure, (int connId, unsigned int id, int x, int y, int w, int h), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowConfigure(connId, id, x, y, w, h);
 });
 
 EM_JS(void, emx11_js_window_set_bit_gravity, (unsigned int id, int gravity), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowSetBitGravity(id, gravity);
 });
 
 EM_JS(void, emx11_js_window_map, (int connId, unsigned int id), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowMap(connId, id);
 });
 
 EM_JS(void, emx11_js_window_unmap, (int connId, unsigned int id), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowUnmap(connId, id);
 });
 
 EM_JS(void, emx11_js_window_destroy, (unsigned int id), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowDestroy(id);
 });
 
 EM_JS(void, emx11_js_window_raise, (unsigned int id), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowRaise(id);
 });
 
 EM_JS(void, emx11_js_window_lower, (unsigned int id), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowLower(id);
 });
 
 EM_JS(void, emx11_js_select_input, (int connId, unsigned int id, unsigned int mask), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onSelectInput(connId, id, mask >>> 0);
 });
 
 EM_JS(void, emx11_js_set_override_redirect, (unsigned int id, int flag), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onSetOverrideRedirect(id, flag !== 0);
 });
 
 EM_JS(void, emx11_js_reparent_window, (unsigned int id, unsigned int parent, int x, int y), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onReparentWindow(id, parent, x, y);
 });
 
 EM_JS(void, emx11_js_window_set_bg_pixmap, (unsigned int id, unsigned int pmId), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowSetBgPixmap(id, pmId);
 });
 
 EM_JS(void, emx11_js_window_set_cursor, (unsigned int id, unsigned int cursor), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowSetCursor(id, cursor);
 });
 
 EM_JS(void, emx11_js_set_grab_cursor, (unsigned int cursor), {
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onSetGrabCursor(cursor);
 });
 
@@ -891,7 +880,7 @@ EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
             });
         }
     }
-    var e = globalThis.emX11; var Host = e && e._bridge;
+    var Host = Module['emx11Host'];
     if (Host) Host.onWindowShape(id, rects);
 });
 
@@ -907,7 +896,7 @@ EM_JS(void, emx11_js_window_shape, (unsigned int id, int rectsPtr, int count), {
 EM_JS(int, emx11_js_glx_create_context,
       (int width, int height, int outTargetIdPtr, int outTargetIdLen),
       {
-          var e = globalThis.emX11; var h = e && e._bridge;
+          var h = Module['emx11Host'];
           if (!h || !h.glx) return 0;
           var info = h.glx.createContext(width | 0, height | 0);
           if (!info) return 0;
@@ -939,7 +928,7 @@ EM_JS(void, emx11_js_glx_legacy_init_once, (void), {
 });
 
 EM_JS(void, emx11_js_glx_destroy_context, (int id), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h || !h.glx) return;
     var targetId = h.glx.targetIdOf(id | 0);
     if (targetId && Module.specialHTMLTargets) {
@@ -949,13 +938,13 @@ EM_JS(void, emx11_js_glx_destroy_context, (int id), {
 });
 
 EM_JS(void, emx11_js_glx_swap_buffers, (int id, unsigned int drawable), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h || !h.glx) return;
     h.glx.swapBuffers(id | 0, drawable >>> 0);
 });
 
 EM_JS(void, emx11_js_glx_resize, (int id, int width, int height), {
-    var e = globalThis.emX11; var h = e && e._bridge;
+    var h = Module['emx11Host'];
     if (!h || !h.glx) return;
     h.glx.resize(id | 0, width | 0, height | 0);
 });

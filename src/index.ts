@@ -1,21 +1,21 @@
 /**
  * @devscholar/em-x11 public entry.
  *
- * Use `createEmX11(options)` to construct an em-x11 instance. The
- * returned object is also mirrored onto `globalThis.emX11` so
- * DevTools and the C-side EM_JS bridges share one namespace.
+ * Three API layers, from simplest to most powerful:
  *
- * Example:
+ *   Layer 1 (zero JS): emcc myapp.c -sUSE_EMX11 -o myapp.html
+ *     The port auto-injects the JS library and creates a default Host.
+ *     No user JS required — same UX as emcc -sUSE_SDL=2.
  *
- *   import { createEmX11 } from '@devscholar/em-x11';
+ *   Layer 2 (single program): initEmX11()
+ *     import { initEmX11 } from '@devscholar/em-x11';
+ *     const x11 = await initEmX11({ canvas, width: 1024, height: 768 });
+ *     // x11.display, x11.debug, no child_process concept
  *
- *   const em = await createEmX11({ canvas: document.getElementById('x') });
- *   await em.fs.mount({ type: 'tar', source: '/assets/x11-base.tar', target: '/usr' });
- *   const xeyes = em.child_process.spawn('/build/artifacts/xeyes/xeyes', {
- *     argv: ['xeyes'],
- *     thisProgram: 'xeyes',
- *   });
- *   xeyes.on('exit', (code) => console.log('xeyes exited', code));
+ *   Layer 3 (multi-process): createEmX11()
+ *     const session = await createEmX11({ canvas });
+ *     const proc = session.child_process.spawn('/bin/xeyes', { ... });
+ *     await proc.ready;
  *
  * Internal manager classes (Host, ConnectionManager, ...) under
  * src/host are NOT re-exported. `em._host` is a typed @internal
@@ -23,6 +23,8 @@
  */
 
 export { createEmX11, EmX11, VERSION } from './api/emx11.js';
+export { initEmX11 } from './api/initEmX11.js';
+export type { InitEmX11Options, EmX11Session } from './api/initEmX11.js';
 
 export type {
   CreateEmX11Options,

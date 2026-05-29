@@ -72,6 +72,21 @@ function(emx11_finalize_demo target)
         "SHELL:--use-port=${_port_script}"
     )
 
+    # Inject the JS bridge library so C EM_JS calls resolve at link time.
+    # In the static-link path this overrides the EM_JS bodies in bridges.c.
+    set(_js_lib "${CMAKE_SOURCE_DIR}/native/src/lib/library_emx11.js")
+    if(EXISTS "${_js_lib}")
+        target_link_options(${target} PRIVATE "SHELL:--js-library=${_js_lib}")
+    endif()
+
+    # Inject the default Host IIFE so Layer 1 (zero-JS) mode auto-creates
+    # a Host on Module.canvas without user JS.  Set Module['emx11NoAutoStart']
+    # to true if you want to provide your own Host via initEmX11/createEmX11.
+    set(_host_bundle "${CMAKE_BINARY_DIR}/artifacts/emx11-default-host.js")
+    if(EXISTS "${_host_bundle}")
+        target_link_options(${target} PRIVATE "SHELL:--pre-js=${_host_bundle}")
+    endif()
+
     # Propagate include paths from each named library target so headers
     # like <X11/Intrinsic.h> (from Xt) and <X11/Xaw/Command.h> (from Xaw)
     # resolve. add_dependencies ensures archives are built before the demo

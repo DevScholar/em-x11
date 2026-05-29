@@ -188,7 +188,15 @@ export class ConnectionManager {
 
     let module: EmscriptenModule;
     try {
-      module = await loadWasm({ ...opts, quit: factoryQuit, onExit: factoryOnExit });
+      module = await loadWasm({
+        ...opts,
+        quit: factoryQuit,
+        onExit: factoryOnExit,
+        moduleOverrides: {
+          emx11Host: this.host,
+          emx11NoAutoStart: true,
+        },
+      });
     } catch (err) {
       /* loadWasm rejected after wasm main() already called XOpenDisplay:
        * a Connection + possibly deferred Exposes were inserted during

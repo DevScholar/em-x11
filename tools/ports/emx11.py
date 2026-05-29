@@ -1,15 +1,17 @@
 """
 em-x11 Emscripten port.
 
-The port is the canonical way to link against em-x11. It returns the full
-filesystem paths to the static archives, bypassing emscripten's built-in
--lX11 -> libxlib.js hijack. The em-x11 examples use it; external projects
-can too by passing --use-port=<path>/emx11.py to emcc.
+Usage:
+    emcc myapp.c -sUSE_EMX11 -o myapp.html
+    emcc myapp.c --use-port=emx11 -o myapp.html
 
-The port reuses the main cmake build artifacts (build/artifacts/) when they
-exist — no separate build step. If they don't exist (e.g. an external
-project pointing at a clean em-x11 clone), the port runs the cmake build
-on demand. Set EMX11_SRC to tell the port where the em-x11 root is.
+The port links against em-x11's static archives (libX11.a, libXext.a,
+libXft.a, ...) and injects the JS-side bridge library
+(native/src/lib/library_emx11.js) so C code calling Xlib APIs works
+in the browser with zero user JS glue.
+
+Set EMX11_SRC to point at the em-x11 clone if the port script isn't
+co-located with the source tree.
 """
 
 import os
@@ -22,7 +24,7 @@ LICENSE = 'MIT'
 logger = logging.getLogger('emx11')
 
 # All static archives the port provides, in link order (higher-level first).
-# Order matches what a standard Xaw program's link line looks like:
+# Order matches a standard Xaw program's link line:
 #   Xaw -> Xmu -> Xt -> Xpm -> SM -> ICE -> xtrans -> Xft -> Xrender -> fontconfig -> GLX -> Xext -> X11
 _PORT_LIBS = [
     'libXaw.a',
@@ -41,6 +43,20 @@ _PORT_LIBS = [
 ]
 
 
+def needed(settings):
+    """Return True when -sUSE_EMX11 or --use-port=emx11 is active.
+
+    The getattr guard avoids crashing when USE_EMX11 hasn't been added
+    to upstream settings.js yet (pre-contribution).  Once the setting
+    lands, this can be simplified to `return settings.USE_EMX11`.
+    """
+    return getattr(settings, 'USE_EMX11', False)
+
+
+def get_lib_name(settings):
+    return 'libemx11.a'
+
+
 def find_emx11_root():
     """Walk up from this script to find the em-x11 project root."""
     env = os.environ.get('EMX11_SRC', '')
@@ -57,7 +73,7 @@ def find_emx11_root():
         return root
 
     # If the port was copied into emscripten's own tools/ports/, the
-    # relative path won't work. Fall back to the current directory.
+    # relative path won't work.  Fall back to the current directory.
     cwd = os.getcwd()
     if os.path.isdir(os.path.join(cwd, 'native')):
         return cwd
@@ -68,17 +84,17 @@ def find_emx11_root():
 def _find_artifacts(emx11_root):
     """Return the path to the artifacts directory, or None.
 
-    Prefers the main cmake build output (build/artifacts/) which is always
-    present when building in-tree (pnpm build:native). Falls back to a
-    dedicated port-build directory.
+    Prefers the main cmake build output (build/artifacts/) which is
+    always present when building in-tree (pnpm build:native).  Falls
+    back to a dedicated port-build directory.
     """
     # Main build — the fast path. Already built by pnpm build:native.
     main = os.path.join(emx11_root, 'build', 'artifacts')
     if os.path.isdir(main) and os.path.exists(os.path.join(main, 'libX11.a')):
         return main
 
-    # Port-specific build — only used by external projects that point at
-    # a clean em-x11 clone.
+    # Port-specific build — only used by external projects that point
+    # at a clean em-x11 clone.
     port_build = os.path.join(emx11_root, 'build', 'port-build', 'artifacts')
     if os.path.isdir(port_build) and os.path.exists(os.path.join(port_build, 'libX11.a')):
         return port_build
@@ -138,6 +154,14 @@ def _ensure_built(emx11_root, artifacts_dir):
 
 
 def get(ports, settings, shared):
+    """Return static archive paths for linking.
+
+    Returns the full filesystem paths so emcc passes them through to
+    wasm-ld without triggering the map_to_js_libs hijack on -lX11 / -lGL.
+
+    TODO: wrap with shared.cache.get_lib() once the port lands in
+    upstream emscripten and can use ports.install_file / install_header_dir.
+    """
     emx11_root = find_emx11_root()
     if not emx11_root:
         logger.error(
@@ -153,8 +177,6 @@ def get(ports, settings, shared):
     else:
         artifacts_dir = _ensure_built(emx11_root, artifacts_dir)
 
-    # Return the full archive paths so emcc passes them through to wasm-ld
-    # without triggering the map_to_js_libs hijack on -lX11 / -lGL.
     lib_paths = []
     for lib in _PORT_LIBS:
         p = os.path.join(artifacts_dir, lib)
@@ -167,6 +189,7 @@ def get(ports, settings, shared):
 
 
 def clear(ports, settings, shared):
+    shared.cache.erase_lib(get_lib_name(settings))
     emx11_root = find_emx11_root()
     if not emx11_root:
         return
@@ -178,17 +201,41 @@ def clear(ports, settings, shared):
 
 
 def process_args(ports):
-    """Return compiler flags so that #include <X11/Xlib.h> resolves."""
+    """Return compile flags: include path, JS library, and default Host.
+
+    --js-library injects the bridge functions.  --pre-js injects the
+    default Host IIFE so Layer 1 (zero JS) mode auto-creates a Host
+    on Module.canvas.  Users who want a custom Host can set
+    Module['emx11NoAutoStart'] = true and call initEmX11() manually.
+
+    In the SIDE_MODULE path (Pyodide dlopen) the EM_JS bodies carry
+    the implementations; the JS library and default host are only
+    needed for the static-link path.
+    """
     emx11_root = find_emx11_root()
     if not emx11_root:
         return []
     include_dir = os.path.join(emx11_root, 'native', 'include')
-    return ['-I' + include_dir]
+    js_library = os.path.join(emx11_root, 'native', 'src', 'lib', 'library_emx11.js')
+    default_host = os.path.join(emx11_root, 'build', 'artifacts', 'emx11-default-host.js')
+    args = ['-I' + include_dir]
+    if os.path.exists(js_library):
+        args.append('--js-library=' + js_library)
+    if os.path.exists(default_host):
+        args.append('--pre-js=' + default_host)
+    return args
 
 
 def process_dependencies(settings):
-    pass
+    """Ensure runtime symbols the JS library needs are exported."""
+    settings.EXPORTED_RUNTIME_METHODS.append('ccall')
+    settings.EXPORTED_RUNTIME_METHODS.append('cwrap')
+    settings.EXPORTED_RUNTIME_METHODS.append('UTF8ToString')
+    settings.EXPORTED_RUNTIME_METHODS.append('stringToUTF8')
+    settings.EXPORTED_RUNTIME_METHODS.append('stringToNewUTF8')
+    settings.EXPORTED_RUNTIME_METHODS.append('FS')
+    settings.EXPORTED_RUNTIME_METHODS.append('specialHTMLTargets')
 
 
 def show():
-    return 'em-x11 (--use-port=emx11; %s license)' % LICENSE
+    return 'em-x11 (-sUSE_EMX11 or --use-port=emx11; %s license)' % LICENSE

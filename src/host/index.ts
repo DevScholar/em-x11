@@ -21,21 +21,18 @@
  * have one. See src/host/README in xserver-counterpart comments for
  * what each method's authoritative source-of-truth is.
  *
- * Host installs itself on globalThis.emX11._bridge via attachToBridge().
- * That must happen BEFORE any wasm module starts: the EM_JS bridges
- * read `globalThis.emX11._bridge` synchronously from C calls.
- *
- * `globalThis.emX11` is the single namespace owned by this package;
- * everything em-x11 puts on the global object lives under it (no
- * scattered `__EMX11_*` globals). `_bridge` is the C-facing facade
- * (this Host); `_caches` holds bridge-owned scratch maps; `_debug`
- * holds runtime trace flags. Public-facing surfaces (`fs`, `spawn`,
- * `display`, `debug`) sit unprefixed on the same object and are
- * wired up by createEmX11() in src/api/.
+ * Host installs itself under Module?.['emx11Host'] via attachToBridge()
+ * so the C-side bridges (native/emx11/bridges.c EM_JS bodies, or
+ * native/src/lib/library_emx11.js in the static-link path) can reach
+ * it synchronously.  Internal caches / debug flags go under
+ * Module?.['emx11Caches'] / Module?.['emx11Debug'].  Public-facing
+ * surfaces (fs, spawn, display, debug) are on the TypeScript Host
+ * object, wired by createEmX11() / initEmX11() in src/api/.
  */
 
 import { RootCanvas } from '../runtime/canvas.js';
 import type { RootCanvasOptions } from '../runtime/canvas.js';
+import { ensureDebugFlags } from '../runtime/debug-flags.js';
 import { Renderer } from './render/index.js';
 import { absOrigin } from './render/window-tree.js';
 import { AtomManager } from './atom.js';
@@ -52,7 +49,6 @@ import { KeyboardLayoutManager } from './keyboard-layout.js';
 import { KeyboardLockManager } from './keyboard-lock.js';
 import type { LoadOptions } from '../loader/wasm.js';
 import type {
-  EmX11Global,
   EmX11Host,
   EmscriptenModule,
   Point,
@@ -145,31 +141,28 @@ export class Host implements EmX11Host {
     this.keyboardLock.disable();
   }
 
-  /** Install this Host as the bridge facade under `globalThis.emX11._bridge`,
-   *  so EM_JS bodies in native/emx11/bridges.c can reach it synchronously.
-   *  Allocates the singleton if needed and never overwrites unrelated
-   *  surfaces (fs, spawn, display, debug) that createEmX11 may have
-   *  already attached.
+  /** Install this Host under Module?.['emx11Host'] (flat Module property,
+   *  per emscripten convention) so EM_JS bodies in bridges.c can reach
+   *  it via `Module?.['emx11Host']`.  Also initialises Module?.['emx11Caches']
+   *  and Module?.['emx11Debug'] (internal scratchpads shared by the bridges).
    *
-   *  Must be called BEFORE any wasm module starts. createEmX11() does
-   *  this for you; legacy callers that constructed Host directly should
-   *  invoke it manually. */
+   *  Must be called BEFORE any wasm module starts. createEmX11() and
+   *  initEmX11() do this for you. */
   attachToBridge(): void {
-    const slot = (globalThis.emX11 ??= {} as EmX11Global);
-    slot._bridge = this;
-    if (!slot._caches) slot._caches = {};
-    if (!slot._debug) {
-      slot._debug = {
-        traceHit: false,
-        traceHitNext: false,
-        traceMotion: false,
-        traceButton: false,
-        tracePaint: false,
-        traceCBtn: false,
-        traceCMot: false,
-        traceMove: false,
-        traceQp: false,
-      };
+    // Always initialise module-level debug state so Host TS code
+    // (hit-test, window-tree, draw, devices) can read it even when
+    // Module is not a global (L2/L3 — user's ES module scope).
+    const dbg = ensureDebugFlags();
+
+    // Mirror to Module for JS library / EM_JS code inside the
+    // emscripten factory (L1 — static link). Same object reference
+    // so DevTools toggles on Module['emx11Debug'] are live in both.
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    const M = (typeof Module !== 'undefined' ? Module : null) as Record<string, any> | null;
+    if (M) {
+      M['emx11Host'] = this;
+      if (!M['emx11Caches']) M['emx11Caches'] = {};
+      M['emx11Debug'] = dbg;
     }
   }
 

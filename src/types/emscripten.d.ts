@@ -171,9 +171,10 @@ export interface EmX11Global {
 }
 
 /**
- * The em-x11 host bridge facade, installed under `globalThis.emX11._bridge`
+ * The em-x11 host bridge facade, installed under Module['emx11Host']
  * by Host.attachToBridge(). The C side calls into this via EM_JS bodies
- * in native/emx11/bridges.c.
+ * in native/emx11/bridges.c (side-module path) or via the JS library
+ * in native/src/lib/library_emx11.js (static-link path).
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;
@@ -470,6 +471,43 @@ export interface EmX11Host {
 }
 
 declare global {
+  /**
+   * Emscripten Module globals that em-x11 writes into.
+   * In MODULARIZE=0 builds Module is a global; in MODULARIZE=1
+   * it's closure-local.  Host.attachToBridge() writes through
+   * `typeof Module !== 'undefined'` guard so both paths work.
+   */
   // eslint-disable-next-line no-var
-  var emX11: EmX11Global | undefined;
+  var Module: {
+    emx11Host?: import('./emscripten.js').EmX11Host;
+    emx11Caches?: {
+      measureCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      fontCache?: Map<string, { ascent: number; descent: number; maxW: number; widths: Int32Array }>;
+      textCache?: Map<string, number>;
+      propStash?: Uint8Array | null;
+      shapeStash?: { id: number; rects: import('./emscripten.js').ShapeRect[] } | null;
+      childrenStash?: { parent: number; kids: number[] } | null;
+    };
+    emx11Debug?: {
+      traceHit: boolean;
+      traceHitNext: boolean;
+      traceMotion: boolean;
+      traceButton: boolean;
+      tracePaint: boolean;
+      traceCBtn: boolean;
+      traceCMot: boolean;
+      traceMove: boolean;
+      traceQp: boolean;
+    };
+    emx11ClipboardBytes?: Uint8Array | null;
+    specialHTMLTargets?: Record<string, unknown>;
+  };
+}
+
+// Backward-compat: EmX11Global is deprecated, retained for existing
+// callers that still reference globalThis.emX11 directly.
+export interface EmX11Global {
+  _bridge?: import('./emscripten.js').EmX11Host;
+  _caches?: Record<string, unknown>;
+  _debug?: Record<string, boolean>;
 }

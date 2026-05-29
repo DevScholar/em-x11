@@ -12,6 +12,7 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import type { Point } from '../../types/emscripten.js';
+import { getDebugFlags } from '../../runtime/debug-flags.js';
 import { paintBackgroundIntoBacking } from './paint.js';
 import { pixelToCssColor } from '../../runtime/canvas.js';
 import {
@@ -94,7 +95,7 @@ export function clearArea(
 ): void {
   const win = r.windows.get(id);
   if (!win || !win.mapped) return;
-  if (globalThis.emX11?._debug?.tracePaint) {
+  if (getDebugFlags()?.tracePaint) {
     console.log('[paint] clearArea', id, '(', x, y, w, h, ') parent=', win.parent);
   }
   paintBackgroundIntoBacking(r, win, x, y, w, h);

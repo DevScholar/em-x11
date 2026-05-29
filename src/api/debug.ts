@@ -1,26 +1,24 @@
 /**
  * em.debug — toggleable trace flags + state dumpers.
  *
- * The flag fields are accessor pairs over `globalThis.emX11._debug`,
- * so toggling `em.debug.traceHit = true` and toggling
- * `globalThis.emX11._debug.traceHit = true` are equivalent — but the
- * `em.debug.*` form is the public API and the underscore form is
- * implementation detail (read by hit-test.ts and the EM_ASM gates in
- * the C bridges).
+ * The flag fields read/write a module-level debug store (see
+ * runtime/debug-flags.ts). Host.attachToBridge() initialises both
+ * the module-level store (for Host TS code) and Module['emx11Debug']
+ * (for JS library / EM_JS code inside the emscripten factory).
+ * Both hold the same object reference, so DevTools toggles and API
+ * calls are visible everywhere.
  */
 
 import type { Host } from '../host/index.js';
 import { dumpWindows as renderDumpWindows } from '../host/render/hit-test.js';
+import { ensureDebugFlags } from '../runtime/debug-flags.js';
 import type { EmX11Debug } from './types.js';
 
 export class DebugNamespace implements EmX11Debug {
   constructor(private readonly host: Host) {}
 
   private get state() {
-    /* host.attachToBridge() guarantees emX11._debug exists; the
-     * non-null assertion below would only fail if a caller bypassed
-     * the factory and never attached. */
-    return globalThis.emX11!._debug!;
+    return ensureDebugFlags();
   }
 
   get traceHit(): boolean { return this.state.traceHit; }

@@ -1,0 +1,81 @@
+/**
+ * default-host.ts — standalone IIFE entry point for Layer 1 (zero JS).
+ *
+ * Compiled by Vite into a self-contained IIFE that sets
+ * `globalThis.EmX11DefaultHost` before the emscripten wasm starts.
+ * The JS library (library_emx11.js) calls EmX11DefaultHost.create(Module)
+ * during $EmX11Host.init().
+ *
+ * This file is NOT imported by the npm package entry (src/index.ts).
+ * It is only used for the --pre-js bundle that the port injects when
+ * the user compiles with -sUSE_EMX11 (no user JS needed).
+ */
+
+import { Host } from './host/index.js';
+import type { HostOptions } from './host/index.js';
+
+interface DefaultHostModule {
+  create(mod: Record<string, unknown>): unknown;
+}
+
+function createDefaultHost(Module: Record<string, unknown>): unknown {
+  const canvas = resolveCanvas(Module);
+  const opts: HostOptions = {};
+
+  if (canvas instanceof HTMLCanvasElement) {
+    opts.element = canvas;
+  } else if (canvas instanceof OffscreenCanvas) {
+    opts.surface = canvas;
+  }
+
+  // Read dimensions from Module or canvas
+  const w = (Module['emx11Width'] as number) ?? (canvas as HTMLCanvasElement).width ?? 1024;
+  const h = (Module['emx11Height'] as number) ?? (canvas as HTMLCanvasElement).height ?? 768;
+  if (w) opts.width = w;
+  if (h) opts.height = h;
+
+  const host = new Host(opts);
+  host.attachToBridge();
+
+  // Mirror the host to Module so DevTools can reach it
+  Module['emx11Host'] = host;
+
+  return host;
+}
+
+function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | OffscreenCanvas {
+  // 1. Module['emx11Canvas'] (user override)
+  const explicit = Module['emx11Canvas'];
+  if (explicit instanceof HTMLCanvasElement || (typeof OffscreenCanvas !== 'undefined' && explicit instanceof OffscreenCanvas)) {
+    return explicit;
+  }
+
+  // 2. Module.canvas (emscripten convention)
+  const mc = Module['canvas'];
+  if (mc instanceof HTMLCanvasElement || (typeof OffscreenCanvas !== 'undefined' && mc instanceof OffscreenCanvas)) {
+    return mc;
+  }
+
+  // 3. document.querySelector('#canvas') (emscripten shell convention)
+  if (typeof document !== 'undefined') {
+    const qs = document.querySelector('#canvas');
+    if (qs instanceof HTMLCanvasElement) {
+      Module['canvas'] = qs;
+      return qs;
+    }
+  }
+
+  // 4. Auto-create a canvas
+  const c = document.createElement('canvas');
+  c.id = 'canvas';
+  c.width = (Module['emx11Width'] as number) ?? 1024;
+  c.height = (Module['emx11Height'] as number) ?? 768;
+  c.style.display = 'block';
+  document.body.appendChild(c);
+  Module['canvas'] = c;
+  Module['emx11Canvas'] = c;
+  return c;
+}
+
+// Expose as a global so library_emx11.js can find it during init.
+(globalThis as Record<string, unknown>).EmX11DefaultHost = { create: createDefaultHost };

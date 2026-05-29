@@ -15,9 +15,10 @@
     "README.md"
   ],
   "scripts": {
-    "build": "pnpm run build:native && pnpm run build:web",
+    "build": "pnpm run build:native && pnpm run build:host && pnpm run build:web",
     "build:native": "emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j",
     "build:native:debug": "emcmake cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build -j",
+    "build:host": "vite build -c vite.host.config.ts",
     "build:web": "vite build",
     "dev": "vite",
     "preview": "vite preview",

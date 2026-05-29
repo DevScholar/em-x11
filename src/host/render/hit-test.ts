@@ -25,14 +25,16 @@
  *    not-viewable descendant of an unmapped ancestor is still rejected
  *    naturally because the loop never enters its parent's subtree.
  *
- * Tracing: set `globalThis.emX11._debug.traceHit = true` to log every
- * hit-test walk. Set `traceHitNext = true` to log only the next call,
+ * Tracing: set `Module['emx11Debug'].traceHit = true` (L1, DevTools) or
+ *   `em.debug.traceHit = true` (L2/L3, API) to log every hit-test walk.
+ *   Set `traceHitNext = true` to log only the next call,
  * then have the helper auto-clear it. Useful for diagnosing "this
  * point looks like root but reports as <some widget>" symptoms (twm
  * icon-manager / hidden shells still receiving Motion).
  */
 import type { RendererState, ManagedWindow } from './types.js';
 import { absOrigin } from './window-tree.js';
+import { getDebugFlags } from '../../runtime/debug-flags.js';
 
 interface TraceCtx {
   enabled: boolean;
@@ -40,14 +42,10 @@ interface TraceCtx {
 }
 
 /* Trace flags read fresh on every call so DevTools toggling is live.
- * Both flags live under `globalThis.emX11._debug`:
- *   traceHit       -> log every findWindowAt call (spammy on Motion)
- *   traceHitNext   -> log the NEXT findWindowAt call only, then auto-clear
- * Use the latter from DevTools right before clicking the mystery point:
- *     emX11._debug.traceHitNext = true
- *   then move/click; the very next hit-test prints its full trace. */
+ * In L1 (--pre-js inside factory) set Module['emx11Debug'].traceHitNext
+ * from DevTools. In L2/L3 use em.debug.traceHitNext from the API. */
 export function findWindowAt(r: RendererState, cssX: number, cssY: number): number | null {
-  const dbg = globalThis.emX11?._debug;
+  const dbg = getDebugFlags();
   const oneShot = !!dbg?.traceHitNext;
   const trace: TraceCtx = {
     enabled: !!dbg?.traceHit || oneShot,

@@ -9,6 +9,7 @@
 
 import type { RendererState, ManagedWindow } from './types.js';
 import type { ShapeRect } from '../../types/emscripten.js';
+import { getDebugFlags } from '../../runtime/debug-flags.js';
 import { MAX_PARENT_WALK } from '../constants.js';
 import { paintWindowSubtree, snapshotClips, paintExposedRegions } from './paint.js';
 import {
@@ -261,7 +262,7 @@ export function setWindowBorder(
   w.borderWidth = borderWidth;
   w.borderPixel = borderPixel;
   if (!w.mapped) return new Map();
-  if (globalThis.emX11?._debug?.tracePaint) {
+  if (getDebugFlags()?.tracePaint) {
     console.log('[paint] setWindowBorder', id, 'widthChanged=', widthChanged);
   }
   if (!widthChanged) {
@@ -356,7 +357,7 @@ export function configureWindow(
   const sameGeom =
     win.x === x && win.y === y && win.width === w && win.height === h;
   if (sameGeom) return new Map();
-  if (globalThis.emX11?._debug?.tracePaint) {
+  if (getDebugFlags()?.tracePaint) {
     console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
   }
   const oldClips = snapshotClips(r);
@@ -660,7 +661,7 @@ export function isViewable(r: RendererState, id: number): boolean {
 export function mapWindow(r: RendererState, id: number): Map<number, Region> {
   const w = r.windows.get(id);
   if (!w) return new Map();
-  if (globalThis.emX11?._debug?.tracePaint) {
+  if (getDebugFlags()?.tracePaint) {
     console.log('[paint] mapWindow', id, 'parent=', w.parent);
   }
   const oldClips = snapshotClips(r);
@@ -677,7 +678,7 @@ export function unmapWindow(r: RendererState, id: number): Map<number, Region> {
   const w = r.windows.get(id);
   if (!w) return new Map();
   if (!w.mapped) return new Map();
-  if (globalThis.emX11?._debug?.tracePaint) {
+  if (getDebugFlags()?.tracePaint) {
     console.log('[paint] unmapWindow', id, 'parent=', w.parent);
   }
   const oldClips = snapshotClips(r);

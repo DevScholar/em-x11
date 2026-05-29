@@ -1,10 +1,10 @@
 /**
- * Loader-level asset cache.
+ * Loader-level asset cache for .wasm binaries.
  *
- * em.spawn fetches a `.js` glue and a `.wasm` binary every time it
- * runs. On the second visit those bytes don't have to come from the
- * network — both fetches go through the Cache Storage API here, keyed
- * by URL, under a versioned cache name.
+ * The .js glue is imported directly via `import(glueUrl)` — the
+ * browser's native module loader handles it.  The .wasm binary is
+ * fetched through Cache Storage here so the large payload (up to
+ * several MB) skips the network on repeat visits.
  *
  * Why Cache Storage and not IDBFS / localStorage / a Service Worker:
  *
@@ -128,22 +128,6 @@ function assertResponseOk(url: string, r: Response): void {
 /** Fetch the bytes at `url`, honouring the cache mode. */
 export function cachedFetchBytes(url: string, mode: CacheMode): Promise<Uint8Array> {
   return fetchWithCache(url, mode);
-}
-
-/** Fetch a JS glue file and return a Blob URL safe to dynamically
- *  import. The glue is text, but we keep one byte path so cacheable
- *  URLs flow through Cache Storage uniformly. The returned URL is
- *  an `URL.createObjectURL(blob)` — short-lived; the caller is
- *  expected to import() it immediately. We don't revoke automatically
- *  (the import keeps the module live as long as its handle is held;
- *  the blob URL becomes garbage-collectable on tab unload anyway). */
-export async function cachedFetchAsBlobUrl(url: string, mode: CacheMode): Promise<string> {
-  const bytes = await fetchWithCache(url, mode);
-  /* Cast through `BlobPart`: TS narrows `Uint8Array<ArrayBufferLike>` and
-   * refuses the more permissive runtime BlobPart type. The bytes are a
-   * regular ArrayBuffer in practice (from response.arrayBuffer()). */
-  const blob = new Blob([bytes as BlobPart], { type: 'text/javascript' });
-  return URL.createObjectURL(blob);
 }
 
 /** Delete any `em-x11-loader-*` caches whose name is not the current

@@ -11,12 +11,11 @@
  *   emX11.dlopen          — pluggable side-module loader (api/dlopen.ts)
  *   emX11._host           — @internal escape hatch, unstable
  *
- * The instance is NOT auto-published on globalThis. Host.attachToBridge()
- * does claim `globalThis.emX11._bridge` / `._caches` / `._debug` because
- * the C-side EM_JS bodies in libemx11 read them synchronously, but the
- * public surface (fs, display, child_process, ...) stays on the local
- * instance the caller binds. Callers who want DevTools access publish it
- * themselves: `globalThis.app = emX11`.
+ * The instance writes the Host to Module['emx11Host'] (flat Module
+ * property, per emscripten convention) via attachToBridge(), so the
+ * C-side bridges in libemx11 reach it via `Module['emx11Host']`.
+ * The public surface (fs, display, child_process, ...) stays on the
+ * local instance the caller binds.
  */
 
 import { Host } from '../host/index.js';
@@ -108,12 +107,11 @@ export class EmX11 {
      * until the next boot picks it up. */
     void cleanupOldCaches();
 
-    /* Note: we deliberately do NOT mirror the public surface onto
-     * globalThis.emX11. attachToBridge() above already populated the
-     * private `_bridge` / `_caches` / `_debug` slots that EM_JS bodies
-     * in libemx11 read synchronously; that is the entire global ABI.
-     * Callers who want DevTools access publish the instance under
-     * their own name (`globalThis.app = emX11`). */
+    /* attachToBridge() above already wrote the Host to
+     * Module['emx11Host'] (and Module['emx11Caches'] /
+     * Module['emx11Debug']) so the C-side bridges can reach it.
+     * The public surface (fs, display, child_process) stays on the
+     * local instance. */
   }
 
   /** Load a side module via the configured DlopenAdapter. Throws if

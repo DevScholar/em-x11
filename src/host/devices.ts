@@ -18,6 +18,7 @@
 import type { Host } from './index.js';
 import type { Point } from '../types/emscripten.js';
 import type { ModuleCcallSurface } from './connection.js';
+import { getDebugFlags } from '../runtime/debug-flags.js';
 import { keyEventToKeysym, keyEventToKeycode, modifiersFromEvent } from '../runtime/keymap.js';
 import { cursorXidToCss } from './cursor.js';
 import {
@@ -270,7 +271,7 @@ export class InputBridge {
       this.activePointerGrab?.module ??
       this.dragModule ??
       (win !== null ? this.moduleForWindow(win) : null);
-    if (globalThis.emX11?._debug?.traceMotion) {
+    if (getDebugFlags()?.traceMotion) {
       const route = this.activePointerGrab ? 'activeGrab' :
                     this.dragModule ? 'dragModule' :
                     win !== null ? 'win' : 'NONE';
@@ -383,7 +384,7 @@ export class InputBridge {
     const x11State = xType === X_ButtonPress
       ? e.modifiers & ~btnMask
       : e.modifiers | btnMask;
-    const traceFlag = !!globalThis.emX11?._debug?.traceButton;
+    const traceFlag = !!getDebugFlags()?.traceButton;
     if (traceFlag) {
       console.log(
         `[btn] type=${xType} (${e.x}, ${e.y}) target=${target} button=${e.button} mods=0x${e.modifiers.toString(16)} x11State=0x${x11State.toString(16)}`,
@@ -687,7 +688,7 @@ export class InputBridge {
     /* Browser → Tk clipboard staging. The C-side bridge
      * (emx11_js_clipboard_read_begin / _fetch in native/emx11/bridges.c) has
      * to answer synchronously because runTcl is sync (no Asyncify), so we
-     * pre-fill `globalThis.__emx11ClipboardBytes` ahead of every paste-
+     * pre-fill `Module?.['emx11ClipboardBytes']` ahead of every paste-
      * equivalent gesture:
      *
      *   1. document `paste` events — ClipboardEvent.clipboardData is
@@ -702,7 +703,9 @@ export class InputBridge {
       const e = ev as ClipboardEvent;
       const text = e.clipboardData?.getData('text/plain');
       if (typeof text === 'string') {
-        globalThis.__emx11ClipboardBytes = new TextEncoder().encode(text);
+        if (typeof Module !== 'undefined') {
+          Module['emx11ClipboardBytes'] = new TextEncoder().encode(text);
+        }
       }
     });
 
@@ -745,7 +748,9 @@ export class InputBridge {
          * unconditionally on resolve OR reject so a denied permission
          * doesn't swallow the keystroke. */
         navigator.clipboard.readText().then((text) => {
-          globalThis.__emx11ClipboardBytes = new TextEncoder().encode(text);
+          if (typeof Module !== 'undefined') {
+            Module['emx11ClipboardBytes'] = new TextEncoder().encode(text);
+          }
         }).catch(() => {
           /* permission denied / not focused — leave cache as-is */
         }).finally(() => {
