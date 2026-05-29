@@ -151,7 +151,7 @@ export class FSNamespace implements EmX11FS {
         }
         return;
       }
-      const fs = fsDesc.value as EmscriptenModule['FS'];
+      const fs = fsDesc.value as NonNullable<EmscriptenModule['FS']>;
       for (const e of snapshot) {
         if (e.data === null) {
           tryMkdir(fs, e.path);

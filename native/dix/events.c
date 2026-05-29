@@ -480,11 +480,11 @@ void emx11_push_button_event(int type,
 
   /* Diagnostic trace: dump the C-side resolution so we can see what
    * each wasm process receives. Toggled via
-   * `globalThis.emX11._debug.traceCBtn` (set from DevTools). Gated
+   * `Module['emx11Debug'].traceCBtn` (set from DevTools). Gated
    * inside EM_ASM so it's effectively free when disabled. */
   EM_ASM(
     {
-      var d = globalThis.emX11 && globalThis.emX11._debug;
+      var d = Module['emx11Debug'];
       if (d && d.traceCBtn) {
         console.log('[c-btn] conn=' + $0 + ' type=' + $1 + ' hint=' +
                     ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 + ' button=' + $5 +
@@ -609,10 +609,10 @@ void emx11_push_motion_event(
    * without the gate there's nothing to bypass. */
 
   /* Decision-path diagnostic trace. Toggled via
-   * `globalThis.emX11._debug.traceCMot` (set from DevTools). */
+   * `Module['emx11Debug'].traceCMot` (set from DevTools). */
   EM_ASM(
     {
-      var d = globalThis.emX11 && globalThis.emX11._debug;
+      var d = Module['emx11Debug'];
       if (d && d.traceCMot) {
         console.log('[c-mot] conn=' + $0 + ' rx=' + $1 + ' ry=' + $2 +
                     ' hint=' + ($3 >>> 0) + ' path=' +
@@ -1021,7 +1021,7 @@ int XGrabPointer(Display* dpy,
   (void)t;
   EM_ASM(
     {
-      var d = globalThis.emX11 && globalThis.emX11._debug;
+      var d = Module['emx11Debug'];
       if (d && d.traceGrab) {
         console.log('[c-grab] XGrabPointer conn=' + $0 + ' grab_win=' +
                     ($1 >>> 0) + ' owner_events=' + $2 + ' cursor=' + $3);
@@ -1112,7 +1112,7 @@ Bool XQueryPointer(Display* dpy,
   }
   EM_ASM(
     {
-      var d = globalThis.emX11 && globalThis.emX11._debug;
+      var d = Module['emx11Debug'];
       if (d && d.traceQp) {
         console.log('[c-qp] conn=' + $0 + ' win=' + $1 + ' root=(' + $2 + ',' +
                     $3 + ')' + ' local=(' + $4 + ',' + $5 + ')');

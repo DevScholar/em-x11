@@ -101,7 +101,7 @@ static void track_DeleteFileHandler(int fd) {
 
 /* Bridges to the JS host. The host registers two callbacks via
  * Host.installEventLoopWake(); these EM_JS bodies dispatch to them
- * through globalThis.emX11._bridge, matching the pattern in bridges.c.
+ * through Module['emx11Host'], matching the pattern in bridges.c.
  *
  * setTimer(ms) — schedule a wake at +ms relative; ms<0 clears any
  *                pending wake (analogous to passing NULL timeout to
@@ -109,15 +109,15 @@ static void track_DeleteFileHandler(int fd) {
  * alert()      — wake the host pump ASAP (analogous to writing to
  *                a self-pipe to break select()). */
 EM_JS(void, emx11_js_notifier_set_timer, (int ms), {
-  var b = globalThis.emX11 && globalThis.emX11._bridge;
-  if (b && b.onTclSetTimer)
-    b.onTclSetTimer(ms);
+  var host = Module['emx11Host'];
+  if (host && host.onTclSetTimer)
+    host.onTclSetTimer(ms);
 });
 
 EM_JS(void, emx11_js_notifier_alert, (void), {
-  var b = globalThis.emX11 && globalThis.emX11._bridge;
-  if (b && b.onTclAlertNotifier)
-    b.onTclAlertNotifier();
+  var host = Module['emx11Host'];
+  if (host && host.onTclAlertNotifier)
+    host.onTclAlertNotifier();
 });
 
 static void real_SetTimer(const Tcl_Time* t) {

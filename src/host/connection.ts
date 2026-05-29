@@ -268,7 +268,7 @@ export class ConnectionManager {
       connId,
       xidBase,
       xidMask,
-      module: rawModule,
+      module: this.defaultModule ?? rawModule,
       ownedWindows: new Set(),
     });
     if (this.pendingLaunch) this.pendingLaunch.connId = connId;

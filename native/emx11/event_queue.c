@@ -182,7 +182,7 @@ int XNextEvent(Display* display, XEvent* event_return) {
   }
   EM_ASM(
     {
-      var d = globalThis.emX11 && globalThis.emX11._debug;
+      var d = Module['emx11Debug'];
       if (d && d.traceNext && $0) {
         console.log('[c-next] XNextEvent conn=' + $1 + ' type=' + $2 + ' win=' +
                     ($3 >>> 0));
@@ -282,7 +282,7 @@ int XMaskEvent(Display* dpy, long event_mask, XEvent* ev) {
     if (emx11_event_queue_peek_match(dpy, event_mask, ev)) {
       EM_ASM(
         {
-          var d = globalThis.emX11 && globalThis.emX11._debug;
+          var d = Module['emx11Debug'];
           if (d && d.traceMask) {
             console.log('[c-mask] XMaskEvent conn=' + $0 + ' mask=0x' +
                         ($1 >>> 0).toString(16) + ' found type=' + $2 +

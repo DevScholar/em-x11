@@ -78,4 +78,4 @@ function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | Off
 }
 
 // Expose as a global so library_emx11.js can find it during init.
-(globalThis as Record<string, unknown>).EmX11DefaultHost = { create: createDefaultHost };
+(globalThis as Record<string, unknown>).EmX11DefaultHost = { create: createDefaultHost } satisfies DefaultHostModule;
