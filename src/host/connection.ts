@@ -272,6 +272,16 @@ export class ConnectionManager {
       ownedWindows: new Set(),
     });
     if (this.pendingLaunch) this.pendingLaunch.connId = connId;
+
+    /* Side-module path (Pyodide dlopen): the EM_JS bridges in bridges.c
+     * read Module['emx11Host'] on every call, but `Module` in a side
+     * module is the side module's own scope — the global Module that
+     * attachToBridge() writes to is a different object. XOpenDisplay
+     * passes us the side module's Module as `rawModule`; set the Host
+     * on it so every subsequent bridge call from this connection finds
+     * the Host without reaching for the global scope. */
+    (rawModule as Record<string, unknown>)['emx11Host'] = this.host;
+
     return { connId, xidBase, xidMask };
   }
 

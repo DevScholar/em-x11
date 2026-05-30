@@ -129,7 +129,7 @@ function(emx11_add_static_lib target output_name)
                 ${CMAKE_CURRENT_SOURCE_DIR}/libX11
     )
 
-    target_compile_options(${target} PRIVATE ${EMX11_WARN_FLAGS})
+    target_compile_options(${target} PRIVATE ${EMX11_WARN_FLAGS} -fPIC)
     if(EMX11_HIDE_INTERNAL_SYMBOLS)
         target_compile_options(${target} PRIVATE -fvisibility=hidden)
     endif()
@@ -160,37 +160,74 @@ target_link_libraries(GLX        PUBLIC X11)
 # JS-side bridges live in emx11/bridges.c via EM_JS, so they're embedded in
 # libX11.a itself (works under both static link and SIDE_MODULE dlopen).
 
-# --- Side module (Pyodide path; disabled by default) --------------------------
+# --- Side modules (Pyodide path; disabled by default) --------------------------
 #
-# Pyodide dlopens one .so, so the side-module path keeps producing a
-# single fat libemx11.so containing every source above. The split only
-# applies to the static archive consumers.
+# Real X ships split shared libraries (libX11.so, libXext.so, …) with proper
+# NEEDED chains.  We mirror that: each sub-library builds its own SIDE_MODULE.
+# Pyodide's dlopen cascades through the NEEDED graph at load time, exactly
+# like ld.so does on Linux.
 
 if(EMX11_BUILD_SIDE_MODULE)
-    add_library(emx11_side SHARED ${EMX11_ALL_SOURCES})
 
-    target_include_directories(emx11_side
-        PUBLIC  ${EMX11_PUBLIC_HEADERS_DIR}
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/emx11
-                ${CMAKE_CURRENT_SOURCE_DIR}/libX11
-    )
+    # emx11_add_side_module(<target> <output_name> <sources...>)
+    # -- adds a SHARED library target for the side-module (dlopen) path with
+    # standard include dirs, -fPIC, and -sSIDE_MODULE=1.
+    function(emx11_add_side_module target output_name)
+        add_library(${target} SHARED ${ARGN})
 
-    # Side module is consumed by libtk.so / _tkinter.so via dynamic linking,
-    # so Xlib symbols MUST be exported. Default visibility (not hidden) plus
-    # EXPORT_ALL=1 lets the auto-export pass at link time pick them up.
-    target_compile_options(emx11_side
-        PRIVATE ${EMX11_WARN_FLAGS}
-                -fPIC
-    )
+        target_include_directories(${target}
+            PUBLIC  ${EMX11_PUBLIC_HEADERS_DIR}
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/emx11
+                    ${CMAKE_CURRENT_SOURCE_DIR}/libX11
+        )
 
-    target_link_options(emx11_side
-        PRIVATE
-            "SHELL:-s SIDE_MODULE=1"
-    )
+        target_compile_options(${target}
+            PRIVATE ${EMX11_WARN_FLAGS}
+                    -fPIC
+        )
 
-    set_target_properties(emx11_side PROPERTIES
-        OUTPUT_NAME "emx11"
-        SUFFIX ".so"
-        PREFIX "lib"
-    )
+        target_link_options(${target}
+            PRIVATE
+                "SHELL:-s SIDE_MODULE=1"
+                "SHELL:-s ERROR_ON_UNDEFINED_SYMBOLS=0"
+        )
+
+        set_target_properties(${target} PROPERTIES
+            OUTPUT_NAME "${output_name}"
+            SUFFIX ".so"
+            PREFIX "lib"
+        )
+    endfunction()
+
+    # Split side modules, matching the static-archive split and real X's
+    # shared-library layout.  The target_link_libraries calls create the
+    # NEEDED entries so Pyodide's recursive dlopen auto-cascades.
+    #
+    #   libX11.so              base, no X deps
+    #   libXext.so        NEEDED libX11.so
+    #   libXrender.so     NEEDED libX11.so
+    #   libfontconfig.so  NEEDED libX11.so
+    #   libXft.so         NEEDED libXrender.so libfontconfig.so libX11.so
+
+    emx11_add_side_module(emx11_X11_side        X11         ${EMX11_X11_SOURCES})
+
+    emx11_add_side_module(emx11_Xext_side       Xext        ${EMX11_XEXT_SOURCES})
+    target_link_libraries(emx11_Xext_side PRIVATE emx11_X11_side)
+
+    emx11_add_side_module(emx11_Xrender_side    Xrender     ${EMX11_XRENDER_SOURCES})
+    target_link_libraries(emx11_Xrender_side PRIVATE emx11_X11_side)
+
+    emx11_add_side_module(emx11_fontconfig_side fontconfig  ${EMX11_FONTCONFIG_SOURCES})
+    target_link_libraries(emx11_fontconfig_side PRIVATE emx11_X11_side)
+
+    emx11_add_side_module(emx11_Xft_side        Xft         ${EMX11_XFT_SOURCES})
+    target_link_libraries(emx11_Xft_side
+        PRIVATE emx11_Xrender_side emx11_fontconfig_side emx11_X11_side)
+
+    # GLX is deliberately skipped — pyodide-tk doesn't use OpenGL.
+
+    add_custom_target(side-modules ALL
+        DEPENDS emx11_X11_side emx11_Xext_side emx11_Xrender_side
+                emx11_fontconfig_side emx11_Xft_side)
+
 endif()

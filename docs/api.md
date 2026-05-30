@@ -404,3 +404,42 @@ plain `fetch` regardless of `loaderCache`.
 Both `EmX11Session._host` and `EmX11._host` expose the underlying
 `Host` (`@internal`, unstable). Use only for things the public API
 doesn't cover yet.
+
+## Build artifacts — split archives (mirrors real X)
+
+em-x11 produces a set of static archives that match real X's library
+split, so consumers link with the standard flags:
+
+```
+-lX11 -lXext -lXrender -lXft -lfontconfig -lGLX
+```
+
+| Archive | Real X analogue | Contents |
+|---------|----------------|----------|
+| `libX11.a` | `libX11.so` | Xlib core, Xrm, XIM, bridges, notifier, events, windows, GC, pixmaps, cursors, XKB |
+| `libXext.a` | `libXext.so` | SHAPE extension |
+| `libXrender.a` | `libXrender.so` | RENDER extension |
+| `libfontconfig.a` | `libfontconfig.so` | fontconfig shim |
+| `libXft.a` | `libXft.so` | Xft (client-side font rendering) |
+| `libGLX.a` | `libGLX.so` | GLX 1.4 (WebGL-backed) |
+
+The archives are compiled with **`-fPIC`**. This is the same requirement
+real X applies to its shared-client-libraries (`libX11.so`, `libXext.so`,
+…), not to client programs. The flag belongs on the library, not on
+programs that link against it. It is load-bearing for consumers that
+repackage the archives into an Emscripten side module:
+
+```makefile
+# pyodide-tk pattern: repackage split archives into one .so
+emcc -sSIDE_MODULE=1 -o libemx11.so \
+    -Wl,--whole-archive libX11.a libXext.a libXrender.a libXft.a libfontconfig.a \
+    -Wl,--no-whole-archive libtcl8.6.so
+```
+
+Without `-fPIC`, wasm-ld rejects `R_WASM_MEMORY_ADDR_*` relocations
+when creating a side module — non-PIC objects cannot form a shared
+library on any platform.
+
+The parallel build also produces a single `libemx11.so` side module
+(`cmake -DEMX11_BUILD_SIDE_MODULE=ON`) for consumers that prefer a
+pre-linked artifact over the `--whole-archive` repackaging pattern.
