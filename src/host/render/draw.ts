@@ -307,14 +307,22 @@ export function drawString(
     bctx.font = font;
     bctx.textBaseline = 'alphabetic';
     bctx.textAlign = 'left';
-    if (imageMode) {
-      /* Round outward to integer pixel grid. measureText/font metrics are
-       * floats, and fillRect with fractional bounds applies sub-pixel AA
-       * at the edges -- partial-alpha pixels that source-over compositing
-       * cannot fully overwrite on the next paint. */
-      bctx.fillStyle = pixelToCssColor(bgColor);
-      bctx.fillRect(bx, by, bx2 - bx, by2 - by);
-    }
+    /* Always clear the text background rect before drawing. Canvas
+     * fillText anti-aliases every glyph; with source-over compositing
+     * the partial-alpha edge pixels cannot be fully overwritten by a
+     * subsequent fillText at the same position. Each re-draw on top of
+     * the existing backing-store text darkens the fringe, and after a
+     * few cycles of Enter↔Leave crossings or occluder-driven Expose
+     * the text looks visibly bolder.
+     *
+     * Painter-model callers expect the bg to be clean before every
+     * XDrawString; layer-model backing stores do not guarantee that --
+     * the previous text pixels live on in the OffscreenCanvas until
+     * actively overwritten. Always painting the bg rect makes text
+     * drawing idempotent regardless of imageMode, at the cost of one
+     * extra fillRect per XDrawString call. */
+    bctx.fillStyle = pixelToCssColor(bgColor);
+    bctx.fillRect(bx, by, bx2 - bx, by2 - by);
     bctx.fillStyle = pixelToCssColor(fgColor);
     bctx.fillText(text, x, y);
   });

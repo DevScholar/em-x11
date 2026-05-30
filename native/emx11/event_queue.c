@@ -11,6 +11,56 @@
 #include <unistd.h>
 
 bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
+  /* Expose coalescing: when the queue already holds an Expose event for
+   * the same window, merge the new rectangle into the existing one and
+   * bump its count. This mirrors xorg's miSendExposures / miWindowExposures
+   * (mi/miexpose.c) which union rectangles and set count to the number of
+   * remaining rects. Without this, every XClearArea(exposures=True) during
+   * a widget Redisplay pushes a new Expose with count=0; the event loop
+   * picks it up, calls Redisplay again (which clears + draws + pushes
+   * another Expose), and the cycle never terminates. Each cycle draws
+   * anti-aliased text on top of the previous text, making it bolder.
+   *
+   * By merging same-window Expose events we:
+   *  - break the infinite Expose → Redisplay → XClearArea → Expose chain
+   *  - deliver at most one Expose per window per event-loop tick
+   *  - let the count field accumulate so clients can check `count==0`
+   *    before paying for a full redraw (standard Xt practice). */
+  if (event->type == Expose) {
+    Window w = event->xexpose.window;
+    unsigned int cap = EMX11_EVENT_QUEUE_CAPACITY;
+    unsigned int idx = dpy->event_head;
+    while (idx != dpy->event_tail) {
+      XEvent* ex = &dpy->event_queue[idx];
+      if (ex->type == Expose && ex->xexpose.window == w) {
+        /* Merge: replace the existing rect with the bounding box of
+         * both rects. xorg also unions, not appends (miRectUnion). */
+        int nx1 = ex->xexpose.x, ny1 = ex->xexpose.y;
+        int nx2 = nx1 + (int)ex->xexpose.width;
+        int ny2 = ny1 + (int)ex->xexpose.height;
+        int ox1 = event->xexpose.x, oy1 = event->xexpose.y;
+        int ox2 = ox1 + (int)event->xexpose.width;
+        int oy2 = oy1 + (int)event->xexpose.height;
+        if (ox1 < nx1)
+          nx1 = ox1;
+        if (oy1 < ny1)
+          ny1 = oy1;
+        if (ox2 > nx2)
+          nx2 = ox2;
+        if (oy2 > ny2)
+          ny2 = oy2;
+        ex->xexpose.x = nx1;
+        ex->xexpose.y = ny1;
+        ex->xexpose.width = (unsigned int)(nx2 - nx1);
+        ex->xexpose.height = (unsigned int)(ny2 - ny1);
+        ex->xexpose.count = (unsigned short)(ex->xexpose.count + 1);
+        return true;
+      }
+      idx = (idx + 1) % cap;
+    }
+    /* Fall through: first Expose for this window, push normally. */
+  }
+
   unsigned int next_tail = (dpy->event_tail + 1) % EMX11_EVENT_QUEUE_CAPACITY;
   if (next_tail == dpy->event_head) {
     return false;
