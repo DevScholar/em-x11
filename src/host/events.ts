@@ -230,32 +230,26 @@ export class EventDispatcher {
         }
         module = conn.module;
       }
-      /* xorg RECTLIMIT cap: single bounding-box Expose when too many
-       * fragments (mi/miexpose.c:80). */
-      if (region.length > 25) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const r of region) {
-          if (r.ax < minX) minX = r.ax;
-          if (r.ay < minY) minY = r.ay;
-          if (r.ax + r.w > maxX) maxX = r.ax + r.w;
-          if (r.ay + r.h > maxY) maxY = r.ay + r.h;
-        }
-        module.ccall(
-          'emx11_push_expose_event',
-          null,
-          ['number', 'number', 'number', 'number', 'number'],
-          [id, minX - origin.ax, minY - origin.ay, maxX - minX, maxY - minY],
-        );
-        continue;
-      }
+      /* Always send ONE Expose per window using the bounding box of
+       * the entire exposed region. Sending multiple rects triggers the
+       * Expose coalescing in emx11_event_queue_push, which used to
+       * increment count on merge — breaking twm's HandleExpose (skips
+       * redraw when count != 0) and Xt's dispatch (defers Redisplay
+       * until count == 0). A single bounding-box Expose with count==0
+       * is always correct and avoids the count-ordering dependency. */
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const r of region) {
-        module.ccall(
-          'emx11_push_expose_event',
-          null,
-          ['number', 'number', 'number', 'number', 'number'],
-          [id, r.ax - origin.ax, r.ay - origin.ay, r.w, r.h],
-        );
+        if (r.ax < minX) minX = r.ax;
+        if (r.ay < minY) minY = r.ay;
+        if (r.ax + r.w > maxX) maxX = r.ax + r.w;
+        if (r.ay + r.h > maxY) maxY = r.ay + r.h;
       }
+      module.ccall(
+        'emx11_push_expose_event',
+        null,
+        ['number', 'number', 'number', 'number', 'number'],
+        [id, minX - origin.ax, minY - origin.ay, maxX - minX, maxY - minY],
+      );
     }
   }
 

@@ -53,7 +53,12 @@ bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
         ex->xexpose.y = ny1;
         ex->xexpose.width = (unsigned int)(nx2 - nx1);
         ex->xexpose.height = (unsigned int)(ny2 - ny1);
-        ex->xexpose.count = (unsigned short)(ex->xexpose.count + 1);
+        /* count=0 tells the client no more Expose events follow for
+         * this window. Real X sends count=N-1, N-2, ..., 0 for a
+         * batch; incrementing made every coalesced event appear to
+         * have more events to follow, starving twm's HandleExpose
+         * and Xt's Redisplay forever. */
+        ex->xexpose.count = 0;
         return true;
       }
       idx = (idx + 1) % cap;
