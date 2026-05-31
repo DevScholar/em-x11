@@ -54,7 +54,10 @@ EM_JS(void, emx11_js_init, (int screenWidth, int screenHeight), {
 });
 
 EM_JS(void, emx11_js_open_display, (int connIdPtr, int basePtr, int maskPtr), {
-  var host = Module['emx11Host'];
+  /* Side-module path (Pyodide dlopen in a Worker): Module['emx11Host'] is
+   * unset until openDisplay writes it. Fall back to the globalThis slot
+   * that attachToBridge() populates. */
+  var host = Module['emx11Host'] || globalThis.__emx11Host;
   if (!host) {
     HEAP32[connIdPtr >> 2] = 0;
     HEAPU32[basePtr >> 2] = 0;

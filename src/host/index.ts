@@ -166,6 +166,11 @@ export class Host implements EmX11Host {
     // Fallback for L2/L3 paths where Module isn't a global yet
     // (createEmX11 / initEmX11 before any emscripten factory runs).
     (globalThis as any).__emx11Debug = surface;
+    // Side-module path (Pyodide dlopen in a Worker): Module isn't a
+    // global and the side module's own Module scope doesn't inherit
+    // from it.  Export the Host on globalThis so emx11_js_open_display
+    // can find it before open() writes it onto the side module's scope.
+    (globalThis as Record<string, unknown>).__emx11Host = this;
   }
 
   /** Build the debug surface exposed as Module['emx11Debug'].

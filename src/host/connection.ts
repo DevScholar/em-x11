@@ -282,6 +282,13 @@ export class ConnectionManager {
      * the Host without reaching for the global scope. */
     (rawModule as Record<string, unknown>)['emx11Host'] = this.host;
 
+    /* Push the browser-resolved keyboard layout into the client's
+     * keysym_table before its first KeyPress. Mirrors what launchClient
+     * and bindModule do for the static-link / explicit-bind paths.
+     * Fire-and-forget: the Host constructor already started the fetch,
+     * so the Promise is typically already resolved by now. */
+    void this.host.keyboardLayout.applyToModule(rawModule);
+
     return { connId, xidBase, xidMask };
   }
 
