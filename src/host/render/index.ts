@@ -38,6 +38,7 @@ import type { ManagedWindow, PixmapLookup, RendererState } from './types.js';
 import type { Region } from './region.js';
 import * as tree from './window-tree.js';
 import * as draw from './draw.js';
+import { snapshotClips, paintExposedRegions } from './paint.js';
 import { findWindowAt } from './hit-test.js';
 import {
   createCompositorState,
@@ -45,10 +46,18 @@ import {
   composeNow as compComposeNow,
   type CompositorState,
 } from './compositor.js';
+import {
+  dumpWindow,
+  dumpComposite,
+  dumpWindowCompare,
+  AutoSnapshotManager,
+} from './dump.js';
 
 export type { ManagedWindow, PixmapLookup, RendererState } from './types.js';
 export type { Region } from './region.js';
+export type { WindowDump, SnapshotEvent, Snapshot, AutoSnapshotConfig } from './dump.js';
 export { arcPath } from './draw.js';
+export { AutoSnapshotManager } from './dump.js';
 
 export class Renderer implements RendererState {
   readonly canvas: RootCanvas;
@@ -61,6 +70,10 @@ export class Renderer implements RendererState {
    *  that affects visible pixels calls `markDirty` (or, for callers
    *  that need pixels visible immediately, `composeNow`). */
   readonly compState: CompositorState = createCompositorState();
+  /** Auto-snapshot ring buffer. Set by DebugNamespace when
+   *  em.debug.autoSnapshot.enabled is toggled. Undefined (no-op) by
+   *  default so the hot-path check is a single undefined guard. */
+  autoSnapshot?: AutoSnapshotManager = undefined;
 
   constructor(canvas: RootCanvas, pixmapLookup: PixmapLookup = () => null) {
     this.canvas = canvas;
@@ -104,6 +117,16 @@ export class Renderer implements RendererState {
   setWindowShape(id: number, rects: ShapeRect[]): Map<number, Region> { return tree.setWindowShape(this, id, rects); }
   raiseWindow(id: number): Map<number, Region> { return tree.raiseWindow(this, id); }
   lowerWindow(id: number): Map<number, Region> { return tree.lowerWindow(this, id); }
+  /** Snapshot all clips, recompute from scratch, and return newly-exposed
+   *  regions for every mapped window. Use at grab-release boundaries
+   *  (resize/move end) to catch shape or clip changes that landed after
+   *  the last configure/reconfigure pass — mirroring XRaiseWindow's
+   *  paintExposedRegions at the start of the next drag. */
+  refreshExposeAll(): Map<number, Region> {
+    const oldClips = snapshotClips(this);
+    tree.recomputeClipsAll(this);
+    return paintExposedRegions(this, oldClips);
+  }
 
   parentOf(id: number): number { return tree.parentOf(this, id); }
   mappedDescendants(id: number): number[] { return tree.mappedDescendants(this, id); }
@@ -196,4 +219,14 @@ export class Renderer implements RendererState {
   composeNow(): void {
     compComposeNow(this, this.compState);
   }
+
+  /* -- debug dump ------------------------------------------------------- */
+
+  /** Dump a window's backing + shapeMask + root canvas crop as viewable
+   *  images. Opens each in a new tab and logs metadata to console. */
+  async dumpWindow(id: number) { return dumpWindow(this, id); }
+  /** Dump the full root canvas as a PNG. */
+  async dumpComposite() { return dumpComposite(this); }
+  /** Side-by-side comparison: backing (left) vs root canvas crop (right). */
+  async dumpWindowCompare(id: number) { return dumpWindowCompare(this, id); }
 }

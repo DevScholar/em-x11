@@ -12,6 +12,11 @@ import type {
   EmscriptenModule,
   EmscriptenModuleFactory,
 } from '../types/emscripten.js';
+import type {
+  WindowDump,
+  Snapshot,
+  AutoSnapshotConfig,
+} from '../host/render/dump.js';
 
 /* -- factory ------------------------------------------------------------- */
 
@@ -264,6 +269,26 @@ export interface EmX11Debug {
   dumpWindows(): void;
   /** Print every registered passive button grab. */
   dumpGrabs(): void;
+  /** Dump a window's backing surface + shapeMask + root canvas crop as
+   *  viewable PNGs. Opens each in a new tab; logs metadata + inline
+   *  &lt;img&gt; previews to console. Async — await in DevTools. */
+  dumpWindow(id: number): Promise<WindowDump | null>;
+  /** Dump the full root canvas (composited output) as a PNG. Opens in a
+   *  new tab. Returns the blob URL. */
+  dumpComposite(): Promise<string>;
+  /** Side-by-side comparison: backing (left) vs root canvas crop (right)
+   *  for a single window. Opens in a new tab. */
+  dumpWindowCompare(id: number): Promise<string | null>;
+  /** Auto-snapshot: event-driven ring buffer. Toggle
+   *  `em.debug.autoSnapshot.enabled = true` to start capturing on every
+   *  configure/shape/map/raise event. `snapshots` array (newest last).
+   *  `snapshotNow(id)` captures a single manual snapshot. */
+  readonly autoSnapshot: AutoSnapshotConfig & {
+    readonly snapshots: readonly Snapshot[];
+    snapshotNow(windowId: number): Promise<Snapshot>;
+    show(): void;
+    clear(): void;
+  };
 }
 
 /* -- child_process ------------------------------------------------------- */

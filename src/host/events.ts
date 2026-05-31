@@ -244,11 +244,15 @@ export class EventDispatcher {
         if (r.ax + r.w > maxX) maxX = r.ax + r.w;
         if (r.ay + r.h > maxY) maxY = r.ay + r.h;
       }
+      const lx = minX - origin.ax;
+      const ly = minY - origin.ay;
+      const lw = maxX - minX;
+      const lh = maxY - minY;
       module.ccall(
         'emx11_push_expose_event',
         null,
         ['number', 'number', 'number', 'number', 'number'],
-        [id, minX - origin.ax, minY - origin.ay, maxX - minX, maxY - minY],
+        [id, lx, ly, lw, lh],
       );
     }
   }

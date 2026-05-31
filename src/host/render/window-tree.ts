@@ -170,7 +170,8 @@ function computeClipsRecursive(
    * xserver/Xext/shape.c. */
   win.borderClip = universe;
 
-  let innerUniverse = regionIntersect(universe, winSize(r, win));
+  const ws = winSize(r, win);
+  let innerUniverse = regionIntersect(universe, ws);
 
   /* Top-to-bottom traversal: descending stackOrder so each iteration
    * sees only what wasn't covered by higher-z siblings. */
@@ -450,6 +451,7 @@ export function configureWindow(
    * into `unpaintedRegion` above, so paintExposedRegions sees them as
    * "newly visible AND unpainted" and emits Expose + bg paint for the
    * grown area without any special-case branch here. */
+  r.autoSnapshot?.scheduleCapture(r, 'configure', id);
   return paintExposedRegions(r, oldClips);
 }
 
@@ -498,6 +500,7 @@ export function raiseWindow(r: RendererState, id: number): Map<number, Region> {
   const oldClips = snapshotClips(r);
   w.stackOrder = r.stackCounter++;
   recomputeClipsAll(r);
+  r.autoSnapshot?.scheduleCapture(r, 'raise', id);
   return paintExposedRegions(r, oldClips);
 }
 
@@ -665,10 +668,18 @@ export function setWindowShape(r: RendererState, id: number, rects: ShapeRect[])
     w.shapeMask = null;
   }
 
+  /* Shape mask changed: the compositor's paintShapedWindow uses this
+   * mask, so even if paintExposedRegions below finds no clip change
+   * (shape rects may produce near-identical absolute regions), a
+   * re-composite is still required. Without this the stale mask from
+   * configureWindow survives until the next unrelated rAF wakeup. */
+  r.markDirty();
+
   if (!w.mapped) return new Map();
 
   const oldClips = snapshotClips(r);
   recomputeClipsAll(r);
+  r.autoSnapshot?.scheduleCapture(r, 'shape', id);
   return paintExposedRegions(r, oldClips);
 }
 
@@ -705,6 +716,7 @@ export function mapWindow(r: RendererState, id: number): Map<number, Region> {
    * chain blocks them); paintExposedRegions naturally no-ops on them.
    * When the ancestor later maps, ITS recompute discovers the now-
    * viewable subtree and the diff is non-empty. */
+  r.autoSnapshot?.scheduleCapture(r, 'map', id);
   return paintExposedRegions(r, oldClips);
 }
 

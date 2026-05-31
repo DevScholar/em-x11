@@ -90,10 +90,21 @@ export function paintExposedRegions(
        * sent on re-Map and the widget never redraws. Match xorg by
        * treating NotViewable→Viewable transitions as fully unpainted. */
       const wasNotViewable = regionIsEmpty(old.clip);
+      /* When old.clip was forced empty (ForgetGravity resize, or genuine
+       * not-viewable→viewable transition), expose the full content rect
+       * regardless of the current shape. The shape may still be stale from
+       * before the resize (the app hasn't called XShapeCombineRectangles
+       * yet), and clipping exposed to the old shape causes the window to
+       * only partially redraw, leaving the grown areas blank until the
+       * next shape update — which may never arrive if the app only sets
+       * shape once at startup. */
+      const effectiveContentExposed = wasNotViewable
+        ? [{ ax, ay, w: w.width, h: w.height }]
+        : contentExposed;
       const effectiveUnpainted = wasNotViewable
         ? [{ ax: 0, ay: 0, w: w.width, h: w.height }]
         : w.unpaintedRegion;
-      const exposedLocal = contentExposed.map((rc) => ({
+      const exposedLocal = effectiveContentExposed.map((rc) => ({
         ax: rc.ax - ax,
         ay: rc.ay - ay,
         w: rc.w,
@@ -103,6 +114,22 @@ export function paintExposedRegions(
       if (!regionIsEmpty(needsRedrawLocal)) {
         for (const rc of needsRedrawLocal) {
           paintBackgroundIntoBacking(r, w, rc.ax, rc.ay, rc.w, rc.h);
+        }
+        /* When bgType is 'none', paintBackgroundIntoBacking returns
+         * early without calling markBackingPainted, so unpaintedRegion
+         * stays full forever. If we just sent a full-content Expose
+         * (wasNotViewable), the client will redraw everything -- clear
+         * unpaintedRegion so the next paintExposedRegions (e.g. from
+         * setWindowShape arriving a microtask later) doesn't send a
+         * redundant Expose whose XClearWindow call would overwrite
+         * what the client just drew in the center area. We only do
+         * this for the wasNotViewable path; normal occluder-driven
+         * exposures must still consult unpaintedRegion so areas that
+         * were truly never drawn get re-exposed. */
+        if (wasNotViewable) {
+          for (const rc of needsRedrawLocal) {
+            markBackingPainted(w, rc.ax, rc.ay, rc.w, rc.h);
+          }
         }
         const exposedAbs: Region = needsRedrawLocal.map((rc) => ({
           ax: rc.ax + ax,

@@ -9,6 +9,7 @@
 import type { RootCanvas } from '../../runtime/canvas.js';
 import type { ShapeRect } from '../../types/emscripten.js';
 import type { Region } from './region.js';
+import type { AutoSnapshotManager } from './dump.js';
 
 export interface ManagedWindow {
   id: number;
@@ -146,4 +147,8 @@ export interface RendererState {
    *  mutates a backing surface or window-tree state that affects
    *  visible pixels. Coalesced internally; safe to call repeatedly. */
   markDirty(): void;
+  /** Auto-snapshot ring buffer. Set by DebugNamespace when
+   *  em.debug.autoSnapshot.enabled is toggled on; undefined
+   *  otherwise so the hot-path check is a single undefined guard. */
+  autoSnapshot?: AutoSnapshotManager;
 }

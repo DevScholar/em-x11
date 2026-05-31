@@ -1,16 +1,14 @@
 /**
- * em.debug — toggleable trace flags + state dumpers.
+ * em.debug — trace flags + state dumpers + pixel dump.
  *
- * The flag fields read/write a module-level debug store (see
- * runtime/debug-flags.ts). Host.attachToBridge() initialises both
- * the module-level store (for Host TS code) and Module['emx11Debug']
- * (for JS library / EM_JS code inside the emscripten factory).
- * Both hold the same object reference, so DevTools toggles and API
- * calls are visible everywhere.
+ * Delegates to the Host's renderer for dump methods. The same surface
+ * is also exposed as Module['emx11Debug'] by Host.attachToBridge() for
+ * L1 (static-link) access from DevTools.
  */
 
 import type { Host } from '../host/index.js';
 import { dumpWindows as renderDumpWindows } from '../host/render/hit-test.js';
+import { AutoSnapshotManager } from '../host/render/dump.js';
 import { ensureDebugFlags } from '../runtime/debug-flags.js';
 import type { EmX11Debug } from './types.js';
 
@@ -23,28 +21,20 @@ export class DebugNamespace implements EmX11Debug {
 
   get traceHit(): boolean { return this.state.traceHit; }
   set traceHit(v: boolean) { this.state.traceHit = v; }
-
   get traceHitNext(): boolean { return this.state.traceHitNext; }
   set traceHitNext(v: boolean) { this.state.traceHitNext = v; }
-
   get traceMotion(): boolean { return this.state.traceMotion; }
   set traceMotion(v: boolean) { this.state.traceMotion = v; }
-
   get traceButton(): boolean { return this.state.traceButton; }
   set traceButton(v: boolean) { this.state.traceButton = v; }
-
   get tracePaint(): boolean { return this.state.tracePaint; }
   set tracePaint(v: boolean) { this.state.tracePaint = v; }
-
   get traceCBtn(): boolean { return this.state.traceCBtn; }
   set traceCBtn(v: boolean) { this.state.traceCBtn = v; }
-
   get traceCMot(): boolean { return this.state.traceCMot; }
   set traceCMot(v: boolean) { this.state.traceCMot = v; }
-
   get traceMove(): boolean { return this.state.traceMove; }
   set traceMove(v: boolean) { this.state.traceMove = v; }
-
   get traceQp(): boolean { return this.state.traceQp; }
   set traceQp(v: boolean) { this.state.traceQp = v; }
 
@@ -54,5 +44,39 @@ export class DebugNamespace implements EmX11Debug {
 
   dumpGrabs(): void {
     this.host.grabs.dump();
+  }
+
+  dumpWindow(id: number) {
+    return this.host.renderer.dumpWindow(id);
+  }
+
+  dumpComposite() {
+    return this.host.renderer.dumpComposite();
+  }
+
+  dumpWindowCompare(id: number) {
+    return this.host.renderer.dumpWindowCompare(id);
+  }
+
+  /** Auto-snapshot. Single source of truth is host.renderer.autoSnapshot;
+   *  both Module['emx11Debug'] and em.debug share the same ring buffer. */
+  get autoSnapshot() {
+    const r = this.host.renderer;
+    if (!r.autoSnapshot) {
+      r.autoSnapshot = new AutoSnapshotManager();
+    }
+    const mgr = r.autoSnapshot;
+    return {
+      get enabled() { return mgr.config.enabled; },
+      set enabled(v: boolean) { mgr.config.enabled = v; },
+      get events() { return mgr.config.events; },
+      set events(v) { mgr.config.events = v; },
+      get maxSnapshots() { return mgr.config.maxSnapshots; },
+      set maxSnapshots(v: number) { mgr.config.maxSnapshots = v; },
+      get snapshots() { return mgr.snapshots; },
+      snapshotNow: (windowId: number) => mgr.snapshotNow(r, windowId),
+      show: () => mgr.show(),
+      clear: () => mgr.clear(),
+    };
   }
 }

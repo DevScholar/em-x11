@@ -33,8 +33,9 @@
 import { RootCanvas } from '../runtime/canvas.js';
 import type { RootCanvasOptions } from '../runtime/canvas.js';
 import { ensureDebugFlags } from '../runtime/debug-flags.js';
-import { Renderer } from './render/index.js';
+import { Renderer, AutoSnapshotManager } from './render/index.js';
 import { absOrigin } from './render/window-tree.js';
+import { dumpWindows as renderDumpWindows } from './render/hit-test.js';
 import { AtomManager } from './atom.js';
 import { PropertyManager } from './property.js';
 import { EventDispatcher } from './events.js';
@@ -153,17 +154,82 @@ export class Host implements EmX11Host {
     // (hit-test, window-tree, draw, devices) can read it even when
     // Module is not a global (L2/L3 — user's ES module scope).
     const dbg = ensureDebugFlags();
+    const surface = this._buildDebugSurface(dbg);
 
-    // Mirror to Module for JS library / EM_JS code inside the
-    // emscripten factory (L1 — static link). Same object reference
-    // so DevTools toggles on Module['emx11Debug'] are live in both.
     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
     const M = (typeof Module !== 'undefined' ? Module : null) as Record<string, any> | null;
     if (M) {
       M['emx11Host'] = this;
       if (!M['emx11Caches']) M['emx11Caches'] = {};
-      M['emx11Debug'] = dbg;
+      M['emx11Debug'] = surface;
     }
+    // Fallback for L2/L3 paths where Module isn't a global yet
+    // (createEmX11 / initEmX11 before any emscripten factory runs).
+    (globalThis as any).__emx11Debug = surface;
+  }
+
+  /** Build the debug surface exposed as Module['emx11Debug'].
+   *  Combines trace flags (from debug-flags.ts) with pixel-dump
+   *  methods and auto-snapshot controls. */
+  private _buildDebugSurface(dbg: ReturnType<typeof ensureDebugFlags>) {
+    const host = this;
+
+    function autoSnapshotMgr(): AutoSnapshotManager {
+      if (!host.renderer.autoSnapshot) {
+        host.renderer.autoSnapshot = new AutoSnapshotManager();
+      }
+      return host.renderer.autoSnapshot;
+    }
+
+    function autoSnapshot() {
+      const mgr = autoSnapshotMgr();
+      return {
+        get enabled() { return mgr.config.enabled; },
+        set enabled(v: boolean) { mgr.config.enabled = v; },
+        get events() { return mgr.config.events; },
+        set events(v) { mgr.config.events = v; },
+        get maxSnapshots() { return mgr.config.maxSnapshots; },
+        set maxSnapshots(v: number) { mgr.config.maxSnapshots = v; },
+        get snapshots() { return mgr.snapshots; },
+        snapshotNow: (windowId: number) => mgr.snapshotNow(host.renderer, windowId),
+        show: () => mgr.show(),
+        clear: () => mgr.clear(),
+      };
+    }
+
+    return {
+      // trace flags
+      get traceHit() { return dbg.traceHit; },
+      set traceHit(v: boolean) { dbg.traceHit = v; },
+      get traceHitNext() { return dbg.traceHitNext; },
+      set traceHitNext(v: boolean) { dbg.traceHitNext = v; },
+      get traceMotion() { return dbg.traceMotion; },
+      set traceMotion(v: boolean) { dbg.traceMotion = v; },
+      get traceButton() { return dbg.traceButton; },
+      set traceButton(v: boolean) { dbg.traceButton = v; },
+      get tracePaint() { return dbg.tracePaint; },
+      set tracePaint(v: boolean) { dbg.tracePaint = v; },
+      get traceCBtn() { return dbg.traceCBtn; },
+      set traceCBtn(v: boolean) { dbg.traceCBtn = v; },
+      get traceCMot() { return dbg.traceCMot; },
+      set traceCMot(v: boolean) { dbg.traceCMot = v; },
+      get traceMove() { return dbg.traceMove; },
+      set traceMove(v: boolean) { dbg.traceMove = v; },
+      get traceQp() { return dbg.traceQp; },
+      set traceQp(v: boolean) { dbg.traceQp = v; },
+
+      // state dumpers
+      dumpWindows: () => renderDumpWindows(host.renderer),
+      dumpGrabs: () => host.grabs.dump(),
+
+      // pixel dump
+      dumpWindow: (id: number) => host.renderer.dumpWindow(id),
+      dumpComposite: () => host.renderer.dumpComposite(),
+      dumpWindowCompare: (id: number) => host.renderer.dumpWindowCompare(id),
+
+      // auto-snapshot (lazy init on first access)
+      get autoSnapshot() { return autoSnapshot(); },
+    };
   }
 
   launchClient(opts: LoadOptions): Promise<{ connId: number; module: EmscriptenModule }> {
@@ -356,6 +422,15 @@ export class Host implements EmX11Host {
   }
   onUngrabPointer(): void {
     this.devices.clearActivePointerGrab();
+    /* Resize/move end: the compositor may have composed with a stale
+     * shapeMask between configureWindow (which rebuilds it from old
+     * win.shape) and setWindowShape (which updates both win.shape and
+     * the mask from the client's XShapeCombineRectangles).  Snapshot +
+     * recompute + paintExposedRegions catches any missed clip changes,
+     * mirroring the XRaiseWindow-triggered repaint at the start of the
+     * next drag. */
+    const exposed = this.renderer.refreshExposeAll();
+    this.events.pushExposesForRegions(exposed, null);
   }
 
   /** Defer-and-coalesce pointer-window repoll, scheduled by C-side
