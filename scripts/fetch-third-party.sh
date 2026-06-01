@@ -38,6 +38,13 @@ TARBALL_CACHE="$REPO_ROOT/ignored-area/tarballs"
 # in the environment can compromise the build" errors.
 rm -f "$CONFIG_CACHE"
 
+# Strip CR from the dummy pkg-config script so the shebang works even
+# when the file was checked out with CRLF on Windows (belt-and-suspenders
+# for the .gitattributes fix).
+if [ -f "$REPO_ROOT/scripts/emx11-pkg-config" ]; then
+    sed -i 's/\r$//' "$REPO_ROOT/scripts/emx11-pkg-config"
+fi
+
 log()  { printf '    %s\n' "$*"; }
 warn() { printf '    WARNING: %s\n' "$*"; }
 die()  { printf 'fetch-third-party: %s\n' "$*" >&2; exit 1; }
@@ -152,8 +159,14 @@ run_configure() {
     # config.cache so repeated fetches are fast. A dummy pkg-config
     # bypasses PKG_CHECK_MODULES.
     #
-    # If configure exits non-zero (e.g. missing build tool like yacc),
-    # fall back to generating config.h from config.h.in via the cache.
+    # Returns 0 when configure itself succeeds, non-zero when it fails.
+    # If configure exits non-zero but config.h was left behind (e.g. the
+    # run wrote it before a late error), we still return non-zero so the
+    # caller can decide whether to count this as "done."
+    #
+    # If configure fails, fall back to generating config.h from
+    # config.h.in via the cache values — but the function still returns
+    # non-zero so fetch_one knows configure needs a retry next time.
     local dir="$1" name="$2"
     local extra_args="${3:-}"
     if [ ! -x "$dir/configure" ]; then
@@ -161,6 +174,7 @@ run_configure() {
         return 0
     fi
     log "running configure for $name"
+    local configure_ok=0
     (cd "$dir" && \
      CONFIG_SITE="$CONFIG_CACHE" \
      PKG_CONFIG="$REPO_ROOT/scripts/emx11-pkg-config" \
@@ -176,18 +190,27 @@ run_configure() {
          --without-xsltproc \
          --disable-nls \
          $extra_args \
-         2>&1) || warn "configure for $name had non-zero exit"
-    if [ -f "$dir/config.h" ]; then
+         2>&1) && configure_ok=1
+
+    if [ "$configure_ok" -eq 1 ]; then
         log "config.h generated for $name"
         return 0
     fi
 
+    warn "configure for $name had non-zero exit"
+
     # Fallback: configure failed before writing config.h (e.g. missing
     # yacc/bison). Generate it from config.h.in using the cache values.
+    # config.h might already exist from a previous run's fallback.
+    if [ -f "$dir/config.h" ]; then
+        log "keeping existing config.h for $name (from previous run)"
+        return 1
+    fi
+
     local hin="$dir/config.h.in"
     if [ ! -f "$hin" ]; then
         warn "no config.h.in for $name, cannot generate config.h"
-        return 0
+        return 1
     fi
     log "generating config.h for $name from config.h.in (configure fallback)"
 
@@ -228,11 +251,14 @@ EOF
     sed -i -f "$sedfile" "$dir/config.h"
     rm -f "$sedfile"
     log "config.h generated for $name (fallback)"
+    return 1
 }
 
 fetch_one() {
     local name="$1" up="$2" ver="$3" url_base="$4" layout="${5:-lib}"
     local extra_config_args="${6:-}"
+    local need_configure=0
+    local configure_ok=0
     local tarball
     if [ "$layout" = "mesa-xdemo" ]; then
         tarball="mesa-demos-$ver.tar.xz"
@@ -293,7 +319,8 @@ fetch_one() {
         lib)
             # Run configure in the full extracted tree to generate config.h,
             # then copy the buildable subset (src, include, config.h) to dst.
-            run_configure "$extracted" "$name" "$extra_config_args"
+            need_configure=1
+            run_configure "$extracted" "$name" "$extra_config_args" && configure_ok=1
             [ -d "$extracted/src" ]     && cp -r "$extracted/src"     "$dst/src"
             [ -d "$extracted/include" ] && cp -r "$extracted/include" "$dst/include"
             [ -f "$extracted/config.h" ] && cp    "$extracted/config.h" "$dst/config.h"
@@ -333,7 +360,8 @@ fetch_one() {
         app)
             # Mirror the full tree, then run configure inside dst.
             cp -r "$extracted/." "$dst/"
-            run_configure "$dst" "$name" "$extra_config_args"
+            need_configure=1
+            run_configure "$dst" "$name" "$extra_config_args" && configure_ok=1
             ;;
         data)
             cp -r "$extracted/." "$dst/"
@@ -350,7 +378,12 @@ fetch_one() {
     esac
 
     # Mark as successfully fetched so re-runs skip this library.
-    touch "$dst/.fetched"
+    # For layouts that run configure, only mark success when configure
+    # itself succeeded — a fallback-generated config.h is best-effort
+    # and should not prevent a retry next time.
+    if [ "$need_configure" -eq 0 ] || [ "$configure_ok" -eq 1 ]; then
+        touch "$dst/.fetched"
+    fi
 
     # Clean up temp. tarballs can contain read-only files that break
     # rm -rf on Windows-hosted filesystems; chmod first to be safe.
