@@ -8,13 +8,10 @@ const demos = [
   { name: 'xt-hello', description: 'libXt Shell + Core child widget' },
   { name: 'xeyes', description: 'Classic eyes-track-mouse demo (SHAPE + arc drawing)' },
   { name: 'xcalc', description: 'Xaw-based calculator (single-thread Host mode)' },
-  { name: 'twm', description: 'Tab Window Manager, running as a standalone client' },
   {
     name: 'twm-session',
     description:
-      'twm + xeyes + xcalc together in single-thread Host mode. All ' +
-      'wasm clients share the main JS thread; the Host owns the canvas ' +
-      'and window tree directly (no workers, no OffscreenCanvas).',
+      'twm + xeyes + xcalc together in single-thread Host mode.',
   },
 ];
 

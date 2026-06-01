@@ -54,7 +54,6 @@ em-x11/
 │   ├── xt-hello/              —   Xt Shell + widget
 │   ├── xeyes/, xcalc/         —   classic X apps
 │   ├── glxgears/              —   OpenGL demo
-│   ├── twm/                   —   window manager (wasm artifact only, no HTML)
 │   └── twm-session/           —   combined twm + xeyes + xcalc
 ├── src/                       — TypeScript host/runtime (browser side)
 │   ├── api/                   —   public JS API

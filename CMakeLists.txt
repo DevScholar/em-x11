@@ -44,7 +44,5 @@ add_subdirectory(examples/xt-hello)
 add_subdirectory(examples/xcalc)
 add_subdirectory(examples/xeyes)
 add_subdirectory(examples/glxgears)
-# twm has no standalone demo page (twm-session/ is the only harness that
-# launches it), but we still need its wasm artifact -- keep the build
-# recipe alive.
+# twm wasm artifact needed by twm-session demo.
 add_subdirectory(examples/twm)

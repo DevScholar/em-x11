@@ -1,9 +1,4 @@
-# Build recipe for the twm wasm artifact. No standalone demo harness
-# lives in this directory (a pure-twm screen is just an empty checker
-# with nothing to manage -- not a useful demo); the twm-session demo at
-# examples/twm-session/ is the one that boots twm alongside xeyes + xcalc.
-# Vite's auto-discovery gates on index.html so the absence here
-# correctly hides this as a demo URL.
+# Build recipe for the twm wasm artifact, used by the twm-session demo.
 set(TWM_SRC_DIR "${CMAKE_SOURCE_DIR}/ignored-area/third-party/twm/src")
 
 # Source list mirrors upstream Makefile.am's twm_SOURCES. session.c uses
