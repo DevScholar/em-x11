@@ -945,6 +945,37 @@ EM_JS(void,
                           bg >>> 0);
       });
 
+EM_JS(void,
+      emx11_js_get_image,
+      (unsigned int drawable,
+       int x,
+       int y,
+       int w,
+       int h,
+       int dstPtr,
+       int dstCapacity),
+      {
+        var host = Module['emx11Host'];
+        var data =
+          host ? host.readDrawablePixels(drawable >>> 0, x, y, w, h) : null;
+        if (!data) {
+          /* Fallback: fill with default gray (X11 bg #d9d9d9).
+           * BGRA byte order so GetPixel(R,G,B) picks it up correctly. */
+          var n4 = (dstCapacity | 0) & ~3;
+          for (var i = 0; i < n4; i += 4) {
+            HEAPU8[dstPtr + i] = 0xd9;     /* B */
+            HEAPU8[dstPtr + i + 1] = 0xd9; /* G */
+            HEAPU8[dstPtr + i + 2] = 0xd9; /* R */
+            HEAPU8[dstPtr + i + 3] =
+              0xff; /* padding (protocol: 0 for planes outside mask) */
+          }
+          return;
+        }
+        var n = Math.min(data.length, dstCapacity | 0);
+        HEAPU8.set(data.subarray ? data.subarray(0, n) : data.slice(0, n),
+                   dstPtr);
+      });
+
 /* --- property ------------------------------------------------------------ */
 
 EM_JS(int,

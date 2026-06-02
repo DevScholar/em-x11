@@ -611,6 +611,68 @@ export class Host implements EmX11Host {
     this.gc.onPutImage(dstId, dstX, dstY, w, h, format, depth, bytesPerLine, data, fg, bg);
   }
 
+  /** Read pixel data from a drawable (window backing or pixmap canvas).
+   *  Used by XGetImage. Transparent pixels (alpha == 0) are filled with
+   *  the window's effective background colour so Tk's BlendComplexAlpha
+   *  gets a fully-opaque source and its alpha-compositing math doesn't
+   *  produce black for semi-transparent areas of photo images. */
+  readDrawablePixels(
+    drawable: number, x: number, y: number, w: number, h: number,
+  ): Uint8Array | null {
+    let canvas: OffscreenCanvas | null = null;
+    let bgFallback = 0xd9d9d9;
+
+    const win = this.renderer.windows.get(drawable);
+    if (win) {
+      canvas = win.backingSurface;
+      if (win.bgType === 'pixel') {
+        bgFallback = win.background;
+      } else {
+        bgFallback = this.findEffectiveBg(win);
+      }
+    } else {
+      canvas = this.gc.pixmapCanvas(drawable);
+    }
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const img = ctx.getImageData(x, y, w, h);
+    const src = img.data;
+    const len = w * h * 4;
+    const out = new Uint8Array(len);
+    const bgR = (bgFallback >> 16) & 0xff;
+    const bgG = (bgFallback >> 8) & 0xff;
+    const bgB = bgFallback & 0xff;
+    for (let i = 0; i < len; i += 4) {
+      if (src[i + 3] === 0) {
+        out[i]     = bgB;
+        out[i + 1] = bgG;
+        out[i + 2] = bgR;
+        out[i + 3] = 0xff;
+      } else {
+        out[i]     = src[i + 2];
+        out[i + 1] = src[i + 1];
+        out[i + 2] = src[i];
+        out[i + 3] = src[i + 3];
+      }
+    }
+    return out;
+  }
+
+  private findEffectiveBg(win: import('./render/types.js').ManagedWindow): number {
+    let cur = win.parent;
+    for (let safety = 0; safety < 64; safety++) {
+      if (cur === 0) break;
+      const w = this.renderer.windows.get(cur);
+      if (!w) break;
+      if (w.bgType === 'pixel') return w.background;
+      /* bgType==='pixmap': w.background is a Pixmap XID, not a color.
+       * Skip it — we can't resolve a tiled pattern to a single solid. */
+      cur = w.parent;
+    }
+    return 0xd9d9d9;
+  }
+
   /* -- EmX11Host: atoms + properties ------------------------------------ */
 
   internAtom(name: string, onlyIfExists: boolean): number {
