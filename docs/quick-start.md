@@ -41,7 +41,7 @@ A few things follow from that:
   factory. The Host is passed via `Module['emx11Host']` — a flat Module
   property, per Emscripten convention.
 
-### Three API layers
+### Two API layers
 
 em-x11 follows Emscripten conventions — the same `-sUSE_*` flag pattern
 as `-sUSE_SDL=2`. Pick the layer that fits:
@@ -49,18 +49,17 @@ as `-sUSE_SDL=2`. Pick the layer that fits:
 | Layer | How | When |
 |-------|-----|------|
 | 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects everything |
-| 2 — single program | `initEmX11()` + spread `moduleOverrides` into the factory | You want JS-side control (canvas, dimensions, asset staging) but only one wasm program |
-| 3 — multi-process | `createEmX11()` + `child_process.spawn()` | Multiple X clients sharing one display, window manager sessions |
+| 2 — createEmX11 | `createEmX11()` | JS-side control: canvas, dimensions, asset staging, single or multi-process |
 
-This tutorial uses **Layer 2** for xcalc: we need JS-side control over
-the canvas and dimensions. The `app-defaults/XCalc` file that Xt needs
-is embedded at build time via Emscripten's `--preload-file` — the glue
-loads the `.data` package automatically before `main()` runs, so no
-JS-side `preRun` hook is needed.
+This tutorial uses **Layer 2** with single-program mode: we need JS-side
+control over the canvas and dimensions. The `app-defaults/XCalc` file
+that Xt needs is embedded at build time via Emscripten's
+`--preload-file` — the glue loads the `.data` package automatically
+before `main()` runs, so no JS-side `preRun` hook is needed.
 
 Only the twm-session demo ([examples/twm-session/](../examples/twm-session/))
-uses Layer 3. Every other example (hello, xeyes, xt-hello, glxgears,
-xcalc) uses Layer 2.
+uses multi-process mode. Every other example (hello, xeyes, xt-hello,
+glxgears, xcalc) uses single-program mode.
 
 ## 1. Prerequisites
 
@@ -225,9 +224,9 @@ and `.data` files
 ([examples/xcalc/main.ts](../examples/xcalc/main.ts)):
 
 ```ts
-import { initEmX11 } from '../../src/index.js';
+import { createEmX11 } from '../../src/index.js';
 
-const x11 = await initEmX11({ width: 800, height: 600 });
+const x11 = await createEmX11({ width: 800, height: 600 });
 
 const factory = (await import('/build/artifacts/xcalc/xcalc.js')).default;
 await factory({
@@ -239,7 +238,7 @@ await factory({
 
 Key points:
 
-- `initEmX11()` creates the Host and returns `moduleOverrides` — an
+- `createEmX11()` creates the Host and returns `moduleOverrides` — an
   object with `{ emx11Host, emx11NoAutoStart: true }`. Spread it into
   the factory call so the C-side bridges find the Host.
 - `thisProgram: 'xcalc'` sets `argv[0]` so `XtResolvePathname`'s `%N`
@@ -269,15 +268,15 @@ For simple programs without assets the pattern is the same three lines.
 See [examples/hello/main.ts](../examples/hello/main.ts):
 
 ```ts
-import { initEmX11 } from '../../src/index.js';
+import { createEmX11 } from '../../src/index.js';
 
-const x11 = await initEmX11({ width: 1024, height: 768 });
+const x11 = await createEmX11({ width: 1024, height: 768 });
 
 const factory = (await import('/build/artifacts/hello/hello.js')).default;
 await factory({ ...x11.moduleOverrides });
 ```
 
-No `child_process`, no `fs`, no launcher — just `initEmX11` + spread
+No `child_process`, no `fs` — just `createEmX11` + spread
 `moduleOverrides` into the factory. xcalc's `main.ts` is identical in
 shape; the asset staging moved to `--preload-file` at build time, so
 the JS side stays minimal.
@@ -333,7 +332,7 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
 
 ## 9. What to read next
 
-- [docs/api.md](api.md) — the full `createEmX11()` / `initEmX11()` /
+- [docs/api.md](api.md) — the full `createEmX11()` /
   `emX11.fs` / `emX11.child_process.spawn` surface, including IDBFS
   persistence and tar-mount staging.
 - [docs/xorg-alignment.md](xorg-alignment.md) — what em-x11

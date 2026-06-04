@@ -59,6 +59,16 @@ export class EmX11 {
   readonly child_process: EmX11ChildProcess;
   readonly version = VERSION;
 
+  /** Module overrides to spread into the Emscripten factory call for
+   *  single-instance mode. Passes the Host to Module['emx11Host'] and
+   *  suppresses the default Host auto-start.
+   *
+   *    const factory = (await import('./myapp.js')).default;
+   *    await factory({ ...x11.moduleOverrides, ...otherOverrides });
+   *
+   *  For multi-instance mode, use x11.child_process.spawn() instead. */
+  readonly moduleOverrides: { emx11Host: Host; emx11NoAutoStart: true };
+
   /** @internal Escape hatch onto the internal Host. Surface unstable;
    *  consumers should migrate every reach-through to a public API as
    *  it becomes available. */
@@ -87,6 +97,10 @@ export class EmX11 {
     this.fs = this._fs;
     this.display = new DisplayNamespace(this._host);
     this.debug = new DebugNamespace(this._host);
+    this.moduleOverrides = {
+      emx11Host: this._host,
+      emx11NoAutoStart: true,
+    };
 
     this._dlopen = options.dlopen ?? defaultDlopen;
     this.defaultStdout = options.stdout ?? ((l) => console.log(l));

@@ -125,7 +125,7 @@ export interface Point {
  *
  * The Host is passed to the wasm Module via Module['emx11Host']
  * (flat Module property, per emscripten convention), set by
- * initEmX11() / createEmX11() through moduleOverrides.
+ * createEmX11() through moduleOverrides.
  * library_emx11.js reads it in $EmX11Host.init() at startup.
  */
 /** Legacy type bundle for the internal Host slots. These are now set
@@ -135,7 +135,7 @@ export interface Point {
  * share the same shape; only the access path changed. */
 export interface EmX11Global {
   /** Host facade dispatched into by every EM_JS body.
-   *  Set via Module['emx11Host'] by initEmX11 / createEmX11. */
+   *  Set via Module['emx11Host'] by createEmX11. */
   _bridge?: EmX11Host;
   /** Bridge-owned scratchpads (font measure ctx, font cache, text
    *  cache, property stash). Lazy-initialised by the bridges

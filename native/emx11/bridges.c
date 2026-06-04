@@ -89,6 +89,12 @@ EM_JS(void, emx11_js_flush, (void), {
     host.onFlush();
 });
 
+EM_JS(void, emx11_js_flush_roundtrip, (void), {
+  var host = Module['emx11Host'];
+  if (host && host.onFlushRoundtrip)
+    host.onFlushRoundtrip();
+});
+
 /* Hot read: XQueryPointer fires at 50ms cadence per xeyes + on every
  * pointer-related Xt dispatch. */
 EM_JS(void, emx11_js_pointer_xy, (int xPtr, int yPtr), {

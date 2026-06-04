@@ -27,7 +27,7 @@
  * it synchronously.  Internal caches / debug flags go under
  * Module?.['emx11Caches'] / Module?.['emx11Debug'].  Public-facing
  * surfaces (fs, spawn, display, debug) are on the TypeScript Host
- * object, wired by createEmX11() / initEmX11() in src/api/.
+ * object, wired by createEmX11() in src/api/.
  */
 
 import { RootCanvas } from '../runtime/canvas.js';
@@ -147,8 +147,8 @@ export class Host implements EmX11Host {
    *  it via `Module?.['emx11Host']`.  Also initialises Module?.['emx11Caches']
    *  and Module?.['emx11Debug'] (internal scratchpads shared by the bridges).
    *
-   *  Must be called BEFORE any wasm module starts. createEmX11() and
-   *  initEmX11() do this for you. */
+   *  Must be called BEFORE any wasm module starts. createEmX11()
+   *  does this for you. */
   attachToBridge(): void {
     // Always initialise module-level debug state so Host TS code
     // (hit-test, window-tree, draw, devices) can read it even when
@@ -164,7 +164,7 @@ export class Host implements EmX11Host {
       M['emx11Debug'] = surface;
     }
     // Fallback for L2/L3 paths where Module isn't a global yet
-    // (createEmX11 / initEmX11 before any emscripten factory runs).
+    // (createEmX11 before any emscripten factory runs).
     (globalThis as any).__emx11Debug = surface;
     // Side-module path (Pyodide dlopen in a Worker): Module isn't a
     // global and the side module's own Module scope doesn't inherit
@@ -396,6 +396,10 @@ export class Host implements EmX11Host {
     this.gc.onDrawString(id, x, y, font, text, fgColor, bgColor, imageMode);
   }
   onFlush(): void { this.gc.onFlush(); }
+  onFlushRoundtrip(): void {
+    /* Hook for XSync: commit any deferred rendering before events are
+     * discarded. Currently a no-op; see bridges.c emx11_js_flush_roundtrip. */
+  }
   onWindowShape(id: number, rects: ShapeRect[]): void { this.gc.onWindowShape(id, rects); }
 
   /* -- EmX11Host: passive button grab dispatch -------------------------- */

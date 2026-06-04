@@ -1,32 +1,30 @@
 /**
  * @devscholar/em-x11 public entry.
  *
- * Three API layers, from simplest to most powerful:
+ * Two API layers, from simplest to most powerful:
  *
  *   Layer 1 (zero JS): emcc myapp.c -sUSE_EMX11 -o myapp.html
  *     The port auto-injects the JS library and creates a default Host.
  *     No user JS required — same UX as emcc -sUSE_SDL=2.
  *
- *   Layer 2 (single program): initEmX11()
- *     import { initEmX11 } from '@devscholar/em-x11';
- *     const x11 = await initEmX11({ canvas, width: 1024, height: 768 });
+ *   Layer 2 (multi-instance): createEmX11()
+ *     import { createEmX11 } from '@devscholar/em-x11';
+ *     const x11 = await createEmX11({ canvas });
+ *
+ *     // Single wasm program: spread moduleOverrides into the factory
  *     const factory = (await import('./myapp.js')).default;
  *     await factory({ ...x11.moduleOverrides });
- *     // x11.display, x11.debug, no child_process concept
  *
- *   Layer 3 (multi-process): createEmX11()
- *     const session = await createEmX11({ canvas });
- *     const proc = session.child_process.spawn('/bin/xeyes', { ... });
+ *     // Multi-process session: use child_process
+ *     const proc = x11.child_process.spawn('/bin/xeyes');
  *     await proc.ready;
  *
  * Internal manager classes (Host, ConnectionManager, ...) under
- * src/host are NOT re-exported. `em._host` is a typed @internal
+ * src/host are NOT re-exported. `x11._host` is a typed @internal
  * escape hatch for callers still mid-migration.
  */
 
 export { createEmX11, EmX11, VERSION } from './api/emx11.js';
-export { initEmX11 } from './api/initEmX11.js';
-export type { InitEmX11Options, EmX11Session } from './api/initEmX11.js';
 
 export type {
   CreateEmX11Options,

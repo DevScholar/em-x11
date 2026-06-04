@@ -15,7 +15,7 @@
  *   Module['emx11ClipboardBytes'] — Uint8Array, staged before paste events
  *   Module['emx11NoAutoStart']    — skip auto-init (advanced users only)
  *
- * The Host (set via Module['emx11Host'] or by initEmX11()) must provide
+ * The Host (set via Module['emx11Host'] or by createEmX11()) must provide
  * the EmX11Host interface methods that each bridge function below
  * dispatches into.
  */

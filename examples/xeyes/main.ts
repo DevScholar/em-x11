@@ -1,14 +1,14 @@
 /**
- * xeyes demo harness — Layer 2 (single program).
+ * xeyes demo harness — single-program mode.
  *
- * initEmX11 creates the Host; we spread moduleOverrides into the
- * Emscripten factory.  No child_process needed for a single wasm
+ * createEmX11 creates the Host; spread moduleOverrides into the
+ * Emscripten factory. No child_process needed for a single wasm
  * program.
  */
 
-import { initEmX11 } from '../../src/index.js';
+import { createEmX11 } from '../../src/index.js';
 
-const x11 = await initEmX11({ width: 1024, height: 768 });
+const x11 = await createEmX11({ width: 1024, height: 768 });
 
 const factory = (await import('/build/artifacts/xeyes/xeyes.js')).default;
 await factory({ ...x11.moduleOverrides, thisProgram: 'xeyes' });

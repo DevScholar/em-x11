@@ -3,7 +3,7 @@
 > Pre-alpha. The surface described here is what the package exports today.
 > Methods may move or rename until the package hits 0.1.
 
-## Three API layers
+## Two API layers
 
 em-x11 follows Emscripten conventions — the same `-sUSE_*` flag pattern
 as `-sUSE_SDL=2`. Pick the layer that fits:
@@ -11,41 +11,32 @@ as `-sUSE_SDL=2`. Pick the layer that fits:
 | Layer | Entry point | When |
 |-------|------------|------|
 | 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects the JS library and a default Host. No user JS required. |
-| 2 — single program | `initEmX11()` + spread `moduleOverrides` into the factory | You want JS-side control (canvas, dimensions, asset staging via `preRun`) but only one wasm program. |
-| 3 — multi-process | `createEmX11()` + `child_process.spawn()` | Multiple X clients sharing one display, window manager sessions. |
+| 2 — createEmX11 | `createEmX11()` | JS-side control: canvas, dimensions, asset staging, single or multi-process. |
 
-For most use-cases, prefer Layer 1 or Layer 2. Layer 3 is only for
-multi-client sessions (twm + xeyes + xcalc on one canvas).
+Layer 2 covers both single-program and multi-process use-cases from one function.
 
 ## Top-level exports
 
 ```ts
 import {
-  // Layer 2
-  initEmX11,
-
-  // Layer 3
   createEmX11,
   EmX11,
   VERSION,
 
   // Types
-  type InitEmX11Options,
-  type EmX11Session,
   type CreateEmX11Options,
   type EmX11Debug,
   type EmX11Display,
   type EmX11FS,
-  type EmX11ChildProcess,
+  type Process,
+  type ProcessFS,
+  type SpawnOptions,
   type DlopenAdapter,
   type DlopenOptions,
   type LoadedModule,
   type InjectKeyEvent,
   type InjectMouseEvent,
   type MountSpec,
-  type Process,
-  type ProcessFS,
-  type SpawnOptions,
   type TextInputRemoteHandle,
 
   // IME cross-thread bridge
@@ -53,20 +44,18 @@ import {
 } from '@devscholar/em-x11';
 ```
 
-### `initEmX11(options?) → Promise<EmX11Session>` — Layer 2
+### `createEmX11(options?) → Promise<EmX11>`
 
-Creates a Host, attaches it to `Module['emx11Host']`, and returns
-display + debug surfaces. Use this for single-program setups where you
-want JS-side control over the canvas or need to stage assets via
-`Module.preRun`.
+Creates a Host, attaches it to `Module['emx11Host']`, and returns the
+full surface. Two usage modes from one function:
+
+**Single-program mode** — spread `moduleOverrides` into the Emscripten factory:
 
 ```ts
-import { initEmX11 } from '@devscholar/em-x11';
+import { createEmX11 } from '@devscholar/em-x11';
 
-const x11 = await initEmX11({ width: 1024, height: 768 });
+const x11 = await createEmX11({ width: 1024, height: 768 });
 
-// Load the wasm module — spread moduleOverrides so the C-side
-// bridges find the Host on Module['emx11Host'].
 const factory = (await import('/build/artifacts/hello/hello.js')).default;
 await factory({ ...x11.moduleOverrides });
 ```
@@ -85,11 +74,10 @@ emx11_finalize_demo(xcalc
 )
 ```
 
-The JS side stays minimal — same pattern as hello, plus the standard
-Emscripten `locateFile` so the runtime finds the `.wasm` and `.data`:
+The JS side stays minimal — same pattern as hello, plus `locateFile`:
 
 ```ts
-const x11 = await initEmX11({ width: 800, height: 600 });
+const x11 = await createEmX11({ width: 800, height: 600 });
 
 const factory = (await import('/build/artifacts/xcalc/xcalc.js')).default;
 await factory({
@@ -99,38 +87,8 @@ await factory({
 });
 ```
 
-#### `InitEmX11Options`
-
-| Option | Type | Notes |
-|--------|------|-------|
-| `canvas` | `HTMLCanvasElement \| OffscreenCanvas` | Canvas to paint into. Falls back to `Module['canvas']`, then `document.querySelector('#canvas')`, then auto-creates one. |
-| `parent` | `HTMLElement` | DOM parent for an auto-created canvas. |
-| `width`  | `number` | Logical width of the X screen. Default 1024. |
-| `height` | `number` | Logical height of the X screen. Default 768. |
-
-#### `EmX11Session`
-
-```ts
-interface EmX11Session {
-  readonly display: EmX11Display;
-  readonly debug: EmX11Debug;
-  /** Spread into the Emscripten factory call:
-   *    await factory({ ...x11.moduleOverrides });
-   *  Sets Module['emx11Host'] and suppresses the default Host auto-start. */
-  readonly moduleOverrides: { emx11Host: Host; emx11NoAutoStart: true };
-  /** @internal Escape hatch onto the internal Host. */
-  readonly _host: Host;
-  dispose(): void;
-}
-```
-
-`dispose()` tears down DOM listeners and the IME overlay. Idempotent.
-
-### `createEmX11(options?) → Promise<EmX11>` — Layer 3
-
-Construct a full em-x11 instance with `child_process`, `fs` staging,
-and multi-client support. Use only for multi-process sessions
-(twm + xeyes + xcalc); for single programs prefer `initEmX11`.
+**Multi-process mode** — use `child_process.spawn()` for multiple X clients
+(twm + xeyes + xcalc sharing one display):
 
 ```ts
 import { createEmX11 } from '@devscholar/em-x11';
@@ -155,7 +113,7 @@ await xeyes.ready;
 | `stderr`   | `(line: string) => void` | Default sink for `printErr`. Falls back to `console.warn`. |
 | `loaderCache` | `'use' \| 'bypass' \| 'refresh'` | Cache Storage policy for `.wasm` binary fetches. Default `'bypass'` in Vite dev mode, `'use'` otherwise. |
 
-## `EmX11` (Layer 3 instance)
+## `EmX11` instance
 
 ```ts
 interface EmX11 {
@@ -164,15 +122,17 @@ interface EmX11 {
   readonly debug: EmX11Debug;
   readonly child_process: EmX11ChildProcess;
   readonly version: string;
+  /** Spread into the Emscripten factory call for single-program mode.
+   *  Sets Module['emx11Host'] and suppresses the default Host auto-start. */
+  readonly moduleOverrides: { emx11Host: Host; emx11NoAutoStart: true };
   readonly _host: Host;  // @internal
   dlopen(soPath: string, options?: DlopenOptions): Promise<LoadedModule>;
 }
 ```
 
-`EmX11` is the full façade. Most single-program consumers should use
-`initEmX11()` instead.
+`EmX11` is the single public façade returned by `createEmX11()`.
 
-## `emX11.fs` — Linux-style staging filesystem (Layer 3 only)
+## `emX11.fs` — Linux-style staging filesystem
 
 `emX11.fs` is a **staging manifest**: every `writeFileSync` / `mkdirSync`
 / `mount` call records an entry, and each spawned process replays the
@@ -180,9 +140,8 @@ manifest into its own MEMFS during the Emscripten `preRun` hook. Stage
 shared files once at boot and every wasm child sees the same `/usr`,
 `/etc`, `/opt`.
 
-For single-program asset staging (Layer 2), use Emscripten's
-`--preload-file` at build time — see the `initEmX11`
-section above.
+For single-program asset staging, use Emscripten's `--preload-file` at build
+time — see the `createEmX11` section above.
 
 Default mounts at construction:
 
@@ -214,7 +173,7 @@ gzip — pre-extract gzipped tars at the call site if needed). To write
 into a process's *live* FS after it has booted, use
 `process.fs.writeFileSync(...)`.
 
-## `emX11.child_process` — spawn and exec wasm processes (Layer 3 only)
+## `emX11.child_process` — spawn and exec wasm processes
 
 ```ts
 emX11.child_process.spawn(programUrl, opts?): Process
@@ -278,9 +237,7 @@ interface ProcessFS {
 `kill()` closes the process's display connection and drops its windows.
 The wasm module itself can't be force-unloaded in a browser.
 
-## `x11.display` / `emX11.display`
-
-Available on both `EmX11Session` (Layer 2) and `EmX11` (Layer 3).
+## `x11.display`
 
 ```ts
 display.canvas: HTMLCanvasElement | OffscreenCanvas
@@ -309,9 +266,7 @@ display.inject.keyUp(...)
 display.inject.setPointer(x, y)
 ```
 
-## `x11.debug` / `emX11.debug`
-
-Available on both `EmX11Session` (Layer 2) and `EmX11` (Layer 3).
+## `x11.debug`
 
 ```ts
 debug.traceHit       // findWindowAt log; spammy on Motion
@@ -332,13 +287,11 @@ All flags are writable and read every tick. Toggle them live from
 DevTools after publishing the instance:
 
 ```ts
-globalThis.app = x11;  // Layer 2: EmX11Session
-// or
-globalThis.app = emX11;  // Layer 3: EmX11
+globalThis.app = await createEmX11({ canvas });
 app.debug.traceHit = true;
 ```
 
-## `emX11.dlopen(soPath, options?) → Promise<LoadedModule>` (Layer 3 only)
+## `emX11.dlopen(soPath, options?) → Promise<LoadedModule>`
 
 Pluggable side-module loader. Pass an adapter to `createEmX11`:
 
@@ -364,18 +317,18 @@ convention of using `Module['...']` for configuration (like
 
 | Slot | Set by | Purpose |
 |------|--------|---------|
-| `Module['emx11Host']` | `initEmX11()` / `createEmX11()` via `moduleOverrides` or `attachToBridge()` | The Host object; every EM_JS bridge dispatches into it. |
+| `Module['emx11Host']` | `createEmX11()` via `moduleOverrides` or `attachToBridge()` | The Host object; every EM_JS bridge dispatches into it. |
 | `Module['emx11Caches']` | `attachToBridge()` | Lazy scratchpads (font measure ctx, property stashes). |
 | `Module['emx11Debug']` | `attachToBridge()` + debug setters | Backing store for trace flags. Mirrored into the `$EmX11Host` closure. |
-| `Module['emx11NoAutoStart']` | Caller (via `moduleOverrides`) | When `true`, suppresses the default Host auto-creation in Layer 1 mode. Set automatically by `initEmX11` and `createEmX11`. |
+| `Module['emx11NoAutoStart']` | Caller (via `moduleOverrides`) | When `true`, suppresses the default Host auto-creation in Layer 1 mode. Set automatically by `createEmX11`. |
 
 The JS library (`library_emx11.js`) reads these during `$EmX11Host.init()`,
 which fires at Emscripten startup. When `Module['emx11Host']` is set
-(Layers 2/3), it uses the caller's Host. When absent and
+(Layer 2), it uses the caller's Host. When absent and
 `emx11NoAutoStart` is unset (Layer 1), the default Host IIFE
 (`EmX11DefaultHost.create(Module)`) auto-creates one.
 
-## Caching (Layer 3 only)
+## Caching
 
 `emX11.child_process.spawn()` fetches a `.wasm` binary every spawn; on
 the second visit those bytes don't have to come from the network. em-x11
@@ -401,9 +354,8 @@ plain `fetch` regardless of `loaderCache`.
 
 ## Internal escape hatch
 
-Both `EmX11Session._host` and `EmX11._host` expose the underlying
-`Host` (`@internal`, unstable). Use only for things the public API
-doesn't cover yet.
+`EmX11._host` exposes the underlying `Host` (`@internal`, unstable).
+Use only for things the public API doesn't cover yet.
 
 ## Build artifacts — split archives (mirrors real X)
 

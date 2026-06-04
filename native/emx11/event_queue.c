@@ -225,11 +225,16 @@ int XEventsQueued(Display* display, int mode) {
 }
 
 int XNextEvent(Display* display, XEvent* event_return) {
-  if (emx11_event_queue_size(display) == 0)
-    return 0;
-  int ok = emx11_event_queue_pop(display, event_return) ? 1 : 0;
-  /* If the queue is now empty, drain wakeup bytes so the next Select()
-   * blocks cleanly (belt-and-suspenders with XEventsQueued drain). */
+  /* Real XNextEvent calls _XReadEvents(dpy) when the queue is empty,
+   * blocking on the socket. In the browser, emscripten_sleep yields
+   * to the JS event loop via Asyncify, letting the host push events.
+   * The host-driven pump path (TCL_DONT_WAIT) pre-checks XPending()
+   * so it never reaches the block. A 1 ms poll interval keeps latency
+   * negligible while avoiding a tight spin. */
+  while (emx11_event_queue_size(display) == 0)
+    emscripten_sleep(1);
+  emx11_event_queue_pop(display, event_return);
+  /* Drain wakeup bytes so the next Select() blocks cleanly. */
   if (emx11_event_queue_size(display) == 0 && display->fd > 0) {
     char buf[64];
     while (read(display->fd, buf, sizeof(buf)) > 0) {
@@ -243,11 +248,11 @@ int XNextEvent(Display* display, XEvent* event_return) {
                     ($3 >>> 0));
       }
     },
-    ok,
+    1,
     display->conn_id,
     event_return->type,
     event_return->xany.window);
-  return ok;
+  return 0;
 }
 
 /* -- Event helpers -- */
@@ -288,17 +293,22 @@ int XIfEvent(Display* dpy,
              XEvent* event_return,
              Bool (*predicate)(Display*, XEvent*, XPointer),
              XPointer arg) {
-  while (!XCheckIfEvent(dpy, event_return, predicate, arg)) {
+  /* Real XIfEvent blocks in _XReadEvents when no matching event is
+   * queued. emscripten_sleep(1) yields to the JS event loop via
+   * Asyncify, letting the host push events. 1 ms poll keeps the
+   * blocking path responsive without busy-waiting. */
+  while (!XCheckIfEvent(dpy, event_return, predicate, arg))
     emscripten_sleep(1);
-  }
-  return 1;
+  return 0;
 }
 
 int XPeekEvent(Display* dpy, XEvent* event_return) {
+  /* Real XPeekEvent calls _XReadEvents(dpy) when the queue is empty
+   * and blocks. Same Asyncify-based poll as XNextEvent. */
   while (dpy->event_head == dpy->event_tail)
     emscripten_sleep(1);
   *event_return = dpy->event_queue[dpy->event_head];
-  return 1;
+  return 0;
 }
 
 int XPutBackEvent(Display* dpy, XEvent* event) {
@@ -333,23 +343,20 @@ Bool XCheckTypedWindowEvent(Display* dpy,
 }
 
 int XMaskEvent(Display* dpy, long event_mask, XEvent* ev) {
-  for (;;) {
-    if (emx11_event_queue_peek_match(dpy, event_mask, ev)) {
-      EM_ASM(
-        {
-          var d = Module['emx11Debug'];
-          if (d && d.traceMask) {
-            console.log('[c-mask] XMaskEvent conn=' + $0 + ' mask=0x' +
-                        ($1 >>> 0).toString(16) + ' found type=' + $2 +
-                        ' win=' + ($3 >>> 0));
-          }
-        },
-        dpy->conn_id,
-        event_mask,
-        ev->type,
-        ev->xany.window);
-      return 1;
-    }
-    emscripten_sleep(10);
-  }
+  while (!emx11_event_queue_peek_match(dpy, event_mask, ev))
+    emscripten_sleep(1);
+  EM_ASM(
+    {
+      var d = Module['emx11Debug'];
+      if (d && d.traceMask) {
+        console.log('[c-mask] XMaskEvent conn=' + $0 + ' mask=0x' +
+                    ($1 >>> 0).toString(16) + ' found type=' + $2 + ' win=' +
+                    ($3 >>> 0));
+      }
+    },
+    dpy->conn_id,
+    event_mask,
+    ev->type,
+    ev->xany.window);
+  return 0;
 }

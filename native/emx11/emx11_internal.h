@@ -456,6 +456,7 @@ extern void emx11_js_draw_line(Window id,
                                unsigned long color,
                                int line_width);
 extern void emx11_js_flush(void);
+extern void emx11_js_flush_roundtrip(void);
 
 /* Arc drawing: angles are X-semantics (64ths of a degree, counterclockwise
  * from 3 o'clock). The compositor converts to canvas-2d semantics

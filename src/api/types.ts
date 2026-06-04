@@ -1,11 +1,10 @@
 /**
  * Public types for the em-x11 npm surface.
  *
- * Everything a consumer touches via `initEmX11()` or `createEmX11()`
- * is typed here. The internal Host / manager classes under src/host
- * are deliberately NOT re-exported; EmX11Session._host and
- * EmX11._host are typed-but-@internal escape hatches for callers
- * still mid-migration.
+ * Everything a consumer touches via `createEmX11()` is typed here.
+ * The internal Host / manager classes under src/host are deliberately
+ * NOT re-exported; EmX11._host is a typed-but-@internal escape hatch
+ * for callers still mid-migration.
  */
 
 import type {

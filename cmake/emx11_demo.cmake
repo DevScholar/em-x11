@@ -82,7 +82,7 @@ function(emx11_finalize_demo target)
 
     # Inject the default Host IIFE so Layer 1 (zero-JS) mode auto-creates
     # a Host on Module.canvas without user JS.  Set Module['emx11NoAutoStart']
-    # to true if you want to provide your own Host via initEmX11/createEmX11.
+    # to true if you want to provide your own Host via createEmX11.
     set(_host_bundle "${CMAKE_BINARY_DIR}/artifacts/emx11-default-host.js")
     if(EXISTS "${_host_bundle}")
         target_link_options(${target} PRIVATE "SHELL:--pre-js=${_host_bundle}")

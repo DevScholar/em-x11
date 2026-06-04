@@ -1,28 +1,75 @@
 /*
  * Browser-friendly Tcl notifier for em-x11.
  *
- * Stock Unix notifier calls select() on the X "fd" — meaningless under
- * em-x11 since there is no real socket; Tk's DisplayFileProc never
- * fires and X events queued by em-x11 sit forever. We replace the
- * notifier with one that honors the standardised Tcl_SetNotifier ABI:
+ * == Why this file exists ==
  *
- *   setTimerProc      — Tcl tells us "next deadline is N ms away".
- *                       We forward this to the JS host so its event
- *                       loop can schedule a wake at exactly that
- *                       deadline (mirrors how a real X client sets a
- *                       select() timeout).
- *   alertNotifierProc — Standardised "wake the event loop" primitive,
- *                       analogous to writing to a self-pipe fd that
- *                       breaks select(). We forward to the host.
- *   createFileHandler — Tracked; waitForEvent drains every registered
- *                       handler regardless of fd readiness, because
- *                       there's no real fd to test.
+ * The browser has no kernel-level blocking I/O. Wasm runs on the same
+ * thread as the browser UI -- there is no `select()` that can block the
+ * C stack while the browser processes input events. The JS event loop
+ * is the master; C code must run-to-completion within each rAF-driven
+ * pump tick.
  *
- * The JS host (em-x11's Host) owns the actual pump scheduling: it
- * receives setTimer / alert signals and either schedules a real
- * setTimeout(N) for the next timer or wakes a paused pump. Idle =
- * zero scheduled work, exactly as a Linux X client at select() with
- * no fds ready and no timer due.
+ * In a real Unix X+Tk client, Tcl's standard notifier calls `select()`
+ * on all registered fds (including ConnectionNumber(dpy) -- the X
+ * socket) with a timeout equal to the next timer deadline. This works
+ * because the kernel puts the process to sleep while the X server sends
+ * data.
+ *
+ * In the browser, two architectures are possible:
+ *
+ *   A. Host-driven pump (this file):
+ *      JS rAF -> Tcl_DoOneEvent(TCL_DONT_WAIT) -> notifier drains
+ *      handlers -> return. Tcl timers bridged to JS host via setTimer.
+ *      Zero CPU when idle. Sync EM_JS bridge calls preserved.
+ *
+ *   B. C-driven loop with Asyncify/JSPI select():
+ *      Tcl's event loop calls select() which emscripten_sleep()s.
+ *      Would let the standard Unix notifier run unmodified. Costs:
+ *      every bridge call must EM_ASYNC_JS or JSPI-wrap, breaking
+ *      the sync runTcl entry point. Nested event loops (tkwait,
+ *      update) would work, but the trade-off isn't worth it today.
+ *
+ * We chose A because it preserves sync runTcl and requires no JSPI
+ * (which isn't yet shipping in all browsers). If JSPI lands widely
+ * this trade-off should be revisited.
+ *
+ * The dual-path design (self-pipe + select() for Xt apps, custom
+ * notifier for Tk apps) is necessary because Xt and Tk have different
+ * event loop drivers. The self-pipe path works for Xt-based programs
+ * (xeyes, xcalc, glxgears) unmodified -- emscripten's libc select()
+ * monitors pipe fds correctly. Tk replaces Xt's event loop with Tcl's
+ * notifier, so it needs this adapter.
+ *
+ * == ABI ==
+ *
+ * Tcl_SetNotifier is the official, documented, stable extension API
+ * that Tcl provides for embedding in foreign event loops. The ABI has
+ * been stable since Tcl 8.0 (1997):
+ *
+ *   setTimerProc      -- Tcl tells us "next deadline is N ms away".
+ *                        We forward to the JS host so its event loop
+ *                        can schedule setTimeout(N) for the next pump
+ *                        tick (mirrors setting a select() timeout).
+ *
+ *   alertNotifierProc -- "Wake the event loop now", analogous to
+ *                        writing to a self-pipe to break select().
+ *                        We forward to the host.
+ *
+ *   waitForEventProc  -- Drains all registered file handlers. In the
+ *                        polling path (timePtr={0,0}) used by the JS
+ *                        pump, drains without yielding. In the block
+ *                        path, yields via emscripten_sleep(1).
+ *
+ *   createFileHandler / deleteFileHandler -- Track fds registered by
+ *                        Tk (typically just ConnectionNumber(dpy), the
+ *                        self-pipe read end). waitForEvent drains them
+ *                        regardless of fd readiness because there's no
+ *                        real socket to test.
+ *
+ * The JS host owns the actual pump scheduling: it receives setTimer /
+ * alert signals and either schedules setTimeout(N) for the next timer
+ * or wakes a paused pump. Idle = zero scheduled work, equivalent to a
+ * Linux X client at select() with no fds ready and no timer due.
  *
  * Forward-declare the Tcl notifier ABI so em-x11 doesn't need tcl.h
  * on its include path. Struct layout / function pointer signatures
@@ -57,7 +104,12 @@ extern void Tcl_SetNotifier(Tcl_NotifierProcs* procs);
 
 #define TCL_READABLE (1 << 1)
 
-#define MAX_FILE_HANDLERS 8
+/* A real Unix client registers one fd per Display + one per XtAppAddInput
+ * call. With 8 we covered the self-pipe + a handful of extras. Raised to
+ * 32 because Tk's idle/signal/timer plumbing can register several fds per
+ * Tcl interpreter, and pyodide-tk may host multiple interpreters in one
+ * wasm process. */
+#define MAX_FILE_HANDLERS 32
 typedef struct {
   int fd;
   int mask;

@@ -1,13 +1,14 @@
 /**
- * twm-session demo harness — Layer 3 (multi-process).
+ * twm-session demo harness — multi-process mode.
  *
- * This is the ONLY example that uses createEmX11 + child_process.spawn.
- * Multiple X clients (twm, xeyes, xcalc) share one display; twm boots
- * first and arms SubstructureRedirectMask on root so subsequent
- * MapRequests are intercepted by the window manager.
+ * Uses createEmX11 + child_process.spawn. Multiple X clients (twm,
+ * xeyes, xcalc) share one display; twm boots first and arms
+ * SubstructureRedirectMask on root so subsequent MapRequests are
+ * intercepted by the window manager.
  *
  * For single-program use-cases (hello, xeyes, xcalc standalone, etc.)
- * prefer Layer 1 (emcc -sUSE_EMX11) or Layer 2 (initEmX11).
+ * prefer Layer 1 (emcc -sUSE_EMX11) or spread moduleOverrides from
+ * createEmX11() into the Emscripten factory.
  */
 
 import { createEmX11 } from '../../src/index.js';
