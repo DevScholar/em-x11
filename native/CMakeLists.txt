@@ -77,6 +77,7 @@ set(EMX11_X11_SOURCES
     emx11/keysym_table.c
     emx11/bridges.c
     emx11/notifier.c
+    emx11/poll.c
 )
 set(EMX11_XEXT_SOURCES       Xext/shape.c)
 set(EMX11_XRENDER_SOURCES    render/render.c)
