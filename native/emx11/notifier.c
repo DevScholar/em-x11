@@ -22,16 +22,18 @@
  *      handlers -> return. Tcl timers bridged to JS host via setTimer.
  *      Zero CPU when idle. Sync EM_JS bridge calls preserved.
  *
- *   B. C-driven loop with Asyncify/JSPI select():
+ *   B. C-driven loop with JSPI select():
  *      Tcl's event loop calls select() which emscripten_sleep()s.
  *      Would let the standard Unix notifier run unmodified. Costs:
- *      every bridge call must EM_ASYNC_JS or JSPI-wrap, breaking
- *      the sync runTcl entry point. Nested event loops (tkwait,
- *      update) would work, but the trade-off isn't worth it today.
+ *      every bridge call must return a Promise, breaking the sync
+ *      runTcl entry point. Nested event loops (tkwait, update)
+ *      would work, but the trade-off isn't worth it for the main
+ *      rAF-driven pump path.
  *
- * We chose A because it preserves sync runTcl and requires no JSPI
- * (which isn't yet shipping in all browsers). If JSPI lands widely
- * this trade-off should be revisited.
+ * We use A for the rAF-driven pump (zero CPU when idle, sync EM_JS
+ * bridges preserved) and keep B available for blocking calls that
+ * go through emscripten_sleep via JSPI (poll/select override in
+ * poll.c, XNextEvent/XIfEvent/XPeekEvent in event_queue.c).
  *
  * The dual-path design (self-pipe + select() for Xt apps, custom
  * notifier for Tk apps) is necessary because Xt and Tk have different
@@ -197,9 +199,10 @@ static int yield_WaitForEvent(const Tcl_Time* timePtr) {
   /* Poll path (timePtr={0,0}) is what Tcl_DoOneEvent(TCL_DONT_WAIT)
    * takes; the JS host pump drives that, so we must NOT yield to JS
    * here -- a re-entrant pump tick would corrupt state. Just drain.
-   * Block path (timePtr==NULL) yields with emscripten_sleep so the
-   * browser stays responsive; not used by the event-driven pump but
-   * safe if something does call Tcl_DoOneEvent without TCL_DONT_WAIT. */
+   * Block path (timePtr==NULL) suspends via emscripten_sleep/JSPI
+   * so the browser stays responsive; not used by the event-driven
+   * pump but safe if something calls Tcl_DoOneEvent without
+   * TCL_DONT_WAIT. */
   int polling = (timePtr && timePtr->sec == 0 && timePtr->usec == 0);
   if (!polling) {
     emscripten_sleep(1);

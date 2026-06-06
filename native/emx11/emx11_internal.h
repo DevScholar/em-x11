@@ -767,12 +767,12 @@ void emx11_xim_capture_key_text(Display* dpy, unsigned int slot);
 void emx11_xim_capture_pop_text(Display* dpy, unsigned int slot);
 
 /* Browser clipboard bridge (see selection.c). The read path is split in
- * two because Asyncify can only suspend a single JS-to-C boundary: first
- * call awaits navigator.clipboard.readText() and stashes the UTF-8 bytes
- * on the JS side, returning the byte length (or -1 on error); second
- * call copies up to `capacity` bytes into `dst` and clears the stash.
- * The write path is fire-and-forget (writeText Promise failures logged
- * to console, never propagated to C). */
+ * two to keep the C side synchronous: first call awaits
+ * navigator.clipboard.readText() (via the host) and stashes the UTF-8
+ * bytes on the JS side, returning the byte length (or -1 on error);
+ * second call copies up to `capacity` bytes into `dst` and clears the
+ * stash. The write path is fire-and-forget (writeText Promise failures
+ * logged to console, never propagated to C). */
 extern int emx11_js_clipboard_read_begin(void);
 extern int emx11_js_clipboard_read_fetch(unsigned char* dst, int capacity);
 extern void emx11_js_clipboard_write_utf8(const unsigned char* data, int len);

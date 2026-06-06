@@ -1,5 +1,5 @@
 # em-x11 demo helper — one place for the boilerplate every wasm demo
-# needs: MODULARIZE + EXPORT_ES6 + ASYNCIFY + event-pump exports + the
+# needs: MODULARIZE + EXPORT_ES6 + JSPI + event-pump exports + the
 # emscripten-ports link so libraries resolve without the -lX11 hijack.
 #
 # Usage from a demo:
@@ -129,7 +129,7 @@ function(emx11_finalize_demo target)
         "SHELL:-s MODULARIZE=1"
         "SHELL:-s EXPORT_ES6=1"
         "SHELL:-s EXPORT_NAME=${EMX11_FD_EXPORT_NAME}"
-        "SHELL:-s ASYNCIFY=1"
+        "SHELL:-s JSPI=1"
         "SHELL:-s ENVIRONMENT=web,worker"
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
         "SHELL:-s EXPORTED_RUNTIME_METHODS=[${_methods_csv}]"

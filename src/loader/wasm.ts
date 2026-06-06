@@ -85,7 +85,7 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
    * table once it's ready. */
   const wasmBytesPromise = cachedFetchBytes(options.wasmUrl, cacheMode);
 
-  return factory({
+  const mod = await factory({
     ...(options.moduleOverrides ?? {}),
     instantiateWasm: (imports, success) => {
       wasmBytesPromise
@@ -141,4 +141,41 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
     ...(options.print !== undefined ? { print: options.print } : {}),
     ...(options.printErr !== undefined ? { printErr: options.printErr } : {}),
   });
+
+  /* JSPI post-processing: the generated glue (assignWasmExports) copies
+   * raw wasm exports directly onto Module["_func"], but JSPI requires
+   * these to be wrapped with WebAssembly.promising so that
+   * emscripten_sleep can suspend. Without this wrapping, ccall-based
+   * calls into wasm throw "SuspendError: trying to suspend without
+   * WebAssembly.promising" when they hit a blocking path (vwait, poll,
+   * XNextEvent). We re-wrap every '_'-prefixed function and also
+   * replace Module.ccall with an async-aware version that handles
+   * the Promise returned by the wrapped exports. */
+  if (typeof (WebAssembly as unknown as Record<string, unknown>).promising === 'function') {
+    const promising = (WebAssembly as unknown as { promising: (f: Function) => Function }).promising;
+    const modRec = mod as unknown as Record<string, unknown>;
+    for (const key of Object.keys(modRec)) {
+      if (key.startsWith('_') && typeof modRec[key] === 'function') {
+        modRec[key] = promising(modRec[key] as Function);
+      }
+    }
+    /* Replace ccall so it can handle the Promise returned by wrapped
+     * exports. The generated ccall has an `opts.async` branch that does
+     * `ret.then(onDone)` — onDone un-marshals (UTF8ToString etc.) after
+     * the wasm call resolves. The sync branch calls onDone immediately,
+     * which corrupts string return values when ret is a Promise. Force
+     * async mode so un-marshalling always chains on the Promise. */
+    const origCcall = mod.ccall.bind(mod);
+    mod.ccall = function (
+      ident: string,
+      returnType: string | null,
+      argTypes: string[],
+      args: unknown[],
+      opts?: { async?: boolean },
+    ) {
+      return origCcall(ident, returnType, argTypes, args, { async: true, ...opts });
+    } as typeof mod.ccall;
+  }
+
+  return mod;
 }

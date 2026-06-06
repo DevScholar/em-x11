@@ -23,11 +23,11 @@
  * Every bridge is EM_JS (sync). The earlier set of EM_ASYNC_JS
  * declarations on the atom / property paths was a holdover from the
  * channel mode, where atom interning crossed a worker boundary and
- * had to unwind via Asyncify. In direct mode every JS body returns
+ * had to unwind via Asyncify/JSPI. In direct mode every JS body returns
  * sync, so EM_ASYNC_JS is pure overhead -- worse, it forces an
  * unwind/rewind on EVERY call, which makes user-side `tcldide_eval`
- * always return a Promise (Asyncify suspends mid-eval), breaking
- * the sync runTcl entry point.
+ * always return a Promise (suspends mid-eval), breaking the sync
+ * runTcl entry point.
  */
 
 #include <emscripten.h>
@@ -446,8 +446,8 @@ EM_JS(int, emx11_js_get_atom_name, (unsigned int atom), {
 
 /* Browser → Tk clipboard read.
  *
- * navigator.clipboard.readText() is async and we can't suspend C without
- * Asyncify (see project_emx11_no_em_async_js). The host side (devices.ts)
+ * navigator.clipboard.readText() is async and we keep the C path
+ * synchronous (see project_emx11_no_em_async_js). The host side (devices.ts)
  * pre-stages clipboard bytes on every paste-equivalent gesture — Ctrl+V /
  * Shift+Insert keydown awaits readText() before the keydown is dispatched
  * to Tk; document `paste` events also fill the cache synchronously via

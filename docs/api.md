@@ -197,7 +197,7 @@ emX11.child_process.spawn('/build/artifacts/xeyes/xeyes.wasm')  // explicit wasm
 ```
 
 > The `.js` glue is an ~80 KB loader that wires up FS / syscall stubs /
-> Asyncify — analogous to a Linux ELF's PT_INTERP pointing at
+> JSPI — analogous to a Linux ELF's PT_INTERP pointing at
 > `ld-linux.so`. You can't run an Emscripten executable without it.
 
 ### `SpawnOptions`

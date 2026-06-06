@@ -139,7 +139,7 @@ export default defineConfig({
   server: {
     port: 5173,
     headers: {
-      // Required for SharedArrayBuffer (used by emscripten pthreads / Asyncify optional)
+      // Required for SharedArrayBuffer (used by emscripten pthreads / JSPI Worker mode)
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },

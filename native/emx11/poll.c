@@ -12,11 +12,11 @@
  *   timeout > 0  or  NULL — blocking with deadline or indefinite.  We
  *                           poll fds at adaptive intervals, yielding to
  *                           the browser via emscripten_sleep() between
- *                           checks.  ASYNCIFY saves/restores the C stack
- *                           across each sleep, so DOM/X11 events arrive
- *                           freely during the block.  The JS caller
- *                           (tcldide_eval) returns a Promise when the
- *                           wasm suspends — callers must await it.
+ *                           checks.  JSPI suspends the wasm call across
+ *                           each sleep, so DOM/X11 events arrive freely
+ *                           during the block.  The JS caller receives a
+ *                           Promise when the wasm suspends — callers
+ *                           must await it.
  *
  * This follows the same strong-symbol pattern as process.c (execvp).
  *
@@ -95,20 +95,20 @@ static int g_in_blocking_poll = 0;
 
 int emx11_is_blocking_in_poll(void) { return g_in_blocking_poll; }
 
-/* -- async sleep via ASYNCIFY -------------------------------------------- */
+/* -- async sleep via JSPI ------------------------------------------------- */
 
 static void async_sleep(unsigned int ms) {
-  /* emscripten_sleep saves the C stack via ASYNCIFY and yields to the
+  /* emscripten_sleep suspends the wasm call via JSPI and yields to the
    * browser for ms milliseconds.  During the yield, the browser event
    * loop runs freely — DOM/X11 events arrive, rAF ticks fire
    * (emscripten_set_main_loop → tick() → Tcl_DoOneEvent), and the
-   * self-pipe becomes readable.  When the sleep expires, the C stack
-   * is restored and execution resumes after this call.
+   * self-pipe becomes readable.  When the sleep expires, execution
+   * resumes after this call.
    *
    * From the C caller's perspective this is synchronous — poll() just
-   * blocks for a while.  From the JS caller's perspective, the cwrap'd
-   * function (tcldide_eval) returns a Promise when the wasm suspends,
-   * so the JS side must await it. */
+   * blocks for a while.  From the JS caller's perspective, the wasm
+   * export returns a Promise when it suspends, so the JS side must
+   * await it. */
   emscripten_sleep(ms);
 }
 
@@ -121,9 +121,9 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
 
   /* Blocking path.  timeout > 0 → deadline; timeout < 0 → indefinite.
    * We yield to the browser via emscripten_sleep():
-   *   - ASYNCIFY saves the C stack, browser event loop runs freely,
+   *   - JSPI suspends the wasm call, browser event loop runs freely,
    *     DOM/X11 events arrive, rAF tick drains Tcl events.
-   *   - When sleep expires, stack is restored, we re-check fds.
+   *   - When sleep expires, execution resumes, we re-check fds.
    *
    * Interval adapts to the deadline to balance latency and wasm↔JS
    * boundary-crossing overhead. */

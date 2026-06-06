@@ -389,7 +389,8 @@ void glXSwapBuffers(Display* dpy, GLXDrawable drawable) {
   /* Yield to the browser so the compositor's requestAnimationFrame
    * callback can fire and paint the backing surface to the display
    * canvas. Without this the wasm render loop starves rAF and only
-   * the root window is ever visible. */
+   * the root window is ever visible. JSPI suspends the call and
+   * resumes it on the next microtask. */
   emscripten_sleep(0);
 }
 

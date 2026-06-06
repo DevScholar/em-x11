@@ -3,8 +3,8 @@
  *
  * createEmX11 creates the Host; spread moduleOverrides into the
  * Emscripten factory. glxgears spins its own animation loop via
- * emscripten_sleep(0); the ASYNCIFY flag in the cmake build handles
- * the unwind.
+ * emscripten_sleep(0); the JSPI flag in the cmake build handles
+ * the suspend/resume.
  */
 
 import { createEmX11 } from '../../src/index.js';

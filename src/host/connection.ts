@@ -152,7 +152,7 @@ export class ConnectionManager {
     this.pendingLaunch = pending;
 
     /* Exit-cleanup hooks. Multiple paths because Emscripten's exit
-     * machinery is unreliable under ASYNCIFY=1 with a long-running
+     * machinery is unreliable under JSPI=1 with a long-running
      * event-loop main(): apps that exit() from inside a callback can
      * land in any of these (or, as observed for xcalc q, none of them
      * -- the wasm just stops without invoking proc_exit at all). See
@@ -248,8 +248,8 @@ export class ConnectionManager {
      * onWindowMap / onWindowConfigure parked them here; now that the
      * client's queue is reachable via ccall, push them through. The
      * client's main() has already suspended in XNextEvent's
-     * emscripten_sleep, so the pushed events wake it on the next yield
-     * and its handler paints the window content. */
+     * emscripten_sleep (JSPI), so the pushed events wake it on the
+     * next yield and its handler paints the window content. */
     const deferred = this.pendingExposes.get(pending.connId);
     if (deferred) {
       for (const winId of deferred) {

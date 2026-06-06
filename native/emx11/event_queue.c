@@ -226,11 +226,11 @@ int XEventsQueued(Display* display, int mode) {
 
 int XNextEvent(Display* display, XEvent* event_return) {
   /* Real XNextEvent calls _XReadEvents(dpy) when the queue is empty,
-   * blocking on the socket. In the browser, emscripten_sleep yields
-   * to the JS event loop via Asyncify, letting the host push events.
-   * The host-driven pump path (TCL_DONT_WAIT) pre-checks XPending()
-   * so it never reaches the block. A 1 ms poll interval keeps latency
-   * negligible while avoiding a tight spin. */
+   * blocking on the socket. In the browser, emscripten_sleep suspends
+   * the wasm call via JSPI, letting the host push events. The host-
+   * driven pump path (TCL_DONT_WAIT) pre-checks XPending() so it never
+   * reaches the block. A 1 ms poll interval keeps latency negligible
+   * while avoiding a tight spin. */
   while (emx11_event_queue_size(display) == 0)
     emscripten_sleep(1);
   emx11_event_queue_pop(display, event_return);
@@ -294,9 +294,9 @@ int XIfEvent(Display* dpy,
              Bool (*predicate)(Display*, XEvent*, XPointer),
              XPointer arg) {
   /* Real XIfEvent blocks in _XReadEvents when no matching event is
-   * queued. emscripten_sleep(1) yields to the JS event loop via
-   * Asyncify, letting the host push events. 1 ms poll keeps the
-   * blocking path responsive without busy-waiting. */
+   * queued. emscripten_sleep(1) suspends the wasm call via JSPI,
+   * letting the host push events. 1 ms poll keeps the blocking path
+   * responsive without busy-waiting. */
   while (!XCheckIfEvent(dpy, event_return, predicate, arg))
     emscripten_sleep(1);
   return 0;
@@ -304,7 +304,7 @@ int XIfEvent(Display* dpy,
 
 int XPeekEvent(Display* dpy, XEvent* event_return) {
   /* Real XPeekEvent calls _XReadEvents(dpy) when the queue is empty
-   * and blocks. Same Asyncify-based poll as XNextEvent. */
+   * and blocks. Same JSPI-based poll as XNextEvent. */
   while (dpy->event_head == dpy->event_tail)
     emscripten_sleep(1);
   *event_return = dpy->event_queue[dpy->event_head];

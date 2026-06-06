@@ -166,7 +166,7 @@ A few things to notice:
   include path, wires the port into the emcc command line, injects the
   JS bridge library (`--js-library`) and the default Host IIFE
   (`--pre-js`), and sets the Emscripten link options (`MODULARIZE`,
-  `EXPORT_ES6`, `ASYNCIFY`, `ENVIRONMENT=web,worker`,
+  `EXPORT_ES6`, `JSPI`, `ENVIRONMENT=web,worker`,
   `ALLOW_MEMORY_GROWTH`, ...) plus the `EXPORTED_FUNCTIONS` /
   `EXPORTED_RUNTIME_METHODS` lists. `PRELOAD_FILES` translates
   directly to emcc's `--preload-file` — the standard Emscripten
@@ -312,7 +312,7 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
   bridge in `native/emx11/bridges.c` you must rebuild every demo.
   `pnpm build` rebuilds everything; partial builds are the usual cause.
 - **Browser tab freezes on first redraw** — you forgot
-  `ASYNCIFY=1`. Without it, the moment xcalc calls `XNextEvent` and
+  `JSPI=1`. Without it, the moment xcalc calls `XNextEvent` and
   there is no event ready, the wasm thread spins instead of
   yielding to the JS event loop.
 - **`XtResolvePathname` returns NULL even though you staged the

@@ -523,8 +523,8 @@ export class Host implements EmX11Host {
       return;
     }
     /* Defer to a fresh macrotask so the respawn launches OUTSIDE the
-     * Asyncify unwind triggered by the wasm's exit(): boot of the new
-     * Module needs a clean JS stack, not one held mid-rewind by the
+     * JSPI suspend triggered by the wasm's exit(): boot of the new
+     * Module needs a clean JS stack, not one held mid-suspend by the
      * dying wasm. */
     setTimeout(() => {
       try {

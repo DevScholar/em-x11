@@ -28,6 +28,7 @@ export interface EmscriptenModule {
     returnType: string | null,
     argTypes: string[],
     args: unknown[],
+    opts?: { async?: boolean },
   ): unknown;
 
   cwrap<F extends (...args: never[]) => unknown>(
