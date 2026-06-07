@@ -116,13 +116,22 @@ Display* XOpenDisplay(const char* display_name) {
   /* Self-pipe: the read end replaces the (nonexistent) X socket fd so
    * that libXt's Select() has something real to block on. When the host
    * pushes an event into the C queue we write one byte to the write end,
-   * waking Select() immediately instead of waiting for its timeout. */
+   * waking Select() immediately instead of waiting for its timeout.
+   *
+   * Both ends are O_NONBLOCK: the read end so poll() can probe without
+   * blocking, the write end so emx11_event_queue_push doesn't stall if
+   * the pipe buffer is full. */
   {
     int p[2];
     if (pipe(p) == 0) {
       g_display.fd = p[0];
       g_display.wakeup_fd = p[1];
       fcntl(p[0], F_SETFL, fcntl(p[0], F_GETFL) | O_NONBLOCK);
+      fcntl(p[1], F_SETFL, fcntl(p[1], F_GETFL) | O_NONBLOCK);
+
+      /* Register with the poll subsystem so poll() can check the ring
+       * buffer (non-destructive) instead of consuming pipe bytes. */
+      emx11_poll_register_display_fd(p[0], &g_display);
     }
   }
 

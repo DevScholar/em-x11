@@ -122,6 +122,10 @@ export class ConnectionManager {
   private readonly pendingExposes = new Map<number, Set<number>>();
   private nextConnId = 0;
   private pendingLaunch: PendingLaunch | null = null;
+  /** When non-null, the next open() call will use this connId instead of
+   *  allocating a new one. Set by posixSpawn() before fire-and-forget
+   *  launching the child wasm; cleared by open() on consumption. */
+  private pendingPosixSpawnConnId: number | null = null;
   /** Surface auto-bound to every future open() conn. Set by bindModule
    *  when called without an explicit connId — covers the Pyodide case
    *  where one wasm Module hosts multiple Tcl interps and each
@@ -260,8 +264,68 @@ export class ConnectionManager {
     return { connId: pending.connId, module };
   }
 
-  open(rawModule: ModuleCcallSurface): { connId: number; xidBase: number; xidMask: number } {
+  /** Synchronous half of posix_spawn: pre-allocate a connId, create a
+   *  stub Connection, fire-and-forget the async wasm load, and return
+   *  the pid (= connId) immediately.  The child's XOpenDisplay (called
+   *  during loadWasm) finds the pre-allocated connId via
+   *  pendingPosixSpawnConnId and reuses it rather than allocating a
+   *  fresh one.
+   *
+   *  Returns -1 if a launch is already in progress (pendingLaunch is
+   *  set — launches are serialized). */
+  posixSpawn(glueUrl: string, args: string[], env: string[]): number {
+    if (this.pendingLaunch || this.pendingPosixSpawnConnId !== null) {
+      return -1;
+    }
+
     const connId = ++this.nextConnId;
+    const xidBase = connId * XID_PER_CONN;
+    this.connections.set(connId, {
+      connId,
+      xidBase,
+      xidMask: XID_MASK,
+      module: null,
+      ownedWindows: new Set(),
+    });
+    this.pendingPosixSpawnConnId = connId;
+
+    // Build LoadOptions from posix_spawn args.  args[0] is the program
+    // name by POSIX convention; remaining entries are argv.
+    const thisProgram = args.length > 0 ? args[0] : undefined;
+    const argv = args.length > 1 ? args.slice(1) : undefined;
+
+    // Fire-and-forget: the async function captures connId for cleanup
+    // on failure.  On success, launchClient binds the Module to the
+    // pre-allocated Connection and drains deferred Exposes.
+    const launchPromise = this.launchClient({
+      glueUrl,
+      argv,
+      thisProgram,
+    });
+    launchPromise
+      .then(() => {
+        // launchClient already cleared pendingLaunch; pendingPosixSpawnConnId
+        // was consumed by open() during the child's XOpenDisplay.  If
+        // something went wrong and it's still set, clear it now.
+        this.pendingPosixSpawnConnId = null;
+      })
+      .catch((err) => {
+        this.pendingPosixSpawnConnId = null;
+        this.close(connId);
+        console.error('[emx11] posix_spawn failed:', err);
+      });
+
+    return connId;
+  }
+
+  open(rawModule: ModuleCcallSurface): { connId: number; xidBase: number; xidMask: number } {
+    let connId: number;
+    if (this.pendingPosixSpawnConnId !== null) {
+      connId = this.pendingPosixSpawnConnId;
+      this.pendingPosixSpawnConnId = null;
+    } else {
+      connId = ++this.nextConnId;
+    }
     const xidBase = connId * XID_PER_CONN;
     const xidMask = XID_MASK;
     this.connections.set(connId, {

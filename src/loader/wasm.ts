@@ -142,29 +142,19 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
     ...(options.printErr !== undefined ? { printErr: options.printErr } : {}),
   });
 
-  /* JSPI post-processing: the generated glue (assignWasmExports) copies
-   * raw wasm exports directly onto Module["_func"], but JSPI requires
-   * these to be wrapped with WebAssembly.promising so that
-   * emscripten_sleep can suspend. Without this wrapping, ccall-based
-   * calls into wasm throw "SuspendError: trying to suspend without
-   * WebAssembly.promising" when they hit a blocking path (vwait, poll,
-   * XNextEvent). We re-wrap every '_'-prefixed function and also
-   * replace Module.ccall with an async-aware version that handles
-   * the Promise returned by the wrapped exports. */
-  if (typeof (WebAssembly as unknown as Record<string, unknown>).promising === 'function') {
-    const promising = (WebAssembly as unknown as { promising: (f: Function) => Function }).promising;
-    const modRec = mod as unknown as Record<string, unknown>;
-    for (const key of Object.keys(modRec)) {
-      if (key.startsWith('_') && typeof modRec[key] === 'function') {
-        modRec[key] = promising(modRec[key] as Function);
-      }
-    }
-    /* Replace ccall so it can handle the Promise returned by wrapped
-     * exports. The generated ccall has an `opts.async` branch that does
-     * `ret.then(onDone)` — onDone un-marshals (UTF8ToString etc.) after
-     * the wasm call resolves. The sync branch calls onDone immediately,
-     * which corrupts string return values when ret is a Promise. Force
-     * async mode so un-marshalling always chains on the Promise. */
+  /* JSPI: Emscripten 5.0.3+ wraps JSPI_EXPORTS functions with
+   * WebAssembly.promising so they return Promises; non-JSPI exports
+   * return their value directly (void functions return undefined).
+   *
+   * Always forcing {async:true} breaks non-JSPI functions: the
+   * generated ccall does `ret.then(onDone)` and `undefined.then()`
+   * throws.  Default to the sync path instead — for JSPI exports
+   * the Promise passes through convertReturnValue unchanged, and
+   * for non-JSPI exports onDone converts the value synchronously.
+   *
+   * The caller can still override via opts.async for value-returning
+   * JSPI functions that need onDone chained for UTF8ToString etc. */
+  {
     const origCcall = mod.ccall.bind(mod);
     mod.ccall = function (
       ident: string,
@@ -173,7 +163,7 @@ export async function loadWasm(options: LoadOptions): Promise<EmscriptenModule> 
       args: unknown[],
       opts?: { async?: boolean },
     ) {
-      return origCcall(ident, returnType, argTypes, args, { async: true, ...opts });
+      return origCcall(ident, returnType, argTypes, args, opts);
     } as typeof mod.ccall;
   }
 

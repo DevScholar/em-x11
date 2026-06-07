@@ -473,6 +473,19 @@ export interface EmX11Host {
    *  twm's F_RESTART produces a fresh Module instance with the supplied
    *  argv -- the wasm analogue of Linux's fork-less exec. */
   onExecSelf(connId: number, argv: string[]): void;
+
+  /** Cross-process signal delivery (signal.c `kill()` bridge).  The
+   *  host finds the target wasm module by pid (= connId) and ccalls
+   *  `emx11_signal_set_pending` on it.  The signal is delivered at the
+   *  target's next cooperative yield point. */
+  onSignalDeliver(pid: number, sig: number): void;
+
+  /** posix_spawn bridge (fork.c).  Allocates a connection id for the
+   *  child, fires off async wasm loading, and returns the child's pid
+   *  (= connId) synchronously.  The child's eventual XOpenDisplay reuses
+   *  the pre-allocated connId.  `path` is the wasm glue URL; `args` is
+   *  argv (args[0] is the program name); `env` is the environment. */
+  onPosixSpawn(path: string, args: string[], env: string[]): number;
 }
 
 declare global {

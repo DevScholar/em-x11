@@ -8,7 +8,11 @@
 #include "emx11_internal.h"
 
 #include <emscripten.h>
+#include <errno.h>
 #include <unistd.h>
+
+/* Signal delivery at cooperative yield points (signal.c). */
+extern void emx11_deliver_pending_signals(void);
 
 bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
   /* Expose coalescing: when the queue already holds an Expose event for
@@ -73,10 +77,15 @@ bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
   dpy->event_queue[dpy->event_tail] = *event;
   dpy->event_tail = next_tail;
   dpy->qlen = (int)emx11_event_queue_size(dpy);
-  /* Wake up any Select() blocking on dpy->fd (libXt's IoWait). */
+  /* Wake up any Select() blocking on dpy->fd (libXt's IoWait).
+   * The write end is O_NONBLOCK; if the pipe buffer is full we drop
+   * the wakeup byte — a full pipe already implies many unprocessed
+   * wakeups queued ahead of us, so this write is redundant. */
   if (dpy->wakeup_fd > 0) {
     char byte = 1;
-    write(dpy->wakeup_fd, &byte, 1);
+    if (write(dpy->wakeup_fd, &byte, 1) < 0) {
+      (void)(errno == EAGAIN || errno == EWOULDBLOCK);
+    }
   }
   return true;
 }
@@ -230,9 +239,14 @@ int XNextEvent(Display* display, XEvent* event_return) {
    * the wasm call via JSPI, letting the host push events. The host-
    * driven pump path (TCL_DONT_WAIT) pre-checks XPending() so it never
    * reaches the block. A 1 ms poll interval keeps latency negligible
-   * while avoiding a tight spin. */
-  while (emx11_event_queue_size(display) == 0)
+   * while avoiding a tight spin.
+   *
+   * After each yield we deliver any pending signals so SIGALRM /
+   * SIGCHLD handlers fire even when the caller is stuck in XNextEvent. */
+  while (emx11_event_queue_size(display) == 0) {
     emscripten_sleep(1);
+    emx11_deliver_pending_signals();
+  }
   emx11_event_queue_pop(display, event_return);
   /* Drain wakeup bytes so the next Select() blocks cleanly. */
   if (emx11_event_queue_size(display) == 0 && display->fd > 0) {
@@ -297,16 +311,20 @@ int XIfEvent(Display* dpy,
    * queued. emscripten_sleep(1) suspends the wasm call via JSPI,
    * letting the host push events. 1 ms poll keeps the blocking path
    * responsive without busy-waiting. */
-  while (!XCheckIfEvent(dpy, event_return, predicate, arg))
+  while (!XCheckIfEvent(dpy, event_return, predicate, arg)) {
     emscripten_sleep(1);
+    emx11_deliver_pending_signals();
+  }
   return 0;
 }
 
 int XPeekEvent(Display* dpy, XEvent* event_return) {
   /* Real XPeekEvent calls _XReadEvents(dpy) when the queue is empty
    * and blocks. Same JSPI-based poll as XNextEvent. */
-  while (dpy->event_head == dpy->event_tail)
+  while (dpy->event_head == dpy->event_tail) {
     emscripten_sleep(1);
+    emx11_deliver_pending_signals();
+  }
   *event_return = dpy->event_queue[dpy->event_head];
   return 0;
 }
@@ -343,8 +361,10 @@ Bool XCheckTypedWindowEvent(Display* dpy,
 }
 
 int XMaskEvent(Display* dpy, long event_mask, XEvent* ev) {
-  while (!emx11_event_queue_peek_match(dpy, event_mask, ev))
+  while (!emx11_event_queue_peek_match(dpy, event_mask, ev)) {
     emscripten_sleep(1);
+    emx11_deliver_pending_signals();
+  }
   EM_ASM(
     {
       var d = Module['emx11Debug'];

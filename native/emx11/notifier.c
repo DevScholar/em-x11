@@ -82,6 +82,9 @@
 #include <limits.h>
 #include <stdio.h>
 
+/* Signal delivery at cooperative yield points. */
+extern void emx11_deliver_pending_signals(void);
+
 typedef void* ClientData;
 typedef struct Tcl_Time {
   long sec;
@@ -206,6 +209,7 @@ static int yield_WaitForEvent(const Tcl_Time* timePtr) {
   int polling = (timePtr && timePtr->sec == 0 && timePtr->usec == 0);
   if (!polling) {
     emscripten_sleep(1);
+    emx11_deliver_pending_signals();
   }
   for (int i = 0; i < MAX_FILE_HANDLERS; i++) {
     if (g_handlers[i].in_use && (g_handlers[i].mask & TCL_READABLE)) {

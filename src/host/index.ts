@@ -535,6 +535,36 @@ export class Host implements EmX11Host {
     }, 0);
   }
 
+  /* -- EmX11Host: cross-process signals (signal.c) ---------------------- */
+
+  /** Cross-process kill(): find the target wasm module by pid (=connId)
+   *  and ccall emx11_signal_set_pending on it. The signal is delivered
+   *  at the target's next cooperative yield point (emscripten_sleep,
+   *  XNextEvent, poll, etc.). No-op for unknown pids or exited modules. */
+  onSignalDeliver(pid: number, sig: number): void {
+    const conn = this.connection.get(pid);
+    if (!conn || !conn.module) return;
+    try {
+      conn.module.ccall(
+        'emx11_signal_set_pending',
+        null,
+        ['number'],
+        [sig],
+      );
+    } catch {
+      /* Target module may have exited between lookup and ccall. */
+    }
+  }
+
+  /* -- EmX11Host: posix_spawn (fork.c) ---------------------------------- */
+
+  /** posix_spawn bridge. Delegates to ConnectionManager.posixSpawn which
+   *  pre-allocates a connId, fires off async wasm loading, and returns
+   *  the child's pid synchronously. */
+  onPosixSpawn(path: string, args: string[], env: string[]): number {
+    return this.connection.posixSpawn(path, args, env);
+  }
+
   /* -- EmX11Host: XIM (xim.c) ------------------------------------------- */
 
   /** XSetICFocus on any module. Tk fires this when its focus moves

@@ -20,40 +20,52 @@
  * ((weak))` annotation.
  */
 
-#include <stdlib.h>
-#include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 extern int emx11_current_conn_id(void);
 
 /* Defined in bridges.c. Hands argv across to the host. */
 extern void emx11_js_exec_self(int conn_id, int argv_ptrs, int argc);
 
-static int do_exec(char *const argv[]) {
-    int argc = 0;
-    while (argv && argv[argc]) argc++;
-    emx11_js_exec_self(emx11_current_conn_id(), (int)(intptr_t)argv, argc);
-    /* Exit cleanly so the host's exit hook fires; ProcessImpl sees
-     * the pending exec request and respawns. We don't return -- on a
-     * successful real exec(), control transfers to the new image, so
-     * callers don't expect us to come back either. */
-    exit(0);
-    return -1;
+/* vfork state (see fork.c).  When execvp is called from a vfork child,
+ * we must clear the vfork-in-progress flag so exit() kills the wasm
+ * module instead of longjmp'ing back to the parent. */
+extern void emx11_vfork_clear(void);
+
+static int do_exec(char* const argv[]) {
+  int argc = 0;
+  while (argv && argv[argc])
+    argc++;
+  /* Clear vfork state BEFORE exit(): we want the wasm to actually
+   * terminate so the host can respawn with the new argv.  If we
+   * longjmp back to the vfork parent, the exec-self message would
+   * still be pending and the host would respawn a second process
+   * on top of the resumed parent. */
+  emx11_vfork_clear();
+  emx11_js_exec_self(emx11_current_conn_id(), (int)(intptr_t)argv, argc);
+  /* Exit cleanly so the host's exit hook fires; ProcessImpl sees
+   * the pending exec request and respawns. We don't return -- on a
+   * successful real exec(), control transfers to the new image, so
+   * callers don't expect us to come back either. */
+  exit(0);
+  return -1;
 }
 
-int execvp(const char *file, char *const argv[]) {
-    (void)file;
-    return do_exec(argv);
+int execvp(const char* file, char* const argv[]) {
+  (void)file;
+  return do_exec(argv);
 }
 
-int execv(const char *path, char *const argv[]) {
-    (void)path;
-    return do_exec(argv);
+int execv(const char* path, char* const argv[]) {
+  (void)path;
+  return do_exec(argv);
 }
 
-int execvpe(const char *file, char *const argv[], char *const envp[]) {
-    (void)file;
-    (void)envp;
-    return do_exec(argv);
+int execvpe(const char* file, char* const argv[], char* const envp[]) {
+  (void)file;
+  (void)envp;
+  return do_exec(argv);
 }

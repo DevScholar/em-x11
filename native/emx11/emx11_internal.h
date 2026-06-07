@@ -290,6 +290,26 @@ struct _XDisplay {
 /* ------------------------------------------------------------------------- */
 
 Display* emx11_get_display(void); /* singleton accessor        */
+
+/* Register/unregister a Display self-pipe fd with the poll subsystem.
+ * After registration, poll()/select() check the ring buffer directly
+ * instead of consuming pipe bytes — see poll.c. */
+void emx11_poll_register_display_fd(int fd, Display* dpy);
+void emx11_poll_unregister_display_fd(int fd);
+
+/* Signal delivery at cooperative yield points (signal.c).
+ * Called after every emscripten_sleep return to fire any pending
+ * SIGALRM / SIGCHLD / SIGINT / SIGPIPE / SIGTERM handlers.
+ * Safe to call when no signals are pending (amortises to a no-op). */
+void emx11_deliver_pending_signals(void);
+void emx11_signal_set_pending(int sig);
+
+/* vfork/exec coordination (fork.c, process.c).
+ * emx11_vfork_clear() must be called from the exec*() path so exit()
+ * kills the wasm module instead of longjmp'ing back to vfork(). */
+void emx11_vfork_clear(void);
+int emx11_vfork_active(void);
+
 EmxWindow* emx11_window_find(Display* dpy, Window id);
 EmxWindow* emx11_window_alloc(Display* dpy);
 XID emx11_next_xid(Display* dpy);

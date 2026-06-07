@@ -138,6 +138,13 @@ function(emx11_finalize_demo target)
         # just the first 15. Wasted minutes early in the Xt bring-up
         # when this default bit us.
         "SHELL:-Wl,--error-limit=0"
+        # poll.c pushback buffer: __wrap_read intercepts read() on non-
+        # Display fds so poll() can return consumed bytes. fork.c vfork:
+        # __wrap__exit longjmps back to the parent instead of killing the
+        # wasm module. Both are defined in libX11.a; --wrap redirects
+        # every call site to the wrapper, which chains to __real_*.
+        "SHELL:-Wl,--wrap=read"
+        "SHELL:-Wl,--wrap=_exit"
     )
 
     if(NOT EMX11_FD_OUTPUT_DIR)

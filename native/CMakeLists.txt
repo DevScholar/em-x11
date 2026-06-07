@@ -78,6 +78,9 @@ set(EMX11_X11_SOURCES
     emx11/bridges.c
     emx11/notifier.c
     emx11/poll.c
+    emx11/threading.c
+    emx11/signal.c
+    emx11/fork.c
 )
 set(EMX11_XEXT_SOURCES       Xext/shape.c)
 set(EMX11_XRENDER_SOURCES    render/render.c)
