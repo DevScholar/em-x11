@@ -102,7 +102,7 @@ menu "defops"
 
 export interface LaunchTwmOptions {
   /** Build artifact directory containing twm.js / twm.wasm. Defaults to
-   *  /build/artifacts/twm which is what cmake produces in dev. */
+   *  /artifacts/twm which is what the build produces. */
   artifactBase?: string;
 }
 
@@ -115,7 +115,7 @@ export async function launchTwm(
   emX11: EmX11,
   options: LaunchTwmOptions = {},
 ): Promise<Process> {
-  const base = options.artifactBase ?? '/build/artifacts/twm';
+  const base = options.artifactBase ?? '/artifacts/twm';
   emX11.fs.writeFileSync(TWMRC_PATH, TWMRC.trimStart());
   const p = emX11.child_process.spawn(`${base}/twm`, {
     thisProgram: 'twm',

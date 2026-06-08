@@ -26,7 +26,7 @@ export async function launchXcalc(
   emX11: EmX11,
   options: LaunchXcalcOptions = {},
 ): Promise<Process> {
-  const base = options.artifactBase ?? '/build/artifacts/xcalc';
+  const base = options.artifactBase ?? '/artifacts/xcalc';
   /* `XCalc.iconPixmap: calculator` in the app-defaults pushes the
    * string "calculator" through XmuCvtStringToBitmap, which probes
    * /usr/include/X11/bitmaps/. The session demo stages the whole

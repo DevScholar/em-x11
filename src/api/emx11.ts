@@ -41,7 +41,7 @@ export const VERSION = '0.0.1';
 
 /** Resolve the default loader cache mode based on the build environment.
  *  In Vite dev mode (`import.meta.env.DEV`), default to `'bypass'` so
- *  rebuilt artifacts under `/build/artifacts/...` are picked up
+ *  rebuilt artifacts under `/artifacts/...` are picked up
  *  immediately. In production / preview / test builds, default to
  *  `'use'` (cache-first). Callers can always override per-instance via
  *  `createEmX11({ loaderCache })` or per-call via `SpawnOptions.cacheMode`. */
