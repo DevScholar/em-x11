@@ -49,17 +49,17 @@ as `-sUSE_SDL=2`. Pick the layer that fits:
 | Layer | How | When |
 |-------|-----|------|
 | 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects everything |
-| 2 — createEmX11 | `createEmX11()` | JS-side control: canvas, dimensions, asset staging, single or multi-process |
+| 2 — createEmX11 | `createEmX11()` | Multi-process sessions, JS-side asset staging, custom canvas |
 
-This tutorial uses **Layer 2** with single-program mode: we need JS-side
-control over the canvas and dimensions. The `app-defaults/XCalc` file
-that Xt needs is embedded at build time via Emscripten's
-`--preload-file` — the glue loads the `.data` package automatically
-before `main()` runs, so no JS-side `preRun` hook is needed.
+This tutorial uses **Layer 1** for the xcalc page: the default Host IIFE
+auto-creates a canvas, and we only pass `thisProgram` and `locateFile` to
+the Emscripten factory. The `app-defaults/XCalc` file that Xt needs is
+embedded at build time via Emscripten's `--preload-file` — the glue loads
+the `.data` package automatically before `main()` runs.
 
-Only the twm-session demo ([examples/twm-session/](../examples/twm-session/))
-uses multi-process mode. Every other example (hello, xeyes, xt-hello,
-glxgears, xcalc) uses single-program mode.
+Every example except twm-session uses Layer 1. Only the twm-session demo
+([examples/twm-session/](../examples/twm-session/)) uses Layer 2
+(multi-process mode with `child_process.spawn()`).
 
 ## 1. Prerequisites
 
@@ -174,7 +174,7 @@ A few things to notice:
 
 The helper sets the artifact location at
 `build/artifacts/xcalc/xcalc.js` and `xcalc.wasm`. The dev server
-serves `build/` at `/build/`.
+serves them under `/artifacts/`.
 
 ## 4. Wire the demo into the top-level build
 
@@ -218,39 +218,36 @@ The `PRELOAD_FILES` argument accepts `<source>@<target>` pairs —
 will appear at inside the wasm. Multiple entries are allowed; each
 becomes a separate `--preload-file` flag.
 
-Because the glue handles loading, the JS side is the same three-line
-pattern as hello, plus `locateFile` so Emscripten can find the `.wasm`
-and `.data` files
-([examples/xcalc/main.ts](../examples/xcalc/main.ts)):
+Because the glue handles loading, the JS side is a one-liner import plus
+the factory call with `locateFile` so Emscripten can find the `.wasm`
+and `.data` files:
 
-```ts
-import { createEmX11 } from '../../src/index.js';
-
-const x11 = await createEmX11({ width: 800, height: 600 });
-
-const factory = (await import('/build/artifacts/xcalc/xcalc.js')).default;
-await factory({
-  ...x11.moduleOverrides,
-  thisProgram: 'xcalc',
-  locateFile: (path: string) => `/build/artifacts/xcalc/${path}`,
-});
+```html
+<script type="module">
+  const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
+  await factory({
+    thisProgram: 'xcalc',
+    emx11Width: 800,
+    emx11Height: 600,
+    locateFile: (path) => `/artifacts/xcalc/${path}`,
+  });
+</script>
 ```
 
 Key points:
 
-- `createEmX11()` creates the Host and returns `moduleOverrides` — an
-  object with `{ emx11Host, emx11NoAutoStart: true }`. Spread it into
-  the factory call so the C-side bridges find the Host.
+- No `createEmX11` — the default Host IIFE (injected by `--pre-js`)
+  auto-creates a canvas and attaches itself to `Module['emx11Host']`.
 - `thisProgram: 'xcalc'` sets `argv[0]` so `XtResolvePathname`'s `%N`
   substitution finds `XCalc`, not `Module`.
+- `emx11Width` / `emx11Height` set the canvas size (the default Host
+  reads these from Module).
 - `locateFile` is the standard Emscripten way to tell the runtime where
   `.wasm` and `.data` files live. Needed when the glue is loaded from a
   different directory than the page URL — Vite serves examples from
-  `/examples/xcalc/` but artifacts live under `/build/artifacts/xcalc/`.
+  `/examples/xcalc/` but artifacts live under `/artifacts/xcalc/`.
 - `.data` blobs produced by `--preload-file` go through `locateFile` too,
   so no `preRun` hook needed.
-- No `child_process.spawn`, no `emX11.fs` — just the Emscripten factory
-  with Module overrides.
 
 If you forget this step the binary still launches, the window still
 appears, but you get a 0×0 Form widget with stacked Commands and no
@@ -264,22 +261,19 @@ An HTML entry point and a TypeScript module:
 type="module">` tag pointing at `main.ts`. Vite picks up every
 `examples/*/index.html` automatically as an entry.
 
-For simple programs without assets the pattern is the same three lines.
-See [examples/hello/main.ts](../examples/hello/main.ts):
+For simple programs without assets the pattern is a one-liner import plus
+the factory call. See [examples/hello/index.html](../examples/hello/index.html):
 
-```ts
-import { createEmX11 } from '../../src/index.js';
-
-const x11 = await createEmX11({ width: 1024, height: 768 });
-
-const factory = (await import('/build/artifacts/hello/hello.js')).default;
-await factory({ ...x11.moduleOverrides });
+```html
+<script type="module">
+  const factory = (await import('/artifacts/hello/hello.js')).default;
+  await factory();
+</script>
 ```
 
-No `child_process`, no `fs` — just `createEmX11` + spread
-`moduleOverrides` into the factory. xcalc's `main.ts` is identical in
-shape; the asset staging moved to `--preload-file` at build time, so
-the JS side stays minimal.
+No `child_process`, no `fs`, no `createEmX11` — just import the Emscripten
+factory and call it. The default Host (injected by `--pre-js`) handles
+canvas creation and event routing automatically.
 
 ## 7. Build and run
 
@@ -325,10 +319,11 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
   it in or stub it. xcalc does not need any of these.
 - **Port can't find em-x11 source** — set `EMX11_SRC` to the
   absolute path of the em-x11 repository.
-- **`Module['emx11Host']` is undefined in the wasm** — you forgot
-  to spread `x11.moduleOverrides` into the factory call. Without it,
-  the C-side bridges have no Host to dispatch to, and the X server
-  is effectively absent.
+- **`Module['emx11Host']` is undefined in the wasm** — for Layer 1,
+  the default Host IIFE (`--pre-js`) is missing; rebuild with
+  `pnpm build:host`. For Layer 2, you forgot to spread
+  `x11.moduleOverrides` into the factory call. Without a Host the
+  C-side bridges have nothing to dispatch to.
 
 ## 9. What to read next
 

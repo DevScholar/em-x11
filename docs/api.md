@@ -10,10 +10,10 @@ as `-sUSE_SDL=2`. Pick the layer that fits:
 
 | Layer | Entry point | When |
 |-------|------------|------|
-| 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects the JS library and a default Host. No user JS required. |
-| 2 — createEmX11 | `createEmX11()` | JS-side control: canvas, dimensions, asset staging, single or multi-process. |
+| 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects the JS library and a default Host. No user JS required. Pass `thisProgram`, `emx11Width`/`emx11Height`, and `locateFile` as Module properties. |
+| 2 — createEmX11 | `createEmX11()` | Multi-process sessions, JS-side asset staging via `emX11.fs`, custom canvas/display, dlopen adapter. |
 
-Layer 2 covers both single-program and multi-process use-cases from one function.
+Layer 1 covers every single-program example (hello, xeyes, glxgears, xt-hello, xcalc). Layer 2 is for multi-process use-cases like twm-session and the Pyodide integration.
 
 ## Top-level exports
 
@@ -49,14 +49,39 @@ import {
 Creates a Host, attaches it to `Module['emx11Host']`, and returns the
 full surface. Two usage modes from one function:
 
-**Single-program mode** — spread `moduleOverrides` into the Emscripten factory:
+**Single-program mode (Layer 1 — zero JS)** — the default Host IIFE
+auto-creates a canvas; just import and call the Emscripten factory:
+
+```html
+<script type="module">
+  const factory = (await import('/artifacts/hello/hello.js')).default;
+  await factory();
+</script>
+```
+
+For custom dimensions, pass `emx11Width` / `emx11Height`:
+
+```html
+<script type="module">
+  const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
+  await factory({
+    thisProgram: 'xcalc',
+    emx11Width: 800,
+    emx11Height: 600,
+    locateFile: (path) => `/artifacts/xcalc/${path}`,
+  });
+</script>
+```
+
+**Single-program mode (Layer 2 — createEmX11)** — spread `moduleOverrides`
+into the Emscripten factory for JS-side control:
 
 ```ts
 import { createEmX11 } from '@devscholar/em-x11';
 
 const x11 = await createEmX11({ width: 1024, height: 768 });
 
-const factory = (await import('/build/artifacts/hello/hello.js')).default;
+const factory = (await import('/artifacts/hello/hello.js')).default;
 await factory({ ...x11.moduleOverrides });
 ```
 
@@ -76,15 +101,16 @@ emx11_finalize_demo(xcalc
 
 The JS side stays minimal — same pattern as hello, plus `locateFile`:
 
-```ts
-const x11 = await createEmX11({ width: 800, height: 600 });
-
-const factory = (await import('/build/artifacts/xcalc/xcalc.js')).default;
-await factory({
-  ...x11.moduleOverrides,
-  thisProgram: 'xcalc',
-  locateFile: (path: string) => `/build/artifacts/xcalc/${path}`,
-});
+```html
+<script type="module">
+  const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
+  await factory({
+    thisProgram: 'xcalc',
+    emx11Width: 800,
+    emx11Height: 600,
+    locateFile: (path) => `/artifacts/xcalc/${path}`,
+  });
+</script>
 ```
 
 **Multi-process mode** — use `child_process.spawn()` for multiple X clients
@@ -94,7 +120,7 @@ await factory({
 import { createEmX11 } from '@devscholar/em-x11';
 
 const emX11 = await createEmX11({ width: 1024, height: 768 });
-const xeyes = emX11.child_process.spawn('/build/artifacts/xeyes/xeyes', {
+const xeyes = emX11.child_process.spawn('/artifacts/xeyes/xeyes', {
   thisProgram: 'xeyes',
 });
 await xeyes.ready;
@@ -191,9 +217,9 @@ Emscripten compiles every executable to a `.js` loader **plus** a
 extension** and resolves both ends:
 
 ```ts
-emX11.child_process.spawn('/build/artifacts/xeyes/xeyes')       // → xeyes.js + xeyes.wasm
-emX11.child_process.spawn('/build/artifacts/xeyes/xeyes.js')    // explicit glue, wasm derived
-emX11.child_process.spawn('/build/artifacts/xeyes/xeyes.wasm')  // explicit wasm, glue derived
+emX11.child_process.spawn('/artifacts/xeyes/xeyes')       // → xeyes.js + xeyes.wasm
+emX11.child_process.spawn('/artifacts/xeyes/xeyes.js')    // explicit glue, wasm derived
+emX11.child_process.spawn('/artifacts/xeyes/xeyes.wasm')  // explicit wasm, glue derived
 ```
 
 > The `.js` glue is an ~80 KB loader that wires up FS / syscall stubs /
