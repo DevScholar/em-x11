@@ -25,6 +25,9 @@
 
 #include <GL/gl.h>
 
+/* --wrap=glLightfv creates __real_glLightfv at link time */
+extern void __real_glLightfv(GLenum light, GLenum pname, const GLfloat* params);
+
 #include <emscripten/em_js.h>
 
 #include <stdint.h>
@@ -76,6 +79,7 @@ enum CmdTag {
   CMD_NORMAL3F,
   CMD_SHADEMODEL,
   CMD_MATERIALFV, /* face = e1, pname = e2, params = v[0..3] */
+  CMD_LIGHTFV,    /* light = e1, pname = e2, params = v[0..3] */
 };
 
 typedef struct {
@@ -314,6 +318,9 @@ void glCallList(GLuint list) {
       case CMD_MATERIALFV:
         exec_material(c->e1, c->e2, c->v);
         break;
+      case CMD_LIGHTFV:
+        __real_glLightfv(c->e1, c->e2, c->v);
+        break;
       default:
         break;
     }
@@ -378,6 +385,33 @@ void __wrap_glShadeModel(GLenum mode) {
     c->e1 = mode;
   } else
     exec_shade_model(mode);
+}
+
+/* Under LEGACY_GL_EMULATION, glLightfv transforms the light position by the
+ * current modelview matrix via GLImmediate.matrixLib.mat4.multiplyVec4.
+ * If no matrix operation has run yet (init called before reshape),
+ * matrixLib is undefined and the call crashes.  Prime the stack once. */
+static int s_matrix_primed = 0;
+
+void __wrap_glLightfv(GLenum light, GLenum pname, const GLfloat* params) {
+  if (!s_matrix_primed) {
+    s_matrix_primed = 1;
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+  }
+  if (g_recording) {
+    Cmd* c = next_cmd();
+    if (!c)
+      return;
+    c->tag = CMD_LIGHTFV;
+    c->e1 = light;
+    c->e2 = pname;
+    c->v[0] = params[0];
+    c->v[1] = params[1];
+    c->v[2] = params[2];
+    c->v[3] = params[3];
+  } else
+    __real_glLightfv(light, pname, params);
 }
 
 void __wrap_glMaterialfv(GLenum face, GLenum pname, const GLfloat* params) {
