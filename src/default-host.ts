@@ -65,7 +65,10 @@ function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | Off
     }
   }
 
-  // 4. Auto-create a canvas
+  // 4. Auto-create a canvas (DOM only — skip in Worker context)
+  if (typeof document === 'undefined') {
+    throw new Error('em-x11: no canvas provided and document is not available (running in a Worker?)');
+  }
   const c = document.createElement('canvas');
   c.id = 'canvas';
   c.width = (Module['emx11Width'] as number) ?? 1024;
