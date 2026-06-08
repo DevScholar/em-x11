@@ -224,8 +224,11 @@ def process_args(ports):
     args = ['-I' + include_dir]
     if os.path.exists(js_library):
         args.append('--js-library=' + js_library)
+    shell_file = os.path.join(emx11_root, 'tools', 'ports', 'shell.html')
     if os.path.exists(default_host):
         args.append('--pre-js=' + default_host)
+    if os.path.exists(shell_file):
+        args.append('--shell-file=' + shell_file)
     return args
 
 

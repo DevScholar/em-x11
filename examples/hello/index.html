@@ -3,26 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>em-x11 · hello</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-        min-height: 100%;
-      }
-      body {
-        padding: 1rem;
-      }
-    </style>
+    <title>Hello - EmX11</title>
   </head>
   <body>
     <script type="module">
-      import { createEmX11 } from '../../src/index.js';
-
-      const x11 = await createEmX11({ width: 1024, height: 768 });
-
-      const factory = (await import('/build/artifacts/hello/hello.js')).default;
-      await factory({ ...x11.moduleOverrides });
+      const factory = (await import('/artifacts/hello/hello.js')).default;
+      await factory();
     </script>
   </body>
 </html>

@@ -79,3 +79,14 @@ function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | Off
 
 // Expose as a global so library_emx11.js can find it during init.
 (globalThis as Record<string, unknown>).EmX11DefaultHost = { create: createDefaultHost } satisfies DefaultHostModule;
+
+// Auto-init for Layer 1: when this IIFE runs inside an emscripten
+// MODULARIZE=1 factory, `Module` is a `var` in the enclosing scope.
+// We call createDefaultHost directly so the EM_JS bridges (which read
+// Module['emx11Host']) work immediately, without depending on the
+// library_emx11.js override (which may not take effect if the EM_JS
+// bodies in bridges.c are not overridden).
+declare var Module: any;
+if (typeof Module !== 'undefined' && !Module['emx11Host'] && !Module['emx11NoAutoStart']) {
+  createDefaultHost(Module);
+}

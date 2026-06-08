@@ -7,15 +7,12 @@
   </head>
   <body>
     <script type="module">
-      import { createEmX11 } from '../../src/index.js';
-
-      const x11 = await createEmX11({ width: 800, height: 600 });
-
-      const factory = (await import('/build/artifacts/xcalc/xcalc.js')).default;
+      const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
       await factory({
-        ...x11.moduleOverrides,
         thisProgram: 'xcalc',
-        locateFile: (path) => `/build/artifacts/xcalc/${path}`,
+        emx11Width: 800,
+        emx11Height: 600,
+        locateFile: (path) => `/artifacts/xcalc/${path}`,
       });
     </script>
   </body>

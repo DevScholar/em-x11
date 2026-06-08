@@ -3,37 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>em-x11 · twm-session (twm + xeyes + xcalc)</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-        min-height: 100%;
-      }
-      body {
-        padding: 1rem;
-      }
-    </style>
+    <title>TWM Session - EmX11</title>
   </head>
   <body>
-    <script type="module">
-      import { createEmX11 } from '../../src/index.js';
-      import { launchTwm } from '../../src/runtime/twm-launch.js';
-      import { launchXcalc } from '../../src/runtime/xcalc-launch.js';
-      import { stageXbitmaps } from '../../src/runtime/xbitmaps-stage.js';
-
-      const emX11 = await createEmX11({ width: 1024, height: 768 });
-
-      stageXbitmaps(emX11);
-
-      await launchTwm(emX11);
-
-      const xeyes = emX11.child_process.spawn('/build/artifacts/xeyes/xeyes', { thisProgram: 'xeyes' });
-      await xeyes.ready;
-
-      await launchXcalc(emX11);
-
-      console.log('[emx11:twm-session] booted twm + xeyes + xcalc');
-    </script>
+    <script type="module" src="./main.ts"></script>
   </body>
 </html>
