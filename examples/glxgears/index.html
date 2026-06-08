@@ -16,6 +16,13 @@
     </style>
   </head>
   <body>
-    <script type="module" src="./main.ts"></script>
+    <script type="module">
+      import { createEmX11 } from '../../src/index.js';
+
+      const x11 = await createEmX11({ width: 1024, height: 768 });
+
+      const factory = (await import('/build/artifacts/glxgears/glxgears.js')).default;
+      await factory({ ...x11.moduleOverrides, thisProgram: 'glxgears' });
+    </script>
   </body>
 </html>

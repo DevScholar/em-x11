@@ -16,6 +16,17 @@
     </style>
   </head>
   <body>
-    <script type="module" src="./main.ts"></script>
+    <script type="module">
+      import { createEmX11 } from '../../src/index.js';
+
+      const x11 = await createEmX11({ width: 800, height: 600 });
+
+      const factory = (await import('/build/artifacts/xcalc/xcalc.js')).default;
+      await factory({
+        ...x11.moduleOverrides,
+        thisProgram: 'xcalc',
+        locateFile: (path) => `/build/artifacts/xcalc/${path}`,
+      });
+    </script>
   </body>
 </html>
