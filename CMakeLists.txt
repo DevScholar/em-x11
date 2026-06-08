@@ -44,5 +44,5 @@ add_subdirectory(examples/xt-hello)
 add_subdirectory(examples/xcalc)
 add_subdirectory(examples/xeyes)
 add_subdirectory(examples/glxgears)
-# twm wasm artifact needed by twm-session demo.
+# twm wasm artifact needed by twm-session demo (no index.html — not a standalone demo).
 add_subdirectory(examples/twm)
