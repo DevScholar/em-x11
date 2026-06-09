@@ -8,6 +8,11 @@
  * composes, or pastes there gets forwarded as synthetic X11 KeyPress
  * events into the wasm side.
  *
+ * The textarea is created lazily on first XSetICFocus (the wasm app has
+ * a text-input widget that wants IME) and removed from the DOM on
+ * XUnsetICFocus.  No permanent hidden element — only present while
+ * the user is actually typing.
+ *
  * Two coordinate systems involved:
  *
  *   - X11 window-local coords (XSetICValues(XNSpotLocation): caret
@@ -52,7 +57,9 @@ export interface TextInputRemote {
 }
 
 export class TextInputOverlay {
-  private readonly el: HTMLTextAreaElement | null;
+  /** The textarea exists only while a widget has XIM focus. Created on
+   *  first setFocus after a clearFocus, removed from DOM on clearFocus. */
+  private el: HTMLTextAreaElement | null = null;
   private focusedWindow: number | null = null;
   /** Most recent caret spot (window-local, X11 px). null until the
    *  client calls XSetICValues(XNSpotLocation) at least once. */
@@ -66,22 +73,17 @@ export class TextInputOverlay {
   /** Public accessor so InputBridge can recognise the overlay as a
    *  legitimate focus surface (document.activeElement === overlay
    *  still counts as "focused on the X canvas" for keyboard routing).
-   *  Always null in remote mode -- the textarea lives in another realm. */
+   *  Returns null when no widget has IME focus or in remote mode. */
   get element(): HTMLTextAreaElement | null {
     return this.el;
   }
 
   constructor(private readonly host: Host) {
     if (host.canvas.headless || typeof document === 'undefined') {
-      this.el = null;
       return;
     }
-    this.el = createHiddenTextarea();
-    document.body.appendChild(this.el);
-    attachCompositionListeners(this.el, (text) => {
-      if (this.focusedWindow !== null) this.host.devices.pushTextKey(text);
-    });
-    /* Reposition on viewport reshape so candidate window stays anchored. */
+    /* Reposition on viewport reshape so candidate window stays anchored.
+     * applyPosition() early-returns when el or focusedWindow is null. */
     const onMove = (): void => this.applyPosition();
     this.moveHandler = onMove;
     window.addEventListener('resize', onMove);
@@ -89,8 +91,8 @@ export class TextInputOverlay {
   }
 
   /** Tear down DOM state owned by this overlay: detach the resize/scroll
-   *  listeners and remove the hidden textarea from the document. Safe
-   *  to call in remote/headless mode (no-op when there's no element).
+   *  listeners and remove the hidden textarea from the document if it
+   *  happens to be present. Safe to call in remote/headless mode.
    *  Idempotent. */
   dispose(): void {
     if (this.moveHandler) {
@@ -98,7 +100,7 @@ export class TextInputOverlay {
       window.removeEventListener('scroll', this.moveHandler, true);
       this.moveHandler = null;
     }
-    if (this.el && this.el.parentNode) this.el.remove();
+    this.removeTextarea();
   }
 
   /** Remote-mode hook. When set, setFocus/setSpot/clearFocus forward
@@ -129,14 +131,13 @@ export class TextInputOverlay {
       }
       return;
     }
-    if (!this.el) return;
     if (!this.focusedWindow) {
-      this.el.blur();
-      this.el.style.left = '-9999px';
+      this.removeTextarea();
       return;
     }
+    this.ensureTextarea();
     this.applyPosition();
-    this.el.value = '';
+    this.el!.value = '';
     /* preventScroll: the page must not jump because we moved focus to
      * a 1px element off in the corner of the viewport. */
     try {
@@ -144,7 +145,7 @@ export class TextInputOverlay {
         focus(opts: { preventScroll: boolean }): void;
       }).focus({ preventScroll: true });
     } catch {
-      this.el.focus();
+      this.el!.focus();
     }
   }
 
@@ -154,9 +155,7 @@ export class TextInputOverlay {
       this.remote.clearFocus();
       return;
     }
-    if (!this.el) return;
-    this.el.blur();
-    this.el.style.left = '-9999px';
+    this.removeTextarea();
   }
 
   /** Caret moved inside the focused widget. Tk fires this on every
@@ -209,6 +208,29 @@ export class TextInputOverlay {
     const spotX = this.spot && this.spot.window === winId ? this.spot.x : 0;
     const spotY = this.spot && this.spot.window === winId ? this.spot.y : 0;
     return { x: origin.ax + spotX, y: origin.ay + spotY };
+  }
+
+  /* -- Lazy textarea helpers --------------------------------------------- */
+
+  /** Create the textarea and inject it into the DOM. No-op if already
+   *  present (consecutive setFocus calls on the same or different window
+   *  without an intervening clearFocus). */
+  private ensureTextarea(): void {
+    if (this.el) return;
+    this.el = createHiddenTextarea();
+    document.body.appendChild(this.el);
+    attachCompositionListeners(this.el, (text) => {
+      if (this.focusedWindow !== null) this.host.devices.pushTextKey(text);
+    });
+  }
+
+  /** Blur and remove the textarea from the DOM so no hidden element
+   *  lingers while the user is not typing into an X11 text widget. */
+  private removeTextarea(): void {
+    if (!this.el) return;
+    this.el.blur();
+    this.el.remove();
+    this.el = null;
   }
 }
 
@@ -369,16 +391,30 @@ export function createDomTextInputBridge(
   if (typeof document === 'undefined') {
     throw new Error('em-x11: createDomTextInputBridge requires a DOM');
   }
-  const ta = createHiddenTextarea();
-  document.body.appendChild(ta);
-  attachCompositionListeners(ta, opts.onText);
-
+  /** The textarea exists only while a widget has XIM focus — created on
+   *  setFocus, removed from DOM on clearFocus. */
+  let ta: HTMLTextAreaElement | null = null;
   let focused = false;
   let focusedWindow: number | null = null;
   let lastAbs: { x: number; y: number } | null = null;
 
+  const ensureTa = (): HTMLTextAreaElement => {
+    if (ta) return ta;
+    ta = createHiddenTextarea();
+    document.body.appendChild(ta);
+    attachCompositionListeners(ta, opts.onText);
+    return ta;
+  };
+
+  const removeTa = (): void => {
+    if (!ta) return;
+    ta.blur();
+    ta.remove();
+    ta = null;
+  };
+
   const reposition = (): void => {
-    if (!focused || !lastAbs) return;
+    if (!focused || !lastAbs || !ta) return;
     const rect = opts.canvas.getBoundingClientRect();
     const rootW = opts.rootWidth ?? opts.canvas.width;
     const rootH = opts.rootHeight ?? opts.canvas.height;
@@ -399,21 +435,21 @@ export function createDomTextInputBridge(
       if (focused && focusedWindow === _window) return;
       focused = true;
       focusedWindow = _window;
+      ensureTa();
       reposition();
-      ta.value = '';
+      ta!.value = '';
       try {
         (ta as HTMLTextAreaElement & {
           focus(opts: { preventScroll: boolean }): void;
         }).focus({ preventScroll: true });
       } catch {
-        ta.focus();
+        ta!.focus();
       }
     },
     clearFocus(): void {
       focused = false;
       focusedWindow = null;
-      ta.blur();
-      ta.style.left = '-9999px';
+      removeTa();
     },
     applyPosition(absX: number, absY: number): void {
       lastAbs = { x: absX, y: absY };
@@ -422,7 +458,7 @@ export function createDomTextInputBridge(
     destroy(): void {
       window.removeEventListener('resize', onMove);
       window.removeEventListener('scroll', onMove, true);
-      ta.remove();
+      removeTa();
     },
   };
 }

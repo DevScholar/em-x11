@@ -147,15 +147,6 @@ export class InputBridge {
     this.cursorRemote = fn;
   }
 
-  /** Hidden-textarea overlay (text-input.ts) registers itself here so
-   *  the keydown path can treat focus on the overlay as equivalent to
-   *  focus on the canvas, and the synthetic-text path (pushTextKey)
-   *  knows it's safe to dispatch composed input. */
-  private overlayElement: HTMLTextAreaElement | null = null;
-  registerOverlay(el: HTMLTextAreaElement | null): void {
-    this.overlayElement = el;
-  }
-
   /** Install an active pointer grab on behalf of the wasm process
    *  identified by `connId`. Until cleared, all button + motion events
    *  route to that connection regardless of which window the pointer
@@ -661,8 +652,8 @@ export class InputBridge {
      * overlay is armed, focus the canvas as before so plain keydown
      * routes work for non-text demos. */
     on(el, 'mousedown', (ev) => {
-      const ov = this.overlayElement;
-      const armed = ov && document.contains(ov) && ov.style.left !== '-9999px';
+      const ov = this.host.textInput.element;
+      const armed = ov !== null;
       if (armed && document.activeElement === ov) {
         /* Textarea already holds DOM focus and the OS IME has anchored
          * its per-element state (Chinese mode, candidate window, etc.)
@@ -717,8 +708,9 @@ export class InputBridge {
        * the OS IME anchors candidate windows to (text-input.ts); from
        * X's point of view we're still typing into the canvas. */
       const active = document.activeElement;
-      const hasFocus = active === el || (this.overlayElement !== null &&
-                                         active === this.overlayElement);
+      const ov = this.host.textInput.element;
+      const hasFocus = active === el || (ov !== null &&
+                                         active === ov);
       /* Composing: KeyboardEvent during IME composition carries
        * key='Process' / keyCode=229 / isComposing=true and contains no
        * useful info. The composed result arrives later as a
@@ -764,8 +756,9 @@ export class InputBridge {
     on(window, 'keyup', (ev) => {
       const e = ev as KeyboardEvent;
       const active = document.activeElement;
-      const hasFocus = active === el || (this.overlayElement !== null &&
-                                         active === this.overlayElement);
+      const ov = this.host.textInput.element;
+      const hasFocus = active === el || (ov !== null &&
+                                         active === ov);
       if (e.isComposing || e.key === 'Process') return;
       if (hasFocus) e.preventDefault();
       this.pushKeyUp({

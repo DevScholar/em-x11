@@ -114,11 +114,6 @@ export class Host implements EmX11Host {
      * headless / OffscreenCanvas mode -- pyodide-tk worker path drives
      * input through devices.push* directly and has no DOM. */
     this.textInput = new TextInputOverlay(this);
-    this.devices.registerOverlay(
-      // Reach in through a typed accessor that returns the underlying
-      // <textarea> when available, null otherwise.
-      this.textInput.element,
-    );
     this.keyboardLayout = new KeyboardLayoutManager();
     this.keyboardLock = new KeyboardLockManager();
     /* Fire-and-forget the getLayoutMap() fetch so the Promise is hot by
