@@ -56,9 +56,10 @@ __real_glMaterialfv(GLenum face, GLenum pname, const GLfloat* params);
  * Lives in the demo (not emx11_static) so emx11 itself stays free
  * of EM_ASYNC_JS, which would otherwise force JSPI suspends on
  * non-GL clients (e.g. tcldide's sync runTcl). */
+// clang-format off
 EM_ASYNC_JS(void, emx11_glx_yield_until_raf, (void), {
   return new Promise(function(resolve) {
-    if (typeof requestAnimationFrame == = 'function') {
+    if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(function() { resolve(); });
     } else {
       /* Worker fallback: a task tick is the best we can do. */
@@ -66,6 +67,7 @@ EM_ASYNC_JS(void, emx11_glx_yield_until_raf, (void), {
     }
   });
 });
+// clang-format on
 
 /* --- recorded command buffer -------------------------------------------- */
 
