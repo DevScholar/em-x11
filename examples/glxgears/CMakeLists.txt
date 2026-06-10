@@ -39,5 +39,4 @@ target_link_options(glxgears PRIVATE
     "SHELL:-Wl,--wrap=glNormal3f"
     "SHELL:-Wl,--wrap=glShadeModel"
     "SHELL:-Wl,--wrap=glMaterialfv"
-    "SHELL:-Wl,--wrap=glLightfv"
 )
