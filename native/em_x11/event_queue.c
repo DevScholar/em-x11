@@ -5,16 +5,16 @@
  * and event_send.c (synthetic delivery).
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <emscripten.h>
 #include <errno.h>
 #include <unistd.h>
 
 /* Signal delivery at cooperative yield points (signal.c). */
-extern void emx11_deliver_pending_signals(void);
+extern void em_x11_deliver_pending_signals(void);
 
-bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
+bool em_x11_event_queue_push(Display* dpy, const XEvent* event) {
   /* Expose coalescing: when the queue already holds an Expose event for
    * the same window, merge the new rectangle into the existing one and
    * bump its count. This mirrors xorg's miSendExposures / miWindowExposures
@@ -32,7 +32,7 @@ bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
    *    before paying for a full redraw (standard Xt practice). */
   if (event->type == Expose) {
     Window w = event->xexpose.window;
-    unsigned int cap = EMX11_EVENT_QUEUE_CAPACITY;
+    unsigned int cap = EM_X11_EVENT_QUEUE_CAPACITY;
     unsigned int idx = dpy->event_head;
     while (idx != dpy->event_tail) {
       XEvent* ex = &dpy->event_queue[idx];
@@ -70,13 +70,13 @@ bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
     /* Fall through: first Expose for this window, push normally. */
   }
 
-  unsigned int next_tail = (dpy->event_tail + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+  unsigned int next_tail = (dpy->event_tail + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
   if (next_tail == dpy->event_head) {
     return false;
   }
   dpy->event_queue[dpy->event_tail] = *event;
   dpy->event_tail = next_tail;
-  dpy->qlen = (int)emx11_event_queue_size(dpy);
+  dpy->qlen = (int)em_x11_event_queue_size(dpy);
   /* Wake up any Select() blocking on dpy->fd (libXt's IoWait).
    * The write end is O_NONBLOCK; if the pipe buffer is full we drop
    * the wakeup byte — a full pipe already implies many unprocessed
@@ -90,7 +90,7 @@ bool emx11_event_queue_push(Display* dpy, const XEvent* event) {
   return true;
 }
 
-bool emx11_event_queue_pop(Display* dpy, XEvent* out) {
+bool em_x11_event_queue_pop(Display* dpy, XEvent* out) {
   if (dpy->event_head == dpy->event_tail) {
     return false;
   }
@@ -99,18 +99,18 @@ bool emx11_event_queue_pop(Display* dpy, XEvent* out) {
    * a subsequent Xutf8LookupString picks up exactly what JS staged
    * for this event. Cheap no-op for non-key events. */
   if (out->type == KeyPress || out->type == KeyRelease) {
-    emx11_xim_capture_pop_text(dpy, dpy->event_head);
+    em_x11_xim_capture_pop_text(dpy, dpy->event_head);
   }
-  dpy->event_head = (dpy->event_head + 1) % EMX11_EVENT_QUEUE_CAPACITY;
-  dpy->qlen = (int)emx11_event_queue_size(dpy);
+  dpy->event_head = (dpy->event_head + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
+  dpy->qlen = (int)em_x11_event_queue_size(dpy);
   return true;
 }
 
-unsigned int emx11_event_queue_size(const Display* dpy) {
+unsigned int em_x11_event_queue_size(const Display* dpy) {
   if (dpy->event_tail >= dpy->event_head) {
     return dpy->event_tail - dpy->event_head;
   }
-  return EMX11_EVENT_QUEUE_CAPACITY - dpy->event_head + dpy->event_tail;
+  return EM_X11_EVENT_QUEUE_CAPACITY - dpy->event_head + dpy->event_tail;
 }
 
 /* Map an event type to the input-mask bit(s) that would select it.
@@ -171,7 +171,7 @@ static long event_type_to_mask(int type) {
 /* Remove the slot at `idx` from the ring, shifting everything that
  * follows it down by one. `idx` must lie in the range [head, tail). */
 static void queue_remove_at(Display* dpy, unsigned int idx) {
-  unsigned int cap = EMX11_EVENT_QUEUE_CAPACITY;
+  unsigned int cap = EM_X11_EVENT_QUEUE_CAPACITY;
   unsigned int cur = idx;
   for (;;) {
     unsigned int next = (cur + 1) % cap;
@@ -181,12 +181,12 @@ static void queue_remove_at(Display* dpy, unsigned int idx) {
     cur = next;
   }
   dpy->event_tail = (dpy->event_tail + cap - 1) % cap;
-  dpy->qlen = (int)emx11_event_queue_size(dpy);
+  dpy->qlen = (int)em_x11_event_queue_size(dpy);
 }
 
-bool emx11_event_queue_peek_match(Display* dpy, long mask, XEvent* out) {
-  unsigned int cap = EMX11_EVENT_QUEUE_CAPACITY;
-  unsigned int n = emx11_event_queue_size(dpy);
+bool em_x11_event_queue_peek_match(Display* dpy, long mask, XEvent* out) {
+  unsigned int cap = EM_X11_EVENT_QUEUE_CAPACITY;
+  unsigned int n = em_x11_event_queue_size(dpy);
   for (unsigned int i = 0; i < n; i++) {
     unsigned int idx = (dpy->event_head + i) % cap;
     if (event_type_to_mask(dpy->event_queue[idx].type) & mask) {
@@ -199,12 +199,12 @@ bool emx11_event_queue_peek_match(Display* dpy, long mask, XEvent* out) {
   return false;
 }
 
-bool emx11_event_queue_peek_typed(Display* dpy,
-                                  Window w,
-                                  int type,
-                                  XEvent* out) {
-  unsigned int cap = EMX11_EVENT_QUEUE_CAPACITY;
-  unsigned int n = emx11_event_queue_size(dpy);
+bool em_x11_event_queue_peek_typed(Display* dpy,
+                                   Window w,
+                                   int type,
+                                   XEvent* out) {
+  unsigned int cap = EM_X11_EVENT_QUEUE_CAPACITY;
+  unsigned int n = em_x11_event_queue_size(dpy);
   for (unsigned int i = 0; i < n; i++) {
     unsigned int idx = (dpy->event_head + i) % cap;
     const XEvent* ev = &dpy->event_queue[idx];
@@ -218,11 +218,11 @@ bool emx11_event_queue_peek_typed(Display* dpy,
   return false;
 }
 
-int XPending(Display* display) { return (int)emx11_event_queue_size(display); }
+int XPending(Display* display) { return (int)em_x11_event_queue_size(display); }
 
 int XEventsQueued(Display* display, int mode) {
   /* In a real X connection, QueuedAfterReading reads bytes from the socket
-   * into the local queue. Our events arrive via emx11_event_queue_push
+   * into the local queue. Our events arrive via em_x11_event_queue_push
    * (called by the JS host), but the self-pipe wakeup bytes accumulate on
    * dpy->fd. Drain them here so the next Select() can block cleanly. */
   if (mode != QueuedAlready && display->fd > 0) {
@@ -230,7 +230,7 @@ int XEventsQueued(Display* display, int mode) {
     while (read(display->fd, buf, sizeof(buf)) > 0) {
     }
   }
-  return (int)emx11_event_queue_size(display);
+  return (int)em_x11_event_queue_size(display);
 }
 
 int XNextEvent(Display* display, XEvent* event_return) {
@@ -243,20 +243,20 @@ int XNextEvent(Display* display, XEvent* event_return) {
    *
    * After each yield we deliver any pending signals so SIGALRM /
    * SIGCHLD handlers fire even when the caller is stuck in XNextEvent. */
-  while (emx11_event_queue_size(display) == 0) {
+  while (em_x11_event_queue_size(display) == 0) {
     emscripten_sleep(1);
-    emx11_deliver_pending_signals();
+    em_x11_deliver_pending_signals();
   }
-  emx11_event_queue_pop(display, event_return);
+  em_x11_event_queue_pop(display, event_return);
   /* Drain wakeup bytes so the next Select() blocks cleanly. */
-  if (emx11_event_queue_size(display) == 0 && display->fd > 0) {
+  if (em_x11_event_queue_size(display) == 0 && display->fd > 0) {
     char buf[64];
     while (read(display->fd, buf, sizeof(buf)) > 0) {
     }
   }
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceNext && $0) {
         console.log('[c-next] XNextEvent conn=' + $1 + ' type=' + $2 + ' win=' +
                     ($3 >>> 0));
@@ -288,17 +288,17 @@ Bool XCheckIfEvent(Display* dpy,
     XEvent* e = &dpy->event_queue[i];
     if (predicate(dpy, e, arg)) {
       *event_return = *e;
-      unsigned int next = (i + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+      unsigned int next = (i + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
       while (next != dpy->event_tail) {
         dpy->event_queue[i] = dpy->event_queue[next];
         i = next;
-        next = (next + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+        next = (next + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
       }
-      dpy->event_tail = (dpy->event_tail + EMX11_EVENT_QUEUE_CAPACITY - 1) %
-                        EMX11_EVENT_QUEUE_CAPACITY;
+      dpy->event_tail = (dpy->event_tail + EM_X11_EVENT_QUEUE_CAPACITY - 1) %
+                        EM_X11_EVENT_QUEUE_CAPACITY;
       return True;
     }
-    i = (i + 1) % EMX11_EVENT_QUEUE_CAPACITY;
+    i = (i + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
   }
   return False;
 }
@@ -313,7 +313,7 @@ int XIfEvent(Display* dpy,
    * responsive without busy-waiting. */
   while (!XCheckIfEvent(dpy, event_return, predicate, arg)) {
     emscripten_sleep(1);
-    emx11_deliver_pending_signals();
+    em_x11_deliver_pending_signals();
   }
   return 0;
 }
@@ -323,7 +323,7 @@ int XPeekEvent(Display* dpy, XEvent* event_return) {
    * and blocks. Same JSPI-based poll as XNextEvent. */
   while (dpy->event_head == dpy->event_tail) {
     emscripten_sleep(1);
-    emx11_deliver_pending_signals();
+    em_x11_deliver_pending_signals();
   }
   *event_return = dpy->event_queue[dpy->event_head];
   return 0;
@@ -332,8 +332,8 @@ int XPeekEvent(Display* dpy, XEvent* event_return) {
 int XPutBackEvent(Display* dpy, XEvent* event) {
   if (!dpy || !event)
     return 0;
-  dpy->event_head = (dpy->event_head + EMX11_EVENT_QUEUE_CAPACITY - 1) %
-                    EMX11_EVENT_QUEUE_CAPACITY;
+  dpy->event_head = (dpy->event_head + EM_X11_EVENT_QUEUE_CAPACITY - 1) %
+                    EM_X11_EVENT_QUEUE_CAPACITY;
   dpy->event_queue[dpy->event_head] = *event;
   return 1;
 }
@@ -350,24 +350,24 @@ int (*XSynchronize(Display* dpy, Bool onoff))(Display*) {
 }
 
 Bool XCheckMaskEvent(Display* dpy, long event_mask, XEvent* ev) {
-  return emx11_event_queue_peek_match(dpy, event_mask, ev) ? True : False;
+  return em_x11_event_queue_peek_match(dpy, event_mask, ev) ? True : False;
 }
 
 Bool XCheckTypedWindowEvent(Display* dpy,
                             Window w,
                             int event_type,
                             XEvent* ev) {
-  return emx11_event_queue_peek_typed(dpy, w, event_type, ev) ? True : False;
+  return em_x11_event_queue_peek_typed(dpy, w, event_type, ev) ? True : False;
 }
 
 int XMaskEvent(Display* dpy, long event_mask, XEvent* ev) {
-  while (!emx11_event_queue_peek_match(dpy, event_mask, ev)) {
+  while (!em_x11_event_queue_peek_match(dpy, event_mask, ev)) {
     emscripten_sleep(1);
-    emx11_deliver_pending_signals();
+    em_x11_deliver_pending_signals();
   }
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceMask) {
         console.log('[c-mask] XMaskEvent conn=' + $0 + ' mask=0x' +
                     ($1 >>> 0).toString(16) + ' found type=' + $2 + ' win=' +

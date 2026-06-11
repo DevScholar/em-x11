@@ -10,7 +10,7 @@
  *
  * Auto-snapshot: a ring buffer of {backing, mask, rootCrop} triggered
  * by window-tree structural events (configure, shape, map, raise).
- * Controlled via Module['emx11Debug'].autoSnapshot.
+ * Controlled via Module['emX11Debug'].autoSnapshot.
  */
 
 import type { RendererState, ManagedWindow } from './types.js';
@@ -42,7 +42,7 @@ function logImageFromUrl(url: string, label: string, borderColor: string): void 
     img.style.border = `2px solid ${borderColor}`;
     console.log(label, img);
   } else {
-    console.log(`[emx11] ${label}: ${url}`);
+    console.log(`[em-x11] ${label}: ${url}`);
   }
 }
 
@@ -76,7 +76,7 @@ export interface WindowDump {
 export async function dumpWindow(r: RendererState, id: number): Promise<WindowDump | null> {
   const win = r.windows.get(id);
   if (!win) {
-    console.warn(`[emx11] dumpWindow: window #${id} not found`);
+    console.warn(`[em-x11] dumpWindow: window #${id} not found`);
     return null;
   }
 
@@ -153,7 +153,7 @@ export function cropRootCanvasToWindow(
 export async function dumpWindowCompare(r: RendererState, id: number): Promise<string | null> {
   const win = r.windows.get(id);
   if (!win) {
-    console.warn(`[emx11] dumpWindowCompare: window #${id} not found`);
+    console.warn(`[em-x11] dumpWindowCompare: window #${id} not found`);
     return null;
   }
 

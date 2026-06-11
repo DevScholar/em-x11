@@ -4,8 +4,8 @@
  * specialization is required for any code that instantiates
  * basic_string<unsigned int>. */
 
-#ifndef EMX11_WASM32_CHAR_TRAITS_UINT_HH
-#define EMX11_WASM32_CHAR_TRAITS_UINT_HH
+#ifndef EM_X11_WASM32_CHAR_TRAITS_UINT_HH
+#define EM_X11_WASM32_CHAR_TRAITS_UINT_HH
 
 #ifdef __cplusplus
 

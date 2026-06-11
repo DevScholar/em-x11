@@ -9,90 +9,113 @@
  * browser-side text pipeline used for 8-bit strings.
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <X11/Xutil.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int xchar2b_to_utf8(const XChar2b *s, int n,
-                           unsigned char *out, int cap) {
-    int w = 0, i = 0;
-    while (i < n) {
-        unsigned int cp = ((unsigned int)s[i].byte1 << 8) | s[i].byte2;
+static int
+xchar2b_to_utf8(const XChar2b* s, int n, unsigned char* out, int cap) {
+  int w = 0, i = 0;
+  while (i < n) {
+    unsigned int cp = ((unsigned int)s[i].byte1 << 8) | s[i].byte2;
+    i++;
+    if (cp >= 0xD800 && cp <= 0xDBFF && i < n) {
+      unsigned int lo = ((unsigned int)s[i].byte1 << 8) | s[i].byte2;
+      if (lo >= 0xDC00 && lo <= 0xDFFF) {
+        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
         i++;
-        if (cp >= 0xD800 && cp <= 0xDBFF && i < n) {
-            unsigned int lo = ((unsigned int)s[i].byte1 << 8) | s[i].byte2;
-            if (lo >= 0xDC00 && lo <= 0xDFFF) {
-                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                i++;
-            }
-        }
-        if (cp < 0x80) {
-            if (w + 1 > cap) break;
-            out[w++] = (unsigned char)cp;
-        } else if (cp < 0x800) {
-            if (w + 2 > cap) break;
-            out[w++] = (unsigned char)(0xC0 | (cp >> 6));
-            out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-        } else if (cp < 0x10000) {
-            if (w + 3 > cap) break;
-            out[w++] = (unsigned char)(0xE0 | (cp >> 12));
-            out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-            out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-        } else {
-            if (w + 4 > cap) break;
-            out[w++] = (unsigned char)(0xF0 | (cp >> 18));
-            out[w++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
-            out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-            out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-        }
+      }
     }
-    return w;
+    if (cp < 0x80) {
+      if (w + 1 > cap)
+        break;
+      out[w++] = (unsigned char)cp;
+    } else if (cp < 0x800) {
+      if (w + 2 > cap)
+        break;
+      out[w++] = (unsigned char)(0xC0 | (cp >> 6));
+      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+      if (w + 3 > cap)
+        break;
+      out[w++] = (unsigned char)(0xE0 | (cp >> 12));
+      out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
+    } else {
+      if (w + 4 > cap)
+        break;
+      out[w++] = (unsigned char)(0xF0 | (cp >> 18));
+      out[w++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+      out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
+    }
+  }
+  return w;
 }
 
-#define EMX11_UTF8_BUFLEN(n)  ((size_t)(n) * 4 + 1)
+#define EM_X11_UTF8_BUFLEN(n) ((size_t)(n) * 4 + 1)
 
-int XDrawString16(Display *dpy, Drawable d, GC gc, int x, int y,
-                  _Xconst XChar2b *string, int length) {
-    if (!string || length <= 0) return 1;
-    size_t cap = EMX11_UTF8_BUFLEN(length);
-    unsigned char stack[512];
-    unsigned char *buf = cap <= sizeof stack ? stack
-                                             : (unsigned char *)malloc(cap);
-    if (!buf) return 0;
-    int used = xchar2b_to_utf8(string, length, buf, (int)cap - 1);
-    buf[used] = 0;
-    int r = XDrawString(dpy, d, gc, x, y, (const char *)buf, used);
-    if (buf != stack) free(buf);
-    return r;
+int XDrawString16(Display* dpy,
+                  Drawable d,
+                  GC gc,
+                  int x,
+                  int y,
+                  _Xconst XChar2b* string,
+                  int length) {
+  if (!string || length <= 0)
+    return 1;
+  size_t cap = EM_X11_UTF8_BUFLEN(length);
+  unsigned char stack[512];
+  unsigned char* buf =
+    cap <= sizeof stack ? stack : (unsigned char*)malloc(cap);
+  if (!buf)
+    return 0;
+  int used = xchar2b_to_utf8(string, length, buf, (int)cap - 1);
+  buf[used] = 0;
+  int r = XDrawString(dpy, d, gc, x, y, (const char*)buf, used);
+  if (buf != stack)
+    free(buf);
+  return r;
 }
 
-int XDrawImageString16(Display *dpy, Drawable d, GC gc, int x, int y,
-                       _Xconst XChar2b *string, int length) {
-    if (!string || length <= 0) return 1;
-    size_t cap = EMX11_UTF8_BUFLEN(length);
-    unsigned char stack[512];
-    unsigned char *buf = cap <= sizeof stack ? stack
-                                             : (unsigned char *)malloc(cap);
-    if (!buf) return 0;
-    int used = xchar2b_to_utf8(string, length, buf, (int)cap - 1);
-    buf[used] = 0;
-    int r = XDrawImageString(dpy, d, gc, x, y, (const char *)buf, used);
-    if (buf != stack) free(buf);
-    return r;
+int XDrawImageString16(Display* dpy,
+                       Drawable d,
+                       GC gc,
+                       int x,
+                       int y,
+                       _Xconst XChar2b* string,
+                       int length) {
+  if (!string || length <= 0)
+    return 1;
+  size_t cap = EM_X11_UTF8_BUFLEN(length);
+  unsigned char stack[512];
+  unsigned char* buf =
+    cap <= sizeof stack ? stack : (unsigned char*)malloc(cap);
+  if (!buf)
+    return 0;
+  int used = xchar2b_to_utf8(string, length, buf, (int)cap - 1);
+  buf[used] = 0;
+  int r = XDrawImageString(dpy, d, gc, x, y, (const char*)buf, used);
+  if (buf != stack)
+    free(buf);
+  return r;
 }
 
-int XTextWidth16(XFontStruct *fs, _Xconst XChar2b *string, int count) {
-    if (!string || count <= 0) return 0;
-    size_t cap = EMX11_UTF8_BUFLEN(count);
-    unsigned char stack[512];
-    unsigned char *buf = cap <= sizeof stack ? stack
-                                             : (unsigned char *)malloc(cap);
-    if (!buf) return 0;
-    int used = xchar2b_to_utf8(string, count, buf, (int)cap - 1);
-    buf[used] = 0;
-    int w = XTextWidth(fs, (const char *)buf, used);
-    if (buf != stack) free(buf);
-    return w;
+int XTextWidth16(XFontStruct* fs, _Xconst XChar2b* string, int count) {
+  if (!string || count <= 0)
+    return 0;
+  size_t cap = EM_X11_UTF8_BUFLEN(count);
+  unsigned char stack[512];
+  unsigned char* buf =
+    cap <= sizeof stack ? stack : (unsigned char*)malloc(cap);
+  if (!buf)
+    return 0;
+  int used = xchar2b_to_utf8(string, count, buf, (int)cap - 1);
+  buf[used] = 0;
+  int w = XTextWidth(fs, (const char*)buf, used);
+  if (buf != stack)
+    free(buf);
+  return w;
 }

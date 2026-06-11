@@ -146,7 +146,7 @@ export interface InjectKeyEvent {
   /** UTF-8 string the browser produced for this key. Plain ASCII typing
    *  fills this from KeyboardEvent.key (length-1 char); non-printable
    *  keys, modifiers, and IME 'Process' events leave it empty.
-   *  Forwarded into emx11_set_pending_key_text so Xutf8LookupString
+   *  Forwarded into em_x11_set_pending_key_text so Xutf8LookupString
    *  returns the typed bytes for Tk's tkUnixKey.c handler. */
   text?: string;
 }
@@ -186,13 +186,13 @@ export interface EmX11Display {
     wheel(e: InjectWheelEvent): void;
   };
   /** Plug the Tk/Tcl event-loop wake target into em-x11's notifier.
-   *  libemx11 forwards the standardised Tcl_SetNotifier setTimerProc
+   *  libem_x11 forwards the standardised Tcl_SetNotifier setTimerProc
    *  + alertNotifierProc signals here; hosts implement them on top
    *  of whatever scheduling primitive they have (setTimeout in the
    *  pyodide-tk worker, rAF in tcldide main thread, Atomics.notify
    *  if cross-thread).
    *
-   *  Without an installed wake, libemx11's bridges are silent no-ops
+   *  Without an installed wake, libem_x11's bridges are silent no-ops
    *  -- callers without a pump (test harnesses, demos that never
    *  enter Tk's event loop) don't need to install anything.
    *

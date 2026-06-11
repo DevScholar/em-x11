@@ -55,25 +55,25 @@
 /* Emscripten's <signal.h> defines NSIG as _NSIG (typically 65).
  * Our handler table only tracks the first 32 signals — the rest
  * (real-time signals, etc.) have no wasm analogue. */
-#define EMX11_NSIG 32
+#define EM_X11_NSIG 32
 
 static struct {
   struct sigaction sa;
   int pending;
-} g_sig[EMX11_NSIG];
+} g_sig[EM_X11_NSIG];
 
-/* True when inside emx11_deliver_pending_signals; prevents re-entrant
+/* True when inside em_x11_deliver_pending_signals; prevents re-entrant
  * delivery if a handler itself triggers a yield point. */
 static volatile int g_in_delivery = 0;
 
 /* Forward — defined after the public API. */
-void emx11_deliver_pending_signals(void);
-void emx11_js_kill(int pid, int sig);
+void em_x11_deliver_pending_signals(void);
+void em_x11_js_kill(int pid, int sig);
 
 /* ---- public overrides -------------------------------------------------- */
 
 sighandler_t signal(int signum, sighandler_t handler) {
-  if (signum <= 0 || signum >= EMX11_NSIG || signum == SIGKILL ||
+  if (signum <= 0 || signum >= EM_X11_NSIG || signum == SIGKILL ||
       signum == SIGSTOP) {
     errno = EINVAL;
     return SIG_ERR;
@@ -88,7 +88,7 @@ sighandler_t signal(int signum, sighandler_t handler) {
 int sigaction(int signum,
               const struct sigaction* act,
               struct sigaction* oldact) {
-  if (signum <= 0 || signum >= EMX11_NSIG || signum == SIGKILL ||
+  if (signum <= 0 || signum >= EM_X11_NSIG || signum == SIGKILL ||
       signum == SIGSTOP) {
     errno = EINVAL;
     return -1;
@@ -101,18 +101,18 @@ int sigaction(int signum,
 }
 
 int raise(int sig) {
-  if (sig <= 0 || sig >= EMX11_NSIG)
+  if (sig <= 0 || sig >= EM_X11_NSIG)
     return -1;
   g_sig[sig].pending = 1;
   /* Deliver synchronously when called from user code (safe: we're at a
    * well-defined point, not inside a yield). */
   if (!g_in_delivery)
-    emx11_deliver_pending_signals();
+    em_x11_deliver_pending_signals();
   return 0;
 }
 
 int kill(pid_t pid, int sig) {
-  if (sig <= 0 || sig >= EMX11_NSIG) {
+  if (sig <= 0 || sig >= EM_X11_NSIG) {
     errno = EINVAL;
     return -1;
   }
@@ -121,8 +121,8 @@ int kill(pid_t pid, int sig) {
   }
   /* Cross-process: tell the JS host to deliver.  The host finds the
    * target wasm module by pid (= connId) and ccalls
-   * emx11_signal_set_pending on it. */
-  emx11_js_kill(pid, sig);
+   * em_x11_signal_set_pending on it. */
+  em_x11_js_kill(pid, sig);
   return 0;
 }
 
@@ -156,7 +156,7 @@ int sigfillset(sigset_t* set) {
 }
 
 int sigaddset(sigset_t* set, int signum) {
-  if (!set || signum <= 0 || signum >= EMX11_NSIG) {
+  if (!set || signum <= 0 || signum >= EM_X11_NSIG) {
     errno = EINVAL;
     return -1;
   }
@@ -165,7 +165,7 @@ int sigaddset(sigset_t* set, int signum) {
 }
 
 int sigdelset(sigset_t* set, int signum) {
-  if (!set || signum <= 0 || signum >= EMX11_NSIG) {
+  if (!set || signum <= 0 || signum >= EM_X11_NSIG) {
     errno = EINVAL;
     return -1;
   }
@@ -174,7 +174,7 @@ int sigdelset(sigset_t* set, int signum) {
 }
 
 int sigismember(const sigset_t* set, int signum) {
-  if (!set || signum <= 0 || signum >= EMX11_NSIG) {
+  if (!set || signum <= 0 || signum >= EM_X11_NSIG) {
     errno = EINVAL;
     return -1;
   }
@@ -183,19 +183,19 @@ int sigismember(const sigset_t* set, int signum) {
 
 /* ---- pending-signal API (called from host / poll / notifier) ----------- */
 
-void emx11_signal_set_pending(int sig) {
-  if (sig > 0 && sig < EMX11_NSIG)
+void em_x11_signal_set_pending(int sig) {
+  if (sig > 0 && sig < EM_X11_NSIG)
     g_sig[sig].pending = 1;
 }
 
 /* Check and deliver every pending, non-blocked signal.  Safe to call
  * at any cooperative yield point; guards against re-entrant delivery. */
-void emx11_deliver_pending_signals(void) {
+void em_x11_deliver_pending_signals(void) {
   if (g_in_delivery)
     return;
   g_in_delivery = 1;
 
-  for (int sig = 1; sig < EMX11_NSIG; sig++) {
+  for (int sig = 1; sig < EM_X11_NSIG; sig++) {
     if (!g_sig[sig].pending)
       continue;
 
@@ -231,34 +231,34 @@ void emx11_deliver_pending_signals(void) {
 /* The host calls this (via ccall) when a child wasm module exits.
  * conn_id is the child's connection id (its "pid"). */
 EMSCRIPTEN_KEEPALIVE
-void emx11_signal_on_child_exit(int conn_id, int status) {
+void em_x11_signal_on_child_exit(int conn_id, int status) {
   (void)conn_id;
   (void)status;
-  emx11_signal_set_pending(SIGCHLD);
+  em_x11_signal_set_pending(SIGCHLD);
   /* Delivery happens at the next yield point — poll.c, notifier.c,
-   * and event_queue.c all call emx11_deliver_pending_signals after
+   * and event_queue.c all call em_x11_deliver_pending_signals after
    * their emscripten_sleep returns. */
 }
 
 /* The host calls this when a SIGALRM timer fires. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_signal_on_alarm(void) { emx11_signal_set_pending(SIGALRM); }
+void em_x11_signal_on_alarm(void) { em_x11_signal_set_pending(SIGALRM); }
 
 /* The host calls this on Ctrl+C or equivalent. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_signal_on_interrupt(void) { emx11_signal_set_pending(SIGINT); }
+void em_x11_signal_on_interrupt(void) { em_x11_signal_set_pending(SIGINT); }
 
 /* The host calls this when SIGTERM is requested. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_signal_on_terminate(void) { emx11_signal_set_pending(SIGTERM); }
+void em_x11_signal_on_terminate(void) { em_x11_signal_set_pending(SIGTERM); }
 
 /* The host calls this when a SIGPIPE condition is detected. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_signal_on_pipe(void) { emx11_signal_set_pending(SIGPIPE); }
+void em_x11_signal_on_pipe(void) { em_x11_signal_set_pending(SIGPIPE); }
 
 /* kill() bridge: tell the host to deliver a signal to another process. */
-EM_JS(void, emx11_js_kill, (int pid, int sig), {
-  var host = Module['emx11Host'];
+EM_JS(void, em_x11_js_kill, (int pid, int sig), {
+  var host = Module['emX11Host'];
   if (host && host.onSignalDeliver) {
     host.onSignalDeliver(pid | 0, sig | 0);
   }

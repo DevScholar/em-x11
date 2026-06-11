@@ -53,7 +53,7 @@ Deliberately NOT copied
 -----------------------
 
   Xlibint.h      -- internal Xlib implementer's header. em-x11 has its
-                    own internal header at native/emx11/emx11_internal.h
+                    own internal header at native/em_x11/em_x11_internal.h
                     that defines struct _XDisplay / struct _XGC for a
                     browser-canvas backend instead of a socket connection.
 
@@ -80,4 +80,4 @@ Upgrading upstream headers
 
   Any API additions in a new libX11 release that em-x11 has not yet
   implemented will surface as unresolved symbols at link time when a
-  client actually calls them -- add stubs in native/emx11/ (or the appropriate xorg-mapped directory) as needed.
+  client actually calls them -- add stubs in native/em_x11/ (or the appropriate xorg-mapped directory) as needed.

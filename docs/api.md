@@ -10,7 +10,7 @@ as `-sUSE_SDL=2`. Pick the layer that fits:
 
 | Layer | Entry point | When |
 |-------|------------|------|
-| 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects the JS library and a default Host. No user JS required. Pass `thisProgram`, `emx11Width`/`emx11Height`, and `locateFile` as Module properties. |
+| 1 — zero JS | `emcc myapp.c -sUSE_EM_X11 -o myapp.html` | Simple Xlib program; the port auto-injects the JS library and a default Host. No user JS required. Pass `thisProgram`, `emX11Width`/`emX11Height`, and `locateFile` as Module properties. |
 | 2 — createEmX11 | `createEmX11()` | Multi-process sessions, JS-side asset staging via `emX11.fs`, custom canvas/display, dlopen adapter. |
 
 Layer 1 covers every single-program example (hello, xeyes, glxgears, xt-hello, xcalc). Layer 2 is for multi-process use-cases like twm-session and the Pyodide integration.
@@ -46,7 +46,7 @@ import {
 
 ### `createEmX11(options?) → Promise<EmX11>`
 
-Creates a Host, attaches it to `Module['emx11Host']`, and returns the
+Creates a Host, attaches it to `Module['emX11Host']`, and returns the
 full surface. Two usage modes from one function:
 
 **Single-program mode (Layer 1 — zero JS)** — the default Host IIFE
@@ -59,15 +59,15 @@ auto-creates a canvas; just import and call the Emscripten factory:
 </script>
 ```
 
-For custom dimensions, pass `emx11Width` / `emx11Height`:
+For custom dimensions, pass `emX11Width` / `emX11Height`:
 
 ```html
 <script type="module">
   const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
   await factory({
     thisProgram: 'xcalc',
-    emx11Width: 800,
-    emx11Height: 600,
+    emX11Width: 800,
+    emX11Height: 600,
     locateFile: (path) => `/artifacts/xcalc/${path}`,
   });
 </script>
@@ -89,10 +89,10 @@ For programs that need assets staged into MEMFS before `main()` runs,
 use Emscripten's `--preload-file` at build time. The glue loads the
 `.data` package automatically — no JS-side `preRun` hook needed.
 
-In CMake, pass the file to `emx11_finalize_demo` via `PRELOAD_FILES`:
+In CMake, pass the file to `em_x11_finalize_demo` via `PRELOAD_FILES`:
 
 ```cmake
-emx11_finalize_demo(xcalc
+em_x11_finalize_demo(xcalc
     EXPORT_NAME createXcalcModule
     LIBS Xaw Xmu Xt Xpm Xext X11
     PRELOAD_FILES "${XCALC_SRC_DIR}/app-defaults/XCalc@/usr/lib/X11/app-defaults/XCalc"
@@ -106,8 +106,8 @@ The JS side stays minimal — same pattern as hello, plus `locateFile`:
   const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
   await factory({
     thisProgram: 'xcalc',
-    emx11Width: 800,
-    emx11Height: 600,
+    emX11Width: 800,
+    emX11Height: 600,
     locateFile: (path) => `/artifacts/xcalc/${path}`,
   });
 </script>
@@ -149,8 +149,8 @@ interface EmX11 {
   readonly child_process: EmX11ChildProcess;
   readonly version: string;
   /** Spread into the Emscripten factory call for single-program mode.
-   *  Sets Module['emx11Host'] and suppresses the default Host auto-start. */
-  readonly moduleOverrides: { emx11Host: Host; emx11NoAutoStart: true };
+   *  Sets Module['emX11Host'] and suppresses the default Host auto-start. */
+  readonly moduleOverrides: { emX11Host: Host; emX11NoAutoStart: true };
   readonly _host: Host;  // @internal
   dlopen(soPath: string, options?: DlopenOptions): Promise<LoadedModule>;
 }
@@ -334,24 +334,24 @@ await emX11.dlopen('/usr/lib/libXft.so');
 
 Without an adapter `emX11.dlopen()` throws.
 
-## The `Module['emx11Host']` slot
+## The `Module['emX11Host']` slot
 
-em-x11 uses a flat Module property — `Module['emx11Host']` — to pass
+em-x11 uses a flat Module property — `Module['emX11Host']` — to pass
 the Host from JS into the C-side bridges. This follows the Emscripten
 convention of using `Module['...']` for configuration (like
 `Module['canvas']` or `Module['preRun']`).
 
 | Slot | Set by | Purpose |
 |------|--------|---------|
-| `Module['emx11Host']` | `createEmX11()` via `moduleOverrides` or `attachToBridge()` | The Host object; every EM_JS bridge dispatches into it. |
-| `Module['emx11Caches']` | `attachToBridge()` | Lazy scratchpads (font measure ctx, property stashes). |
-| `Module['emx11Debug']` | `attachToBridge()` + debug setters | Backing store for trace flags. Mirrored into the `$EmX11Host` closure. |
-| `Module['emx11NoAutoStart']` | Caller (via `moduleOverrides`) | When `true`, suppresses the default Host auto-creation in Layer 1 mode. Set automatically by `createEmX11`. |
+| `Module['emX11Host']` | `createEmX11()` via `moduleOverrides` or `attachToBridge()` | The Host object; every EM_JS bridge dispatches into it. |
+| `Module['emX11Caches']` | `attachToBridge()` | Lazy scratchpads (font measure ctx, property stashes). |
+| `Module['emX11Debug']` | `attachToBridge()` + debug setters | Backing store for trace flags. Mirrored into the `$EmX11Host` closure. |
+| `Module['emX11NoAutoStart']` | Caller (via `moduleOverrides`) | When `true`, suppresses the default Host auto-creation in Layer 1 mode. Set automatically by `createEmX11`. |
 
-The JS library (`library_emx11.js`) reads these during `$EmX11Host.init()`,
-which fires at Emscripten startup. When `Module['emx11Host']` is set
+The JS library (`library_em-x11.js`) reads these during `$EmX11Host.init()`,
+which fires at Emscripten startup. When `Module['emX11Host']` is set
 (Layer 2), it uses the caller's Host. When absent and
-`emx11NoAutoStart` is unset (Layer 1), the default Host IIFE
+`emX11NoAutoStart` is unset (Layer 1), the default Host IIFE
 (`EmX11DefaultHost.create(Module)`) auto-creates one.
 
 ## Caching
@@ -409,7 +409,7 @@ repackage the archives into an Emscripten side module:
 
 ```makefile
 # pyodide-tk pattern: repackage split archives into one .so
-emcc -sSIDE_MODULE=1 -o libemx11.so \
+emcc -sSIDE_MODULE=1 -o libem_x11.so \
     -Wl,--whole-archive libX11.a libXext.a libXrender.a libXft.a libfontconfig.a \
     -Wl,--no-whole-archive libtcl8.6.so
 ```
@@ -418,6 +418,6 @@ Without `-fPIC`, wasm-ld rejects `R_WASM_MEMORY_ADDR_*` relocations
 when creating a side module — non-PIC objects cannot form a shared
 library on any platform.
 
-The parallel build also produces a single `libemx11.so` side module
-(`cmake -DEMX11_BUILD_SIDE_MODULE=ON`) for consumers that prefer a
+The parallel build also produces a single `libem_x11.so` side module
+(`cmake -DEM_X11_BUILD_SIDE_MODULE=ON`) for consumers that prefer a
 pre-linked artifact over the `--whole-archive` repackaging pattern.

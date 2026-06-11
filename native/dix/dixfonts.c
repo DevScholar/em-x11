@@ -25,7 +25,7 @@
  *     and CSS fallback to a generic is already what we want.
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <X11/Xatom.h>
 #include <ctype.h>
@@ -34,10 +34,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define EMX11_MAX_FONTS 64
-#define EMX11_PER_CHAR_MIN 32
-#define EMX11_PER_CHAR_MAX 126
-#define EMX11_PER_CHAR_COUNT (EMX11_PER_CHAR_MAX - EMX11_PER_CHAR_MIN + 1)
+#define EM_X11_MAX_FONTS 64
+#define EM_X11_PER_CHAR_MIN 32
+#define EM_X11_PER_CHAR_MAX 126
+#define EM_X11_PER_CHAR_COUNT (EM_X11_PER_CHAR_MAX - EM_X11_PER_CHAR_MIN + 1)
 
 typedef struct EmxFont {
   bool in_use;
@@ -45,13 +45,13 @@ typedef struct EmxFont {
   int pixel_size;
   char css[128];
   XFontStruct fs;
-  XFontProp props[1];                         /* XA_FONT -> atom of XLFD name */
-  XCharStruct per_char[EMX11_PER_CHAR_COUNT]; /* retained for XTextWidth
-                                               * fast paths that key on
-                                               * the ASCII band */
+  XFontProp props[1]; /* XA_FONT -> atom of XLFD name */
+  XCharStruct per_char[EM_X11_PER_CHAR_COUNT]; /* retained for XTextWidth
+                                                * fast paths that key on
+                                                * the ASCII band */
 } EmxFont;
 
-static EmxFont g_fonts[EMX11_MAX_FONTS];
+static EmxFont g_fonts[EM_X11_MAX_FONTS];
 
 /* -- XLFD parsing ---------------------------------------------------------- */
 
@@ -187,7 +187,7 @@ build_css_font(char* out, size_t outlen, const char* name, int pixel_size) {
 /* -- Font table -------------------------------------------------------- */
 
 static EmxFont* font_lookup(Font fid) {
-  for (int i = 0; i < EMX11_MAX_FONTS; i++) {
+  for (int i = 0; i < EM_X11_MAX_FONTS; i++) {
     if (g_fonts[i].in_use && g_fonts[i].fid == fid)
       return &g_fonts[i];
   }
@@ -195,14 +195,14 @@ static EmxFont* font_lookup(Font fid) {
 }
 
 static EmxFont* font_alloc_slot(void) {
-  for (int i = 0; i < EMX11_MAX_FONTS; i++) {
+  for (int i = 0; i < EM_X11_MAX_FONTS; i++) {
     if (!g_fonts[i].in_use)
       return &g_fonts[i];
   }
   return NULL;
 }
 
-const char* emx11_font_css(Font font) {
+const char* em_x11_font_css(Font font) {
   EmxFont* f = font_lookup(font);
   return f ? f->css : NULL;
 }
@@ -259,7 +259,7 @@ build_xlfd(char* out, size_t outlen, const char* css_font, int pixel_size) {
   /* Classic 14-field XLFD with iso10646-1 at registry-encoding. */
   snprintf(out,
            outlen,
-           "-emx11-%s-%s-%c-normal--%d-*-*-*-*-*-iso10646-1",
+           "-em-x11-%s-%s-%c-normal--%d-*-*-*-*-*-iso10646-1",
            family,
            weight,
            slant,
@@ -268,8 +268,8 @@ build_xlfd(char* out, size_t outlen, const char* css_font, int pixel_size) {
 
 static void fill_font_struct(Display* dpy, EmxFont* f) {
   int ascent = 0, descent = 0, max_width = 0;
-  int widths[EMX11_PER_CHAR_COUNT] = {0};
-  emx11_js_measure_font(f->css, &ascent, &descent, &max_width, widths);
+  int widths[EM_X11_PER_CHAR_COUNT] = {0};
+  em_x11_js_measure_font(f->css, &ascent, &descent, &max_width, widths);
 
   XFontStruct* fs = &f->fs;
   memset(fs, 0, sizeof(*fs));
@@ -295,7 +295,7 @@ static void fill_font_struct(Display* dpy, EmxFont* f) {
   fs->per_char = NULL;
 
   int min_w = widths[0] > 0 ? widths[0] : max_width;
-  for (int i = 0; i < EMX11_PER_CHAR_COUNT; i++) {
+  for (int i = 0; i < EM_X11_PER_CHAR_COUNT; i++) {
     short w = (short)widths[i];
     if (w > 0 && w < min_w)
       min_w = w;
@@ -340,7 +340,7 @@ XFontStruct* XLoadQueryFont(Display* dpy, const char* name) {
     return NULL;
 
   int pixel_size = resolve_pixel_size(name);
-  f->fid = emx11_next_xid(dpy);
+  f->fid = em_x11_next_xid(dpy);
   f->pixel_size = pixel_size;
   build_css_font(f->css, sizeof(f->css), name, pixel_size);
   fill_font_struct(dpy, f);
@@ -391,7 +391,7 @@ int XTextWidth(XFontStruct* fs, _Xconst char* string, int count) {
    * for clients that poke at XFontStruct directly. */
   EmxFont* f = font_lookup(fs->fid);
   const char* css = f ? f->css : "13px sans-serif";
-  return emx11_js_measure_string(css, string, count);
+  return em_x11_js_measure_string(css, string, count);
 }
 
 int XTextExtents(XFontStruct* fs,
@@ -432,18 +432,18 @@ static void dispatch_draw_string(Display* dpy,
   (void)dpy;
   if (!gc || !string || length <= 0)
     return;
-  const char* css = gc->font != None ? emx11_font_css(gc->font) : NULL;
+  const char* css = gc->font != None ? em_x11_font_css(gc->font) : NULL;
   if (!css)
     css = "13px sans-serif";
-  emx11_js_draw_string((Window)d,
-                       x,
-                       y,
-                       css,
-                       string,
-                       length,
-                       gc->foreground,
-                       gc->background,
-                       image_mode);
+  em_x11_js_draw_string((Window)d,
+                        x,
+                        y,
+                        css,
+                        string,
+                        length,
+                        gc->foreground,
+                        gc->background,
+                        image_mode);
 }
 
 int XDrawString(Display* dpy,
@@ -527,12 +527,12 @@ char* XGetDefault(Display* dpy, _Xconst char* program, _Xconst char* option) {
 
 /* -- Font sets (XIM / Motif path) -- */
 
-#define EMX11_FONTSET_MAX_FONTS 8
+#define EM_X11_FONTSET_MAX_FONTS 8
 
 struct _XOC {
   Display* dpy;
-  XFontStruct* fonts[EMX11_FONTSET_MAX_FONTS];
-  char* names[EMX11_FONTSET_MAX_FONTS];
+  XFontStruct* fonts[EM_X11_FONTSET_MAX_FONTS];
+  char* names[EM_X11_FONTSET_MAX_FONTS];
   int n_fonts;
   XFontStruct** font_struct_list;
   char** font_name_list;
@@ -586,7 +586,7 @@ XFontSet XCreateFontSet(Display* dpy,
   int missing = 0;
   int loaded = 0;
   char* p = work;
-  while (p && *p && loaded < EMX11_FONTSET_MAX_FONTS) {
+  while (p && *p && loaded < EM_X11_FONTSET_MAX_FONTS) {
     while (*p == ' ' || *p == '\t')
       p++;
     char* comma = strchr(p, ',');
@@ -731,7 +731,7 @@ Bool XContextualDrawing(XFontSet font_set) {
   return False;
 }
 
-XFontStruct* emx11_fontset_font(XFontSet font_set) {
+XFontStruct* em_x11_fontset_font(XFontSet font_set) {
   struct _XOC* set = (struct _XOC*)font_set;
   return (set && set->n_fonts > 0) ? set->fonts[0] : NULL;
 }

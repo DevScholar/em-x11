@@ -6,14 +6,14 @@
  * gen_keysyms.awk over keysymdef.h (done once; re-run if we upgrade
  * the X11 proto headers).
  */
-#ifndef EMX11_KEYSYM_TABLE_H
-#define EMX11_KEYSYM_TABLE_H
+#ifndef EM_X11_KEYSYM_TABLE_H
+#define EM_X11_KEYSYM_TABLE_H
 
 #include <X11/X.h>
 
 struct KeysymEntry {
-    const char *name;
-    KeySym      keysym;
+  const char* name;
+  KeySym keysym;
 };
 
 extern const struct KeysymEntry g_keysym_table[];

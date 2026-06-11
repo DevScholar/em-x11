@@ -9,7 +9,7 @@
  * mystery in two different files.
  */
 
-/* X11 event-type numerics we send to the C side via emx11_push_*_event. */
+/* X11 event-type numerics we send to the C side via em_x11_push_*_event. */
 export const X_ButtonPress = 4;
 export const X_ButtonRelease = 5;
 /* X11 event-mask bits for the events we route on (X11/X.h: KeyPressMask = 1L<<0,

@@ -62,7 +62,7 @@ export class GcManager {
     /* C tells us its compile-time default screen size, but the browser
      * canvas is the authority. We discard the hint; the C side reads the
      * real dimensions back through XDisplayWidth/Height when it needs
-     * them, which routes via emx11_js_get_window_attrs(root). */
+     * them, which routes via em_x11_js_get_window_attrs(root). */
   }
 
   onClearArea(id: number, x: number, y: number, w: number, h: number): void {
@@ -267,7 +267,7 @@ export class GcManager {
       const conn = this.host.connection.get(connId);
       if (conn?.module) {
         conn.module.ccall(
-          'emx11_push_shape_notify',
+          'em_x11_push_shape_notify',
           null,
           ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
           [destId, 0 /* ShapeBounding */, 0, 0, attrs.width, attrs.height, shaped ? 1 : 0],

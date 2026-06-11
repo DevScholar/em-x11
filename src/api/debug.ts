@@ -2,7 +2,7 @@
  * em.debug — trace flags + state dumpers + pixel dump.
  *
  * Delegates to the Host's renderer for dump methods. The same surface
- * is also exposed as Module['emx11Debug'] by Host.attachToBridge() for
+ * is also exposed as Module['emX11Debug'] by Host.attachToBridge() for
  * L1 (static-link) access from DevTools.
  */
 
@@ -59,7 +59,7 @@ export class DebugNamespace implements EmX11Debug {
   }
 
   /** Auto-snapshot. Single source of truth is host.renderer.autoSnapshot;
-   *  both Module['emx11Debug'] and em.debug share the same ring buffer. */
+   *  both Module['emX11Debug'] and em.debug share the same ring buffer. */
   get autoSnapshot() {
     const r = this.host.renderer;
     if (!r.autoSnapshot) {

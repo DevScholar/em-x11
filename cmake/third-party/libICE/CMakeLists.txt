@@ -5,7 +5,7 @@
 # session manager" at runtime, which is fine — SM is optional in Xt.
 #
 # Depends on xorgproto for Xtrans and base protocol headers, not on
-# emx11's Xlib (libICE doesn't use the X11 client API).
+# em_x11's Xlib (libICE doesn't use the X11 client API).
 
 set(LIBICE_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 

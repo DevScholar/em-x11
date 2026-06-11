@@ -38,7 +38,7 @@ A few things follow from that:
   events back into wasm.
 - Each X client is its own Emscripten module (`xcalc.js` +
   `xcalc.wasm`), loaded as a standard `MODULARIZE=1 + EXPORT_ES6=1`
-  factory. The Host is passed via `Module['emx11Host']` — a flat Module
+  factory. The Host is passed via `Module['emX11Host']` — a flat Module
   property, per Emscripten convention.
 
 ### Two API layers
@@ -48,7 +48,7 @@ as `-sUSE_SDL=2`. Pick the layer that fits:
 
 | Layer | How | When |
 |-------|-----|------|
-| 1 — zero JS | `emcc myapp.c -sUSE_EMX11 -o myapp.html` | Simple Xlib program; the port auto-injects everything |
+| 1 — zero JS | `emcc myapp.c -sUSE_EM_X11 -o myapp.html` | Simple Xlib program; the port auto-injects everything |
 | 2 — createEmX11 | `createEmX11()` | Multi-process sessions, JS-side asset staging, custom canvas |
 
 This tutorial uses **Layer 1** for the xcalc page: the default Host IIFE
@@ -90,16 +90,16 @@ directory is gitignored — it is fully reproducible from the script.
 ## 2. The em-x11 port
 
 em-x11 ships an [emscripten-ports](https://emscripten.org/docs/compiling/Projects.html#embuilder-and-emscripten-ports)
-script at [`tools/ports/emx11.py`](../tools/ports/emx11.py). Link
+script at [`tools/ports/em_x11.py`](../tools/ports/em_x11.py). Link
 against it the same way you link against SDL2 or other emscripten
 ports:
 
 ```bash
-# Preferred: -sUSE_EMX11 (emscripten convention)
-emcc myapp.c -sUSE_EMX11 -o myapp.html
+# Preferred: -sUSE_EM_X11 (emscripten convention)
+emcc myapp.c -sUSE_EM_X11 -o myapp.html
 
 # Also works: explicit port path
-emcc myapp.c --use-port=emx11 -o myapp.html
+emcc myapp.c --use-port=em_x11 -o myapp.html
 ```
 
 The port handles everything — include paths, static archives, the JS
@@ -110,14 +110,14 @@ and emcc handles the rest.
 For CMake projects, use `find_package`:
 
 ```cmake
-find_package(emx11 REQUIRED)
-target_link_libraries(myapp PRIVATE emx11::emx11)
+find_package(em_x11 REQUIRED)
+target_link_libraries(myapp PRIVATE em_x11::em_x11)
 ```
 
 For a minimal end-to-end example see
 [examples/hello/](../examples/hello/) — a 30-line Xlib program that
 opens a window and draws a rectangle. With Layer 1 it builds with no
-JS: `emcc hello.c -sUSE_EMX11 -o hello.html`.
+JS: `emcc hello.c -sUSE_EM_X11 -o hello.html`.
 
 ## 3. The demo's `CMakeLists.txt`
 
@@ -142,7 +142,7 @@ target_compile_options(xcalc PRIVATE -w)
 # --preload-file embeds app-defaults into a .data package that the
 # Emscripten glue loads automatically before main(). No JS-side preRun
 # hook needed — just this one line in CMake.
-emx11_finalize_demo(xcalc
+em_x11_finalize_demo(xcalc
     EXPORT_NAME createXcalcModule
     LIBS Xaw Xmu Xt Xpm Xext X11
     PRELOAD_FILES "${XCALC_SRC_DIR}/app-defaults/XCalc@/usr/lib/X11/app-defaults/XCalc"
@@ -161,8 +161,8 @@ A few things to notice:
   Xext X11`. The `LIBS` list documents the link order for readers
   (higher-level first). The actual linking goes through the
   emscripten-ports script.
-- `emx11_finalize_demo` is the helper at
-  [cmake/emx11_demo.cmake](../cmake/emx11_demo.cmake). It adds the
+- `em_x11_finalize_demo` is the helper at
+  [cmake/em_x11_demo.cmake](../cmake/em_x11_demo.cmake). It adds the
   include path, wires the port into the emcc command line, injects the
   JS bridge library (`--js-library`) and the default Host IIFE
   (`--pre-js`), and sets the Emscripten link options (`MODULARIZE`,
@@ -202,11 +202,11 @@ is not there unless you put it there. The standard Emscripten way is
 the `.wasm`, and the generated JS glue loads it automatically before
 `main()` runs. No JS-side `preRun` hook needed.
 
-The CMake side is a single line passed to `emx11_finalize_demo`
+The CMake side is a single line passed to `em_x11_finalize_demo`
 ([examples/xcalc/CMakeLists.txt](../examples/xcalc/CMakeLists.txt)):
 
 ```cmake
-emx11_finalize_demo(xcalc
+em_x11_finalize_demo(xcalc
     EXPORT_NAME createXcalcModule
     LIBS Xaw Xmu Xt Xpm Xext X11
     PRELOAD_FILES "${XCALC_SRC_DIR}/app-defaults/XCalc@/usr/lib/X11/app-defaults/XCalc"
@@ -227,8 +227,8 @@ and `.data` files:
   const factory = (await import('/artifacts/xcalc/xcalc.js')).default;
   await factory({
     thisProgram: 'xcalc',
-    emx11Width: 800,
-    emx11Height: 600,
+    emX11Width: 800,
+    emX11Height: 600,
     locateFile: (path) => `/artifacts/xcalc/${path}`,
   });
 </script>
@@ -237,10 +237,10 @@ and `.data` files:
 Key points:
 
 - No `createEmX11` — the default Host IIFE (injected by `--pre-js`)
-  auto-creates a canvas and attaches itself to `Module['emx11Host']`.
+  auto-creates a canvas and attaches itself to `Module['emX11Host']`.
 - `thisProgram: 'xcalc'` sets `argv[0]` so `XtResolvePathname`'s `%N`
   substitution finds `XCalc`, not `Module`.
-- `emx11Width` / `emx11Height` set the canvas size (the default Host
+- `emX11Width` / `emX11Height` set the canvas size (the default Host
   reads these from Module).
 - `locateFile` is the standard Emscripten way to tell the runtime where
   `.wasm` and `.data` files live. Needed when the glue is loaded from a
@@ -293,7 +293,7 @@ Open `http://localhost:5173/examples/xcalc/` and you should see xcalc.
 
 Click the buttons. If they highlight on hover and respond to clicks,
 the input event path works (DOM `mousemove`/`mousedown` →
-`emx11_push_button_event`/`emx11_push_motion_event` → libX11
+`em_x11_push_button_event`/`em_x11_push_motion_event` → libX11
 event queue → Xt's `WaitForSomething` → xcalc's action procs).
 
 ## 8. Things that go wrong, and what they mean
@@ -301,9 +301,9 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
 - **Window appears, but it is a stack of unlabelled buttons** — you
   did not pass `PRELOAD_FILES` for `app-defaults/XCalc` in CMake. See §5.
 - **All windows are pure black** — almost certainly a stale wasm
-  artifact. The em-x11 host and the libemx11 inside the demo
+  artifact. The em-x11 host and the libem_x11 inside the demo
   communicate via signature-tied EM_JS bridges; if you change a
-  bridge in `native/emx11/bridges.c` you must rebuild every demo.
+  bridge in `native/em_x11/bridges.c` you must rebuild every demo.
   `pnpm build` rebuilds everything; partial builds are the usual cause.
 - **Browser tab freezes on first redraw** — you forgot
   `JSPI=1`. Without it, the moment xcalc calls `XNextEvent` and
@@ -317,9 +317,9 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
   symbols** — em-x11's static archive ships only the X11 surface
   the demos exercise. If your client pulls in Xrender, either link
   it in or stub it. xcalc does not need any of these.
-- **Port can't find em-x11 source** — set `EMX11_SRC` to the
+- **Port can't find em-x11 source** — set `EM_X11_SRC` to the
   absolute path of the em-x11 repository.
-- **`Module['emx11Host']` is undefined in the wasm** — for Layer 1,
+- **`Module['emX11Host']` is undefined in the wasm** — for Layer 1,
   the default Host IIFE (`--pre-js`) is missing; rebuild with
   `pnpm build:host`. For Layer 2, you forgot to spread
   `x11.moduleOverrides` into the factory call. Without a Host the
@@ -337,7 +337,7 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
   more involved launcher with `.twmrc` staging and a multi-client
   session (Layer 3), useful as a template if your port needs a window
   manager.
-- [tools/ports/emx11.py](../tools/ports/emx11.py) — the port script
+- [tools/ports/em_x11.py](../tools/ports/em_x11.py) — the port script
   itself, with comments explaining each hook in the emscripten-ports
-  API, `-sUSE_EMX11` integration, and the `needed()` / `process_args()`
+  API, `-sUSE_EM_X11` integration, and the `needed()` / `process_args()`
   flow.

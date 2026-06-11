@@ -10,8 +10,8 @@
  * stripped to the three functions em-x11 actually stubs. Add more here
  * when a new client demands them. */
 
-#ifndef EMX11_STUB_X11_EXT_SYNC_H
-#define EMX11_STUB_X11_EXT_SYNC_H
+#ifndef EM_X11_STUB_X11_EXT_SYNC_H
+#define EM_X11_STUB_X11_EXT_SYNC_H
 
 #include <X11/Xlib.h>
 

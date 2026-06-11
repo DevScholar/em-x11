@@ -6,8 +6,8 @@
  *
  * On x86_64 Linux, both types are 64-bit and this never trips. */
 
-#ifndef EMX11_WASM32_TIME_T_COMPAT_HH
-#define EMX11_WASM32_TIME_T_COMPAT_HH
+#ifndef EM_X11_WASM32_TIME_T_COMPAT_HH
+#define EM_X11_WASM32_TIME_T_COMPAT_HH
 
 #ifdef __cplusplus
 

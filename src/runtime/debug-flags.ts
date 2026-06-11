@@ -10,11 +10,11 @@
  * This module provides a dependency-free storage location that both
  * the Host render code and the public API (DebugNamespace) can access.
  * Host.attachToBridge() writes the same object reference to BOTH this
- * store AND Module['emx11Debug'] so that:
+ * store AND Module['emX11Debug'] so that:
  *
- *   - JS library / EM_JS code (inside the factory) reads Module['emx11Debug']
+ *   - JS library / EM_JS code (inside the factory) reads Module['emX11Debug']
  *   - Host TS code (outside the factory) reads getDebugFlags()
- *   - DevTools toggles on Module['emx11Debug'] are visible to both (same object)
+ *   - DevTools toggles on Module['emX11Debug'] are visible to both (same object)
  */
 
 export interface EmX11DebugFlags {

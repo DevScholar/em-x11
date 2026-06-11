@@ -3,8 +3,8 @@ exec_prefix=@exec_prefix@
 libdir=@libdir@
 includedir=@includedir@
 
-Name: emx11
+Name: em_x11
 Description: X11 client library implementation for Emscripten (browser canvas)
 Version: @VERSION@
-Cflags: -sUSE_EMX11
-Libs: -sUSE_EMX11
+Cflags: -sUSE_EM_X11
+Libs: -sUSE_EM_X11

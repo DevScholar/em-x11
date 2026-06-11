@@ -68,4 +68,4 @@ void XUnlockDisplay(Display* dpy) {
 /* XSetIOErrorHandler / XSetErrorHandler are declared in Xlib.h and
  * defined in error.c.  Some threaded apps reach for XSetIOErrorHandler
  * through a macro that resolves through _XLockMutex.  The actual
- * implementations in emx11/error.c are single-threaded already. */
+ * implementations in em_x11/error.c are single-threaded already. */

@@ -49,7 +49,7 @@ export class GlxManager {
     id: number; targetId: string; canvas: OffscreenCanvas;
   } {
     const id = this.nextId++;
-    const targetId = `!emx11-glx-${id}`;
+    const targetId = `!em-x11-glx-${id}`;
     const w = Math.max(1, width | 0);
     const h = Math.max(1, height | 0);
     const canvas = new OffscreenCanvas(w, h);

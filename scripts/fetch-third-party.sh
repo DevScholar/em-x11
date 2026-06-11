@@ -30,7 +30,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 THIRD_PARTY_DIR="$REPO_ROOT/ignored-area/third-party"
 TEMP_DIR="$REPO_ROOT/ignored-area/temp"
 OVERLAY_DIR="$REPO_ROOT/cmake/third-party"
-CONFIG_CACHE="$REPO_ROOT/scripts/emx11-config.cache"
+CONFIG_CACHE="$REPO_ROOT/scripts/em-x11-config.cache"
 TARBALL_CACHE="$REPO_ROOT/ignored-area/tarballs"
 
 # Regenerate the config cache on every run so hardcoded absolute paths
@@ -41,8 +41,8 @@ rm -f "$CONFIG_CACHE"
 # Strip CR from the dummy pkg-config script so the shebang works even
 # when the file was checked out with CRLF on Windows (belt-and-suspenders
 # for the .gitattributes fix).
-if [ -f "$REPO_ROOT/scripts/emx11-pkg-config" ]; then
-    sed -i 's/\r$//' "$REPO_ROOT/scripts/emx11-pkg-config"
+if [ -f "$REPO_ROOT/scripts/em-x11-pkg-config" ]; then
+    sed -i 's/\r$//' "$REPO_ROOT/scripts/em-x11-pkg-config"
 fi
 
 log()  { printf '    %s\n' "$*"; }
@@ -177,7 +177,7 @@ run_configure() {
     local configure_ok=0
     (cd "$dir" && \
      CONFIG_SITE="$CONFIG_CACHE" \
-     PKG_CONFIG="$REPO_ROOT/scripts/emx11-pkg-config" \
+     PKG_CONFIG="$REPO_ROOT/scripts/em-x11-pkg-config" \
      CFLAGS="-I$REPO_ROOT/native/include" \
      CPPFLAGS="-I$REPO_ROOT/native/include" \
      emconfigure ./configure \
@@ -216,7 +216,7 @@ run_configure() {
 
     # Build sed expressions from cache: #undef SYMBOL → #define SYMBOL val
     # Only convert values that are "yes" or numeric; "no" values stay #undef.
-    local sedfile="$dir/.emx11-fallback.sed"
+    local sedfile="$dir/.em-x11-fallback.sed"
     rm -f "$sedfile"
     while IFS='=' read -r var val; do
         # Skip comments and env/metadata variables

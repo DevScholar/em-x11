@@ -12,40 +12,63 @@
  *                   'default'. No client depends on per-pixmap cursor art yet.
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <X11/Xutil.h>
 #include <stdlib.h>
 
-#define EMX11_FONT_CURSOR_TAG 0x70000000u
+#define EM_X11_FONT_CURSOR_TAG 0x70000000u
 
 static XID g_cursor_next2 = 0x40000001;
 
-Cursor XCreateFontCursor(Display *dpy, unsigned int shape) {
-    (void)dpy;
-    return (Cursor)(EMX11_FONT_CURSOR_TAG | (shape & 0xFFFu));
+Cursor XCreateFontCursor(Display* dpy, unsigned int shape) {
+  (void)dpy;
+  return (Cursor)(EM_X11_FONT_CURSOR_TAG | (shape & 0xFFFu));
 }
 
-int XFreeCursor(Display *dpy, Cursor cursor) {
-    (void)dpy; (void)cursor;
-    return 1;
+int XFreeCursor(Display* dpy, Cursor cursor) {
+  (void)dpy;
+  (void)cursor;
+  return 1;
 }
 
-Cursor XCreatePixmapCursor(Display *dpy, Pixmap src, Pixmap mask,
-                           XColor *fg, XColor *bg, unsigned int x, unsigned int y) {
-    (void)dpy; (void)src; (void)mask; (void)fg; (void)bg; (void)x; (void)y;
-    return (Cursor)(g_cursor_next2++);
+Cursor XCreatePixmapCursor(Display* dpy,
+                           Pixmap src,
+                           Pixmap mask,
+                           XColor* fg,
+                           XColor* bg,
+                           unsigned int x,
+                           unsigned int y) {
+  (void)dpy;
+  (void)src;
+  (void)mask;
+  (void)fg;
+  (void)bg;
+  (void)x;
+  (void)y;
+  return (Cursor)(g_cursor_next2++);
 }
 
-Cursor XCreateGlyphCursor(Display *dpy, Font src_font, Font mask_font,
-                          unsigned int src_ch, unsigned int mask_ch,
-                          _Xconst XColor *fg, _Xconst XColor *bg) {
-    (void)dpy; (void)src_font; (void)mask_font;
-    (void)mask_ch; (void)fg; (void)bg;
-    return (Cursor)(EMX11_FONT_CURSOR_TAG | (src_ch & 0xFFFu));
+Cursor XCreateGlyphCursor(Display* dpy,
+                          Font src_font,
+                          Font mask_font,
+                          unsigned int src_ch,
+                          unsigned int mask_ch,
+                          _Xconst XColor* fg,
+                          _Xconst XColor* bg) {
+  (void)dpy;
+  (void)src_font;
+  (void)mask_font;
+  (void)mask_ch;
+  (void)fg;
+  (void)bg;
+  return (Cursor)(EM_X11_FONT_CURSOR_TAG | (src_ch & 0xFFFu));
 }
 
-int XRecolorCursor(Display *dpy, Cursor cursor, XColor *fg, XColor *bg) {
-    (void)dpy; (void)cursor; (void)fg; (void)bg;
-    return 1;
+int XRecolorCursor(Display* dpy, Cursor cursor, XColor* fg, XColor* bg) {
+  (void)dpy;
+  (void)cursor;
+  (void)fg;
+  (void)bg;
+  return 1;
 }

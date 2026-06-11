@@ -3,7 +3,7 @@
  *
  * Two API layers, from simplest to most powerful:
  *
- *   Layer 1 (zero JS): emcc myapp.c -sUSE_EMX11 -o myapp.html
+ *   Layer 1 (zero JS): emcc myapp.c -sUSE_EM_X11 -o myapp.html
  *     The port auto-injects the JS library and creates a default Host.
  *     No user JS required — same UX as emcc -sUSE_SDL=2.
  *
@@ -24,7 +24,7 @@
  * escape hatch for callers still mid-migration.
  */
 
-export { createEmX11, EmX11, VERSION } from './api/emx11.js';
+export { createEmX11, EmX11, VERSION } from './api/em-x11.js';
 
 export type {
   CreateEmX11Options,

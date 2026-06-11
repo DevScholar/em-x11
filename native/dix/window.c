@@ -1,5 +1,5 @@
-#include "emx11_internal.h"
-#include "emx11_meta_layout.h"
+#include "em_x11_internal.h"
+#include "em_x11_meta_layout.h"
 
 #include <X11/Xatom.h>
 #include <emscripten.h>
@@ -36,13 +36,13 @@
  * StructureNotifyMask on hilite_w (nor SubstructureNotifyMask on
  * hilite_w's parent title_w), so the events were never delivered. */
 static bool wants_structure(Display* dpy, Window w) {
-  EmxWindow* win = emx11_window_find(dpy, w);
+  EmxWindow* win = em_x11_window_find(dpy, w);
   if (!win)
     return false;
   if (win->event_mask & StructureNotifyMask)
     return true;
   if (win->parent != None) {
-    EmxWindow* p = emx11_window_find(dpy, win->parent);
+    EmxWindow* p = em_x11_window_find(dpy, win->parent);
     if (p && (p->event_mask & SubstructureNotifyMask))
       return true;
   }
@@ -73,7 +73,7 @@ static void push_map_notify(Display* dpy, EmxWindow* win, bool mapped) {
     ev.xunmap.window = win->id;
     ev.xunmap.from_configure = False;
   }
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 static void push_configure_notify(Display* dpy, EmxWindow* win) {
@@ -99,7 +99,7 @@ static void push_configure_notify(Display* dpy, EmxWindow* win) {
   ev.xconfigure.border_width = (int)win->border_width;
   ev.xconfigure.above = None;
   ev.xconfigure.override_redirect = win->override_redirect ? True : False;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 Window XCreateSimpleWindow(Display* display,
@@ -111,12 +111,12 @@ Window XCreateSimpleWindow(Display* display,
                            unsigned int border_width,
                            unsigned long border,
                            unsigned long background) {
-  EmxWindow* w = emx11_window_alloc(display);
+  EmxWindow* w = em_x11_window_alloc(display);
   if (!w) {
     return None;
   }
 
-  w->id = emx11_next_xid(display);
+  w->id = em_x11_next_xid(display);
   w->parent = parent;
   w->x = x;
   w->y = y;
@@ -127,26 +127,26 @@ Window XCreateSimpleWindow(Display* display,
   w->background_pixel = background;
   w->mapped = false;
 
-  emx11_js_window_create(display->conn_id,
-                         w->id,
-                         parent,
-                         x,
-                         y,
-                         width,
-                         height,
-                         border_width,
-                         border,
-                         /* XCreateSimpleWindow takes an explicit
-                          * background pixel; that fixes state to
-                          * BackgroundPixel (= 1). XCreateWindow uses
-                          * the bridge directly when CWBackPixel is
-                          * absent so it can pass state=None (= 0).
-                          * Note: XCreateSimpleWindow's contract does
-                          * not allow `background == None`, so a
-                          * caller passing 0 here gets a black-pixel
-                          * window, not a None-state one. */
-                         1,
-                         background);
+  em_x11_js_window_create(display->conn_id,
+                          w->id,
+                          parent,
+                          x,
+                          y,
+                          width,
+                          height,
+                          border_width,
+                          border,
+                          /* XCreateSimpleWindow takes an explicit
+                           * background pixel; that fixes state to
+                           * BackgroundPixel (= 1). XCreateWindow uses
+                           * the bridge directly when CWBackPixel is
+                           * absent so it can pass state=None (= 0).
+                           * Note: XCreateSimpleWindow's contract does
+                           * not allow `background == None`, so a
+                           * caller passing 0 here gets a black-pixel
+                           * window, not a None-state one. */
+                          1,
+                          background);
   return w->id;
 }
 
@@ -182,7 +182,7 @@ Window XCreateWindow(Display* display,
   (void)class_;
   (void)visual;
 
-  EmxWindow* w = emx11_window_alloc(display);
+  EmxWindow* w = em_x11_window_alloc(display);
   if (!w)
     return None;
 
@@ -196,7 +196,7 @@ Window XCreateWindow(Display* display,
   if (attrs && (valuemask & CWBorderPixel))
     bd = attrs->border_pixel;
 
-  w->id = emx11_next_xid(display);
+  w->id = em_x11_next_xid(display);
   w->parent = parent;
   w->x = x;
   w->y = y;
@@ -207,17 +207,17 @@ Window XCreateWindow(Display* display,
   w->background_pixel = bg_pixel;
   w->mapped = false;
 
-  emx11_js_window_create(display->conn_id,
-                         w->id,
-                         parent,
-                         x,
-                         y,
-                         width,
-                         height,
-                         border_width,
-                         bd,
-                         bg_type,
-                         bg_pixel);
+  em_x11_js_window_create(display->conn_id,
+                          w->id,
+                          parent,
+                          x,
+                          y,
+                          width,
+                          height,
+                          border_width,
+                          bd,
+                          bg_type,
+                          bg_pixel);
 
   /* Apply remaining bits (CWBackPixmap, CWEventMask, ...) via the
    * common setter. CWBackPixel/CWBorderPixel were already shipped to
@@ -260,7 +260,7 @@ int XMapWindow(Display* display, Window w) {
    * the WM frame. Real twm relies on this no-op-on-already-mapped
    * behaviour around HandleMapNotify line 1387's XUnmapWindow on
    * hilite_w (never mapped -> no event) and the iconmgr setup paths. */
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   bool state_changed = false;
   if (win) {
     bool was_mapped = win->mapped;
@@ -294,14 +294,14 @@ int XMapWindow(Display* display, Window w) {
    * NotifyInferior re-entry from a child) and we'd schedule a repoll
    * for nothing. The JS-side callback is left ungated -- host's
    * renderer.mapWindow is already a no-op for already-mapped windows. */
-  emx11_js_window_map(display->conn_id, w);
+  em_x11_js_window_map(display->conn_id, w);
   if (state_changed) {
     /* Defer the repoll across a JS event-loop tick rather than
      * pushing crossings into the caller's queue synchronously.
-     * See bridges.c::emx11_js_schedule_repoll for the rationale --
+     * See bridges.c::em_x11_js_schedule_repoll for the rationale --
      * synchronous repoll wedged twm under self-amplifying
      * map → crossing → handle → map chains (xeyes title-bar 50%). */
-    emx11_js_schedule_repoll(display->conn_id);
+    em_x11_js_schedule_repoll(display->conn_id);
   }
   return 1;
 }
@@ -310,7 +310,7 @@ int XUnmapWindow(Display* display, Window w) {
   /* State-change gate: see XMapWindow. Real X early-returns on already-
    * unmapped windows; we have to do the same or twm's destructor path
    * fires on phantom UnmapNotifies for never-mapped windows. */
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   bool state_changed = false;
   if (win) {
     bool was_mapped = win->mapped;
@@ -321,15 +321,15 @@ int XUnmapWindow(Display* display, Window w) {
       push_map_notify(display, win, false);
     }
   }
-  emx11_js_window_unmap(display->conn_id, w);
+  em_x11_js_window_unmap(display->conn_id, w);
   if (state_changed) {
-    emx11_js_schedule_repoll(display->conn_id);
+    em_x11_js_schedule_repoll(display->conn_id);
   }
   return 1;
 }
 
 int XDestroyWindow(Display* display, Window w) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win) {
     return 0;
   }
@@ -340,18 +340,18 @@ int XDestroyWindow(Display* display, Window w) {
 
   /* Drop the bg-pixmap reference this window held, if any. */
   if (win->background_pixmap != 0) {
-    emx11_pixmap_release(display, win->background_pixmap);
+    em_x11_pixmap_release(display, win->background_pixmap);
     win->background_pixmap = 0;
   }
 
   win->in_use = false;
-  emx11_js_window_destroy(w);
+  em_x11_js_window_destroy(w);
   return 1;
 }
 
 /* -- Geometry changes. The JS-side compositor needs to learn about
  *    every size/position change so it can redraw, so we push through
- *    emx11_js_window_create when a window is logically "re-set". */
+ *    em_x11_js_window_create when a window is logically "re-set". */
 
 static void notify_js_reconfigure(Display* dpy, EmxWindow* win) {
   /* Bump dpy->request to model the X protocol "request serial" Xlib
@@ -360,7 +360,7 @@ static void notify_js_reconfigure(Display* dpy, EmxWindow* win) {
    * Window, then waits for a ConfigureNotify whose serial >= captured.
    * Without this bump, dpy->request stays at 0 and push_configure_notify
    * pushes serial=0; Tk's diff = 0 - serial < 0 and the wait loops on
-   * tkUnixWm.c's hard-coded 2-second deadline (see project_emx11_
+   * tkUnixWm.c's hard-coded 2-second deadline (see project_em_x11_
    * configure_serial in memory). Incrementing here makes dpy->request
    * equal to the value Tk captured, so the synthetic ConfigureNotify
    * satisfies the wait on the first poll.
@@ -375,13 +375,13 @@ static void notify_js_reconfigure(Display* dpy, EmxWindow* win) {
    * the old size until the next interaction triggers a fresh Expose.
    *
    * The same ordering constraint applies to the cross-connection path
-   * in Host.onConfigure (see emx11_push_configure_notify there).
+   * in Host.onConfigure (see em_x11_push_configure_notify there).
    *
    * Geometry-only path: window already exists on Host; just update
    * its (x, y, w, h). We deliberately avoid re-calling window_create
    * here — doing so stomped on parent / shape / background_pixmap. */
   push_configure_notify(dpy, win);
-  emx11_js_window_configure(
+  em_x11_js_window_configure(
     dpy->conn_id, win->id, win->x, win->y, win->width, win->height);
 }
 
@@ -391,7 +391,7 @@ static void notify_js_reconfigure(Display* dpy, EmxWindow* win) {
  * queue. Mirrors the XReparentWindow cross-conn pattern: fetch the
  * window's current authoritative geometry from the Host, merge the
  * caller's requested changes, then forward to Host. Host.onConfigure
- * dispatches emx11_push_configure_notify on the owner module so the
+ * dispatches em_x11_push_configure_notify on the owner module so the
  * client app sees the size change and re-lays out. Without this, twm
  * resizing xcalc / xeyes never reaches the client and the inner
  * content stays at its pre-resize size while the WM frame visibly
@@ -403,14 +403,14 @@ static int notify_js_reconfigure_xconn(Display* dpy,
                                        Window w,
                                        unsigned int valuemask,
                                        const XWindowChanges* values) {
-  int a[EMX11_WIN_ATTRS_SIZE];
-  emx11_js_get_window_attrs(w, a);
-  if (!a[EMX11_WIN_ATTRS_PRESENT])
+  int a[EM_X11_WIN_ATTRS_SIZE];
+  em_x11_js_get_window_attrs(w, a);
+  if (!a[EM_X11_WIN_ATTRS_PRESENT])
     return 0;
-  int x = a[EMX11_WIN_ATTRS_X];
-  int y = a[EMX11_WIN_ATTRS_Y];
-  int width = a[EMX11_WIN_ATTRS_WIDTH];
-  int height = a[EMX11_WIN_ATTRS_HEIGHT];
+  int x = a[EM_X11_WIN_ATTRS_X];
+  int y = a[EM_X11_WIN_ATTRS_Y];
+  int width = a[EM_X11_WIN_ATTRS_WIDTH];
+  int height = a[EM_X11_WIN_ATTRS_HEIGHT];
   if (values) {
     if (valuemask & CWX)
       x = values->x;
@@ -427,13 +427,13 @@ static int notify_js_reconfigure_xconn(Display* dpy,
    * (Tk/Xt on the owner uses *its own* dpy->request), but keeps
    * symmetry with notify_js_reconfigure. */
   dpy->request++;
-  emx11_js_window_configure(
+  em_x11_js_window_configure(
     dpy->conn_id, w, x, y, (unsigned int)width, (unsigned int)height);
   return 1;
 }
 
 int XMoveWindow(Display* display, Window w, int x, int y) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win) {
     XWindowChanges v = {0};
     v.x = x;
@@ -442,7 +442,7 @@ int XMoveWindow(Display* display, Window w, int x, int y) {
   }
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceMove) {
         console.log('[c-move] conn=' + $0 + ' win=' + ($1 >>> 0) + ' x=' + $2 +
                     ' y=' + $3 + ' old_x=' + $4 + ' old_y=' + $5);
@@ -464,7 +464,7 @@ int XResizeWindow(Display* display,
                   Window w,
                   unsigned int width,
                   unsigned int height) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win) {
     XWindowChanges v = {0};
     v.width = (int)width;
@@ -483,7 +483,7 @@ int XMoveResizeWindow(Display* display,
                       int y,
                       unsigned int width,
                       unsigned int height) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win) {
     XWindowChanges v = {0};
     v.x = x;
@@ -507,7 +507,7 @@ int XConfigureWindow(Display* display,
                      XWindowChanges* values) {
   if (!values)
     return 0;
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win) {
     return notify_js_reconfigure_xconn(display, w, valuemask, values);
   }
@@ -523,28 +523,28 @@ int XConfigureWindow(Display* display,
     win->border_width = (unsigned int)values->border_width;
   if (valuemask & CWStackMode) {
     if (values->stack_mode == Above) {
-      emx11_js_window_raise(w);
+      em_x11_js_window_raise(w);
     } else if (values->stack_mode == Below) {
-      emx11_js_window_lower(w);
+      em_x11_js_window_lower(w);
     }
     /* Opposite / TopIf / BottomIf are less common; defer until needed. */
   }
   notify_js_reconfigure(display, win);
   if (valuemask & CWBorderWidth) {
-    emx11_js_window_set_border(win->id, win->border_width, win->border_pixel);
+    em_x11_js_window_set_border(win->id, win->border_width, win->border_pixel);
   }
   return 1;
 }
 
 int XRaiseWindow(Display* display, Window w) {
   (void)display;
-  emx11_js_window_raise(w);
+  em_x11_js_window_raise(w);
   return 1;
 }
 
 int XLowerWindow(Display* display, Window w) {
   (void)display;
-  emx11_js_window_lower(w);
+  em_x11_js_window_lower(w);
   return 1;
 }
 
@@ -552,30 +552,30 @@ int XChangeWindowAttributes(Display* display,
                             Window w,
                             unsigned long valuemask,
                             XSetWindowAttributes* attrs) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win || !attrs)
     return 0;
   if (valuemask & CWBackPixel) {
     win->background_pixel = attrs->background_pixel;
-    emx11_js_window_set_bg(w, 1, win->background_pixel);
+    em_x11_js_window_set_bg(w, 1, win->background_pixel);
   }
   if (valuemask & CWBorderPixel) {
     win->border_pixel = attrs->border_pixel;
-    emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+    em_x11_js_window_set_border(w, win->border_width, win->border_pixel);
   }
   if (valuemask & CWEventMask) {
     win->event_mask = attrs->event_mask;
-    emx11_js_select_input(display->conn_id, w, attrs->event_mask);
+    em_x11_js_select_input(display->conn_id, w, attrs->event_mask);
   }
   if (valuemask & CWOverrideRedirect) {
     win->override_redirect = attrs->override_redirect;
-    emx11_js_set_override_redirect(w, attrs->override_redirect ? 1 : 0);
+    em_x11_js_set_override_redirect(w, attrs->override_redirect ? 1 : 0);
   }
   if (valuemask & CWBitGravity) {
     /* Forward to host so the renderer's configureWindow knows
      * whether to preserve (NorthWestGravity) or discard
      * (ForgetGravity / others) the backing on resize. */
-    emx11_js_window_set_bit_gravity(w, attrs->bit_gravity);
+    em_x11_js_window_set_bit_gravity(w, attrs->bit_gravity);
   }
   if (valuemask & CWBackPixmap) {
     /* X semantics (xserver/dix/window.c:1186-1216):
@@ -591,21 +591,21 @@ int XChangeWindowAttributes(Display* display,
     Pixmap old = win->background_pixmap;
     if (pm == ParentRelative) {
       win->background_pixmap = 0;
-      emx11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
+      em_x11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
     } else if (pm == None) {
       win->background_pixmap = 0;
-      emx11_js_window_set_bg(w, 0, 0); /* state = None */
+      em_x11_js_window_set_bg(w, 0, 0); /* state = None */
     } else {
       /* Acquire BEFORE release: if pm == old (idempotent re-set)
        * the refcount stays correct; and if old's only remaining
        * reference was our window's, we don't free a canvas the
        * caller is about to keep using. */
-      emx11_pixmap_acquire(pm);
+      em_x11_pixmap_acquire(pm);
       win->background_pixmap = pm;
-      emx11_js_window_set_bg_pixmap(w, pm);
+      em_x11_js_window_set_bg_pixmap(w, pm);
     }
     if (old != 0 && old != win->background_pixmap) {
-      emx11_pixmap_release(display, old);
+      em_x11_pixmap_release(display, old);
     }
   }
   if (valuemask & CWCursor) {
@@ -613,14 +613,14 @@ int XChangeWindowAttributes(Display* display,
      * via XCreateWindow + XChangeWindowAttributes(CWCursor) rather
      * than XDefineCursor. Without this branch the title-bar arrow,
      * frame-edge resize cursors, and root X-cursor never appear. */
-    emx11_js_window_set_cursor(w, (unsigned int)attrs->cursor);
+    em_x11_js_window_set_cursor(w, (unsigned int)attrs->cursor);
   }
   /* Ignored: CWBorderPixmap, ... */
   return 1;
 }
 
 int XSetWindowBackground(Display* display, Window w, unsigned long background) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win)
     return 0;
   win->background_pixel = background;
@@ -629,8 +629,8 @@ int XSetWindowBackground(Display* display, Window w, unsigned long background) {
   if (win->background_pixmap != 0) {
     Pixmap old = win->background_pixmap;
     win->background_pixmap = 0;
-    emx11_js_window_set_bg_pixmap(w, 0);
-    emx11_pixmap_release(display, old);
+    em_x11_js_window_set_bg_pixmap(w, 0);
+    em_x11_pixmap_release(display, old);
   }
   /* Push the new pixel to the Host so the next XClearArea / Expose
    * actually paints with it. Without this, Xt's XawCommandToggle
@@ -638,28 +638,28 @@ int XSetWindowBackground(Display* display, Window w, unsigned long background) {
    * compositor keeps the old colour -- the next clearArea fills
    * with the OLD bg while Label redraws text using the NEW fg
    * (which equals the old bg), rendering invisible text. */
-  emx11_js_window_set_bg(w, 1, background);
+  em_x11_js_window_set_bg(w, 1, background);
   return 1;
 }
 
 int XSetWindowBackgroundPixmap(Display* display, Window w, Pixmap pm) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win)
     return 0;
   Pixmap old = win->background_pixmap;
   if (pm == ParentRelative) {
     win->background_pixmap = 0;
-    emx11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
+    em_x11_js_window_set_bg(w, 2, 0); /* state = ParentRelative */
   } else {
     if (pm == None)
       pm = 0;
     if (pm != 0)
-      emx11_pixmap_acquire(pm);
+      em_x11_pixmap_acquire(pm);
     win->background_pixmap = pm;
-    emx11_js_window_set_bg_pixmap(w, pm);
+    em_x11_js_window_set_bg_pixmap(w, pm);
   }
   if (old != 0 && old != win->background_pixmap) {
-    emx11_pixmap_release(display, old);
+    em_x11_pixmap_release(display, old);
   }
   return 1;
 }
@@ -669,7 +669,7 @@ Status XGetWindowAttributes(Display* display,
                             XWindowAttributes* attrs_return) {
   if (!attrs_return)
     return 0;
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (win) {
     memset(attrs_return, 0, sizeof(*attrs_return));
     attrs_return->x = win->x;
@@ -700,16 +700,16 @@ Status XGetWindowAttributes(Display* display,
    * XID (WM case -- twm querying xeyes's shell to size its frame).
    * dix/window.c treats window state as server-authoritative by XID,
    * so we reach through to the Host for the canonical record. */
-  int a[EMX11_WIN_ATTRS_SIZE];
-  emx11_js_get_window_attrs(w, a);
-  if (!a[EMX11_WIN_ATTRS_PRESENT])
+  int a[EM_X11_WIN_ATTRS_SIZE];
+  em_x11_js_get_window_attrs(w, a);
+  if (!a[EM_X11_WIN_ATTRS_PRESENT])
     return 0;
   memset(attrs_return, 0, sizeof(*attrs_return));
-  attrs_return->x = a[EMX11_WIN_ATTRS_X];
-  attrs_return->y = a[EMX11_WIN_ATTRS_Y];
-  attrs_return->width = a[EMX11_WIN_ATTRS_WIDTH];
-  attrs_return->height = a[EMX11_WIN_ATTRS_HEIGHT];
-  attrs_return->border_width = a[EMX11_WIN_ATTRS_BORDER_WIDTH];
+  attrs_return->x = a[EM_X11_WIN_ATTRS_X];
+  attrs_return->y = a[EM_X11_WIN_ATTRS_Y];
+  attrs_return->width = a[EM_X11_WIN_ATTRS_WIDTH];
+  attrs_return->height = a[EM_X11_WIN_ATTRS_HEIGHT];
+  attrs_return->border_width = a[EM_X11_WIN_ATTRS_BORDER_WIDTH];
   attrs_return->depth = display->screens[0].root_depth;
   attrs_return->visual = display->screens[0].root_visual;
   attrs_return->root = display->screens[0].root;
@@ -720,12 +720,13 @@ Status XGetWindowAttributes(Display* display,
   attrs_return->save_under = False;
   attrs_return->colormap = display->screens[0].cmap;
   attrs_return->map_installed = True;
-  attrs_return->map_state = a[EMX11_WIN_ATTRS_MAPPED] ? IsViewable : IsUnmapped;
+  attrs_return->map_state =
+    a[EM_X11_WIN_ATTRS_MAPPED] ? IsViewable : IsUnmapped;
   attrs_return->all_event_masks = 0;
   attrs_return->your_event_mask = 0;
   attrs_return->do_not_propagate_mask = 0;
   attrs_return->override_redirect =
-    a[EMX11_WIN_ATTRS_OVERRIDE_RED] ? True : False;
+    a[EM_X11_WIN_ATTRS_OVERRIDE_RED] ? True : False;
   attrs_return->screen = &display->screens[0];
   return 1;
 }
@@ -739,7 +740,7 @@ Status XGetGeometry(Display* display,
                     unsigned int* height_return,
                     unsigned int* border_width_return,
                     unsigned int* depth_return) {
-  EmxWindow* win = emx11_window_find(display, (Window)d);
+  EmxWindow* win = em_x11_window_find(display, (Window)d);
   if (win) {
     if (root_return)
       *root_return = display->screens[0].root;
@@ -760,22 +761,22 @@ Status XGetGeometry(Display* display,
 
   /* Cross-connection fallback: same story as XGetWindowAttributes --
    * twm.c:845 queries a managed client's shell geometry. */
-  int a[EMX11_WIN_ATTRS_SIZE];
-  emx11_js_get_window_attrs((Window)d, a);
-  if (!a[EMX11_WIN_ATTRS_PRESENT])
+  int a[EM_X11_WIN_ATTRS_SIZE];
+  em_x11_js_get_window_attrs((Window)d, a);
+  if (!a[EM_X11_WIN_ATTRS_PRESENT])
     return 0;
   if (root_return)
     *root_return = display->screens[0].root;
   if (x_return)
-    *x_return = a[EMX11_WIN_ATTRS_X];
+    *x_return = a[EM_X11_WIN_ATTRS_X];
   if (y_return)
-    *y_return = a[EMX11_WIN_ATTRS_Y];
+    *y_return = a[EM_X11_WIN_ATTRS_Y];
   if (width_return)
-    *width_return = (unsigned int)a[EMX11_WIN_ATTRS_WIDTH];
+    *width_return = (unsigned int)a[EM_X11_WIN_ATTRS_WIDTH];
   if (height_return)
-    *height_return = (unsigned int)a[EMX11_WIN_ATTRS_HEIGHT];
+    *height_return = (unsigned int)a[EM_X11_WIN_ATTRS_HEIGHT];
   if (border_width_return)
-    *border_width_return = (unsigned int)a[EMX11_WIN_ATTRS_BORDER_WIDTH];
+    *border_width_return = (unsigned int)a[EM_X11_WIN_ATTRS_BORDER_WIDTH];
   if (depth_return)
     *depth_return = (unsigned int)display->screens[0].root_depth;
   return 1;
@@ -789,8 +790,8 @@ Bool XTranslateCoordinates(Display* display,
                            int* dest_x_return,
                            int* dest_y_return,
                            Window* child_return) {
-  EmxWindow* src = emx11_window_find(display, src_w);
-  EmxWindow* dst = emx11_window_find(display, dest_w);
+  EmxWindow* src = em_x11_window_find(display, src_w);
+  EmxWindow* dst = em_x11_window_find(display, dest_w);
   if (!src || !dst)
     return False;
   /* Walk src and dst to their root-relative origins, then compute the
@@ -807,7 +808,7 @@ Bool XTranslateCoordinates(Display* display,
     src_ay += cur->y;
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* p = emx11_window_find(display, cur->parent);
+    EmxWindow* p = em_x11_window_find(display, cur->parent);
     if (!p)
       break;
     cur = p;
@@ -818,7 +819,7 @@ Bool XTranslateCoordinates(Display* display,
     dst_ay += cur->y;
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* p = emx11_window_find(display, cur->parent);
+    EmxWindow* p = em_x11_window_find(display, cur->parent);
     if (!p)
       break;
     cur = p;
@@ -851,7 +852,7 @@ Status XQueryTree(Display* display,
    * order. twm's RestartPreviousState walks this after F_RESTART
    * respawn -- without it the new wasm sees an empty root and never
    * re-manages the still-mapped clients from the prior session. */
-  int count = emx11_js_get_window_children_count(w);
+  int count = em_x11_js_get_window_children_count(w);
   if (count <= 0)
     return 1;
   Window* kids = (Window*)malloc(sizeof(Window) * (size_t)count);
@@ -864,7 +865,7 @@ Status XQueryTree(Display* display,
     free(kids);
     return 1;
   }
-  int got = emx11_js_get_window_children(w, buf, count);
+  int got = em_x11_js_get_window_children(w, buf, count);
   if (got <= 0) {
     free(buf);
     free(kids);
@@ -881,20 +882,20 @@ Status XQueryTree(Display* display,
 }
 
 int XSelectInput(Display* display, Window w, long event_mask) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (win)
     win->event_mask = event_mask;
   /* Always forward to Host, even for cross-connection targets (twm
    * must XSelectInput(root, SubstructureRedirectMask) -- root is
    * Host-owned, no local shadow of its event_mask would help). */
-  emx11_js_select_input(display->conn_id, w, event_mask);
+  em_x11_js_select_input(display->conn_id, w, event_mask);
   return 1;
 }
 
 int XStoreName(Display* display, Window w, const char* name) {
   if (!name)
     return 0;
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (win) {
     strncpy(win->name, name, sizeof(win->name) - 1);
     win->name[sizeof(win->name) - 1] = '\0';
@@ -925,24 +926,24 @@ int XStoreName(Display* display, Window w, const char* name) {
  * xeyes's shell (a conn-2 XID) is the canonical cross-connection case,
  * and twm wouldn't have a local EmxWindow for it. */
 int XReparentWindow(Display* display, Window w, Window parent, int x, int y) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (win) {
     win->parent = parent;
     win->x = x;
     win->y = y;
   }
-  emx11_js_reparent_window(w, parent, x, y);
+  em_x11_js_reparent_window(w, parent, x, y);
   return 1;
 }
 
 /* -- Window border / cursor -- */
 
 int XSetWindowBorder(Display* dpy, Window w, unsigned long border) {
-  EmxWindow* win = emx11_window_find(dpy, w);
+  EmxWindow* win = em_x11_window_find(dpy, w);
   if (!win)
     return 0;
   win->border_pixel = border;
-  emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+  em_x11_js_window_set_border(w, win->border_width, win->border_pixel);
   return 1;
 }
 
@@ -955,22 +956,22 @@ int XSetWindowBorderPixmap(Display* dpy, Window w, Pixmap pixmap) {
 
 int XDefineCursor(Display* dpy, Window w, Cursor cursor) {
   dpy->request++;
-  emx11_js_window_set_cursor(w, (unsigned int)cursor);
+  em_x11_js_window_set_cursor(w, (unsigned int)cursor);
   return 1;
 }
 
 int XUndefineCursor(Display* dpy, Window w) {
   dpy->request++;
-  emx11_js_window_set_cursor(w, 0);
+  em_x11_js_window_set_cursor(w, 0);
   return 1;
 }
 
 int XSetWindowBorderWidth(Display* dpy, Window w, unsigned int width) {
-  EmxWindow* win = emx11_window_find(dpy, w);
+  EmxWindow* win = em_x11_window_find(dpy, w);
   if (!win)
     return 0;
   win->border_width = width;
-  emx11_js_window_set_border(w, win->border_width, win->border_pixel);
+  em_x11_js_window_set_border(w, win->border_width, win->border_pixel);
   return 1;
 }
 

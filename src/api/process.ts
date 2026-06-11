@@ -135,7 +135,7 @@ export class ProcessImpl implements Process {
     this.bootPromise = launchProcess(this.connection, this.launchOpts);
     this.ready = this.attachBoot(this.bootPromise);
     this.ready.catch((err) => {
-      console.error('[emx11] respawn failed:', err);
+      console.error('[em-x11] respawn failed:', err);
     });
   }
 

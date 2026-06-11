@@ -20,7 +20,7 @@ target_compile_options(xeyes PRIVATE -w)
 
 # xeyes uses Xt + Xmu (for CvtStringToBackingStore) + the SHAPE stub
 # (Xext) for the rounded eyes outline.
-emx11_finalize_demo(xeyes
+em_x11_finalize_demo(xeyes
     EXPORT_NAME createXeyesModule
     LIBS Xmu Xt Xext X11
 )

@@ -12,7 +12,7 @@ target_compile_options(glxgears PRIVATE -w)
 # Pure Xlib + GLX. -lGLX pulls our glX* symbols; -lGL is the emscripten
 # system lib that ships glBegin / glRotatef / matrix stack via
 # LEGACY_GL_EMULATION (turned on below).
-emx11_finalize_demo(glxgears
+em_x11_finalize_demo(glxgears
     EXPORT_NAME createGlxgearsModule
     LIBS GLX X11 GL
     EXTRA_RUNTIME_METHODS stringToUTF8 specialHTMLTargets

@@ -54,7 +54,7 @@ export class WindowManager {
   }
 
   /** XID of the one shared root window. Queried by every client's
-   *  XOpenDisplay through the emx11_js_get_root_window bridge. */
+   *  XOpenDisplay through the em_x11_js_get_root_window bridge. */
   getRootWindow(): number {
     return HOST_ROOT_ID;
   }
@@ -62,7 +62,7 @@ export class WindowManager {
   /** Cross-connection XGetWindowAttributes fallback. When twm queries
    *  xeyes's shell for geometry, twm's local shadow table has no entry
    *  for it (a WM doesn't mirror other clients' windows). Xlib calls
-   *  the emx11_js_get_window_attrs bridge, which lands here.
+   *  the em_x11_js_get_window_attrs bridge, which lands here.
    *  dix/window.c treats window state as XID-keyed server state; this
    *  accessor is how we present that to a querying client. */
   getAttrs(id: number): {
@@ -135,7 +135,7 @@ export class WindowManager {
   }
 
   onSetBg(id: number, bgType: number, bgValue: number): void {
-    /* state codes from emx11_js_window_set_bg in native/emx11/bridges.c:
+    /* state codes from em_x11_js_window_set_bg in native/em_x11/bridges.c:
      *   0 = None (no auto-paint, backing left as-is)
      *   1 = Pixel (solid colour)
      *   2 = ParentRelative (tile parent's bg with parent's tile origin)
@@ -167,7 +167,7 @@ export class WindowManager {
      *
      * Skip when caller == owner (Tk/Xt resizing their own toplevel):
      * notify_js_reconfigure already pushed the local ConfigureNotify
-     * before the emx11_js_window_configure bridge fires. */
+     * before the em_x11_js_window_configure bridge fires. */
     const ownerConnId = this.host.connection.connOf(id);
     if (
       ownerConnId !== undefined &&
@@ -179,7 +179,7 @@ export class WindowManager {
         const attrs = this.host.renderer.attrsOf(id);
         const borderWidth = attrs?.borderWidth ?? 0;
         owner.module.ccall(
-          'emx11_push_configure_notify',
+          'em_x11_push_configure_notify',
           null,
           ['number', 'number', 'number', 'number', 'number', 'number'],
           [id, x, y, w, h, borderWidth],
@@ -301,7 +301,7 @@ export class WindowManager {
      * walk lands at the pre-reparent absolute coords, ButtonPress/Motion
      * get translated with the wrong offset, hover/click hit the wrong
      * widget, and Xt's Shell widget never sees a ReparentNotify it would
-     * otherwise consume. emx11_push_reparent_notify (event.c) updates
+     * otherwise consume. em_x11_push_reparent_notify (event.c) updates
      * the local shadow unconditionally and pushes a ReparentNotify XEvent
      * gated on the StructureNotify/SubstructureNotify masks, mirroring
      * dix/events.c::DeliverEvents. */
@@ -310,7 +310,7 @@ export class WindowManager {
       const owner = this.host.connection.get(ownerConnId);
       if (owner?.module) {
         owner.module.ccall(
-          'emx11_push_reparent_notify',
+          'em_x11_push_reparent_notify',
           null,
           ['number', 'number', 'number', 'number'],
           [id, parent, x, y],

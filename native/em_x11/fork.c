@@ -26,7 +26,7 @@
  *   2. setjmp returns 0 → child path.  Child runs in the same wasm
  *      context with vfork_in_progress=1.
  *   3a. Child calls exec*() → process.c's execvp override fires:
- *       emx11_js_exec_self tells the JS host to kill+respawn this
+ *       em_x11_js_exec_self tells the JS host to kill+respawn this
  *       connection.  vfork state is cleared first so exit() kills
  *       the wasm module cleanly.
  *   3b. Child calls _exit() → __wrap__exit detects vfork_in_progress
@@ -86,9 +86,9 @@ pid_t vfork(void) {
 
 /* Clear vfork state before exec().  Called from process.c's do_exec()
  * so exit() kills the wasm module instead of longjmp'ing back. */
-void emx11_vfork_clear(void) { g_vfork_active = 0; }
+void em_x11_vfork_clear(void) { g_vfork_active = 0; }
 
-int emx11_vfork_active(void) { return g_vfork_active; }
+int em_x11_vfork_active(void) { return g_vfork_active; }
 
 /* Intercept _exit when called from a vfork child.
  *
@@ -123,7 +123,7 @@ pid_t fork(void) {
 
 EM_JS(
   int,
-  emx11_js_posix_spawn,
+  em_x11_js_posix_spawn,
   (int pathPtr, int pathLen, int argvPtrs, int argc, int envpPtrs, int envc),
   {
     /* Decode path. */
@@ -149,7 +149,7 @@ EM_JS(
       }
     }
 
-    var host = Module['emx11Host'];
+    var host = Module['emX11Host'];
     if (!host || !host.onPosixSpawn) {
       errno = 38; /* ENOSYS */
       return -1;
@@ -161,7 +161,7 @@ EM_JS(
     try {
       return host.onPosixSpawn(path, args, env) | 0;
     } catch (e) {
-      console.error('[emx11] posix_spawn failed:', e);
+      console.error('[em_x11] posix_spawn failed:', e);
       errno = 38; /* ENOSYS */
       return -1;
     }
@@ -194,12 +194,12 @@ int posix_spawn(pid_t* pid,
 
   /* Build argv pointer array for the bridge.  argv[0] is the program
    * name by POSIX convention. */
-  int result = emx11_js_posix_spawn((int)(intptr_t)path,
-                                    (int)strlen(path),
-                                    (int)(intptr_t)argv,
-                                    argc,
-                                    (int)(intptr_t)envp,
-                                    envc);
+  int result = em_x11_js_posix_spawn((int)(intptr_t)path,
+                                     (int)strlen(path),
+                                     (int)(intptr_t)argv,
+                                     argc,
+                                     (int)(intptr_t)envp,
+                                     envc);
 
   if (result < 0)
     return -1;

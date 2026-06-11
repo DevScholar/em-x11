@@ -1,11 +1,11 @@
 /**
  * Vite config for building the default Host as a standalone IIFE bundle.
  *
- * Output: build/artifacts/emx11-default-host.js
+ * Output: build/artifacts/em-x11-default-host.js
  *
  * This IIFE sets `globalThis.EmX11DefaultHost = { create(Module) }`,
- * which library_emx11.js calls during $EmX11Host.init() in Layer 1
- * (zero-JS / -sUSE_EMX11 mode).
+ * which library_em-x11.js calls during $EmX11Host.init() in Layer 1
+ * (zero-JS / -sUSE_EM_X11 mode).
  *
  * Usage: npx vite build -c vite.host.config.ts
  */
@@ -31,7 +31,7 @@ export default defineConfig({
       entry: resolve(__dirname, 'src/default-host.ts'),
       name: 'EmX11DefaultHost',
       formats: ['iife'],
-      fileName: () => 'emx11-default-host.js',
+      fileName: () => 'em-x11-default-host.js',
     },
   },
 });

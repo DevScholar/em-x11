@@ -3,12 +3,12 @@
  *
  * Compiled by Vite into a self-contained IIFE that sets
  * `globalThis.EmX11DefaultHost` before the emscripten wasm starts.
- * The JS library (library_emx11.js) calls EmX11DefaultHost.create(Module)
+ * The JS library (library_em-x11.js) calls EmX11DefaultHost.create(Module)
  * during $EmX11Host.init().
  *
  * This file is NOT imported by the npm package entry (src/index.ts).
  * It is only used for the --pre-js bundle that the port injects when
- * the user compiles with -sUSE_EMX11 (no user JS needed).
+ * the user compiles with -sUSE_EM_X11 (no user JS needed).
  */
 
 import { Host } from './host/index.js';
@@ -29,28 +29,28 @@ function createDefaultHost(Module: Record<string, unknown>): unknown {
   }
 
   // Read dimensions from Module or canvas
-  const w = (Module['emx11Width'] as number) ?? (canvas as HTMLCanvasElement).width ?? 1024;
-  const h = (Module['emx11Height'] as number) ?? (canvas as HTMLCanvasElement).height ?? 768;
+  const w = (Module['emX11Width'] as number) ?? (canvas as HTMLCanvasElement).width ?? 1024;
+  const h = (Module['emX11Height'] as number) ?? (canvas as HTMLCanvasElement).height ?? 768;
   if (w) opts.width = w;
   if (h) opts.height = h;
 
-  // HiDPI opt-out: set Module['emx11HiDpi'] = false to revert to 1:1
+  // HiDPI opt-out: set Module['emX11HiDpi'] = false to revert to 1:1
   // backing store when non-integer DPR causes antialiasing artifacts
   // or layout misalignment (e.g. xcalc's Athena Toggle LCD ghosting).
-  if (Module['emx11HiDpi'] === false) opts.hiDpi = false;
+  if (Module['emX11HiDpi'] === false) opts.hiDpi = false;
 
   const host = new Host(opts);
   host.attachToBridge();
 
   // Mirror the host to Module so DevTools can reach it
-  Module['emx11Host'] = host;
+  Module['emX11Host'] = host;
 
   return host;
 }
 
 function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | OffscreenCanvas {
-  // 1. Module['emx11Canvas'] (user override)
-  const explicit = Module['emx11Canvas'];
+  // 1. Module['emX11Canvas'] (user override)
+  const explicit = Module['emX11Canvas'];
   if (explicit instanceof HTMLCanvasElement || (typeof OffscreenCanvas !== 'undefined' && explicit instanceof OffscreenCanvas)) {
     return explicit;
   }
@@ -76,25 +76,25 @@ function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | Off
   }
   const c = document.createElement('canvas');
   c.id = 'canvas';
-  c.width = (Module['emx11Width'] as number) ?? 1024;
-  c.height = (Module['emx11Height'] as number) ?? 768;
+  c.width = (Module['emX11Width'] as number) ?? 1024;
+  c.height = (Module['emX11Height'] as number) ?? 768;
   c.style.display = 'block';
   document.body.appendChild(c);
   Module['canvas'] = c;
-  Module['emx11Canvas'] = c;
+  Module['emX11Canvas'] = c;
   return c;
 }
 
-// Expose as a global so library_emx11.js can find it during init.
+// Expose as a global so library_em-x11.js can find it during init.
 (globalThis as Record<string, unknown>).EmX11DefaultHost = { create: createDefaultHost } satisfies DefaultHostModule;
 
 // Auto-init for Layer 1: when this IIFE runs inside an emscripten
 // MODULARIZE=1 factory, `Module` is a `var` in the enclosing scope.
 // We call createDefaultHost directly so the EM_JS bridges (which read
-// Module['emx11Host']) work immediately, without depending on the
-// library_emx11.js override (which may not take effect if the EM_JS
+// Module['emX11Host']) work immediately, without depending on the
+// library_em-x11.js override (which may not take effect if the EM_JS
 // bodies in bridges.c are not overridden).
 declare var Module: any;
-if (typeof Module !== 'undefined' && !Module['emx11Host'] && !Module['emx11NoAutoStart']) {
+if (typeof Module !== 'undefined' && !Module['emX11Host'] && !Module['emX11NoAutoStart']) {
   createDefaultHost(Module);
 }

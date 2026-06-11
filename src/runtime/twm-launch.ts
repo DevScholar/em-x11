@@ -18,7 +18,7 @@
  * to read it via `-f`. Same mechanism people use on real Linux.
  */
 
-import type { EmX11 } from '../api/emx11.js';
+import type { EmX11 } from '../api/em-x11.js';
 import type { Process } from '../api/types.js';
 
 const TWMRC_PATH = '/em-x11.twmrc';

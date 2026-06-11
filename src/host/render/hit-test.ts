@@ -25,7 +25,7 @@
  *    not-viewable descendant of an unmapped ancestor is still rejected
  *    naturally because the loop never enters its parent's subtree.
  *
- * Tracing: set `Module['emx11Debug'].traceHit = true` (L1, DevTools) or
+ * Tracing: set `Module['emX11Debug'].traceHit = true` (L1, DevTools) or
  *   `em.debug.traceHit = true` (L2/L3, API) to log every hit-test walk.
  *   Set `traceHitNext = true` to log only the next call,
  * then have the helper auto-clear it. Useful for diagnosing "this
@@ -42,7 +42,7 @@ interface TraceCtx {
 }
 
 /* Trace flags read fresh on every call so DevTools toggling is live.
- * In L1 (--pre-js inside factory) set Module['emx11Debug'].traceHitNext
+ * In L1 (--pre-js inside factory) set Module['emX11Debug'].traceHitNext
  * from DevTools. In L2/L3 use em.debug.traceHitNext from the API. */
 export function findWindowAt(r: RendererState, cssX: number, cssY: number): number | null {
   const dbg = getDebugFlags();

@@ -19,7 +19,7 @@
  * -- source-over compositing can't undo partial-alpha pixels, so widget
  * edges that repaint in alternating colours (Athena Toggle's Set/Unset
  * cycle on XCalc's LCD) may accumulate an L-shaped ghost at rectangle
- * corners. Set `hiDpi: false` (or `Module['emx11HiDpi'] = false`)
+ * corners. Set `hiDpi: false` (or `Module['emX11HiDpi'] = false`)
  * to revert to the 1:1 backing store when this is visible.
  *
  * Three construction modes:

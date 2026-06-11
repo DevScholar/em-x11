@@ -28,7 +28,7 @@ target_compile_options(xcalc PRIVATE -w)
 # (Windows 125%/150%) the compositor's drawImage upscale lands segment
 # edges on fractional device pixels, producing L-shaped antialiasing
 # ghosts at corners.
-emx11_finalize_demo(xcalc
+em_x11_finalize_demo(xcalc
     EXPORT_NAME createXcalcModule
     LIBS Xaw Xmu Xt Xpm Xext X11
     HI_DPI OFF

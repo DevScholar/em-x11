@@ -52,7 +52,7 @@ export interface LoadOptions {
    *  the post-launch onExit / ccall-throw paths both miss. */
   quit?: (status: number, toThrow: unknown) => void;
   /** Extra properties to set on Module before the wasm factory starts.
-   *  ConnectionManager uses this to pre-populate Module['emx11Host']
+   *  ConnectionManager uses this to pre-populate Module['emX11Host']
    *  so the JS library's $EmX11Host.init() sees the caller's Host and
    *  skips creating a duplicate default host from --pre-js. */
   moduleOverrides?: Record<string, unknown>;

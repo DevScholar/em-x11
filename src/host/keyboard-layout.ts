@@ -8,7 +8,7 @@
  * physical key, and patch our keysym_table accordingly inside each
  * wasm process AFTER it's loaded but BEFORE its first KeyPress event.
  *
- * The C side (event_keysym.c::emx11_us_qwerty) pre-fills US QWERTY as
+ * The C side (event_keysym.c::em_x11_us_qwerty) pre-fills US QWERTY as
  * the fallback for every evdev keycode. This module overwrites the
  * letter / digit / punctuation slots with what the user actually
  * types -- so a French AZERTY user's physical Q key reports the
@@ -73,7 +73,7 @@ export class KeyboardLayoutManager {
   /** Modules we've already pushed the layout into. The keysym_table is
    *  per-Display state inside each wasm, so a new wasm process needs its
    *  own patch pass; one Set entry per module avoids re-ccalling 100+
-   *  emx11_install_keysym for a module that's already up to date. */
+   *  em_x11_install_keysym for a module that's already up to date. */
   private appliedTo = new WeakSet<ModuleCcallSurface>();
 
   /** Fetch (or return cached) layout. First call kicks off the
@@ -105,7 +105,7 @@ export class KeyboardLayoutManager {
     if (layout.entries.size === 0) return;     /* US QWERTY suffices */
     for (const [keycode, keysym] of layout.entries) {
       module.ccall(
-        'emx11_install_keysym',
+        'em_x11_install_keysym',
         null,
         ['number', 'number'],
         [keycode, keysym],

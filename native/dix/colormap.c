@@ -28,7 +28,7 @@
  *                                                   resolve correctly.
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <X11/Xutil.h>
 #include <ctype.h>
@@ -36,77 +36,110 @@
 #include <string.h>
 
 static int hexval(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
-    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
-    return -1;
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return 10 + c - 'a';
+  if (c >= 'A' && c <= 'F')
+    return 10 + c - 'A';
+  return -1;
 }
 
 /* Parse one hex component of `digits` hex digits, returning a value
  * scaled into [0, 65535]. Returns -1 on parse error. */
-static int parse_hex_component(const char *s, int digits) {
-    int v = 0;
-    for (int i = 0; i < digits; i++) {
-        int d = hexval(s[i]);
-        if (d < 0) return -1;
-        v = (v << 4) | d;
-    }
-    switch (digits) {
-    case 1: v = v * 0x1111; break;              /* scale #XYZ -> 0xXXYYZZ... */
-    case 2: v = v * 0x0101; break;
-    case 3: v = v * 0x0011; break;              /* rough, keeps top bits */
-    case 4: break;                              /* already 16-bit */
-    default: return -1;
-    }
-    return v;
+static int parse_hex_component(const char* s, int digits) {
+  int v = 0;
+  for (int i = 0; i < digits; i++) {
+    int d = hexval(s[i]);
+    if (d < 0)
+      return -1;
+    v = (v << 4) | d;
+  }
+  switch (digits) {
+    case 1:
+      v = v * 0x1111;
+      break; /* scale #XYZ -> 0xXXYYZZ... */
+    case 2:
+      v = v * 0x0101;
+      break;
+    case 3:
+      v = v * 0x0011;
+      break; /* rough, keeps top bits */
+    case 4:
+      break; /* already 16-bit */
+    default:
+      return -1;
+  }
+  return v;
 }
 
-static bool parse_hex_triplet(const char *spec, unsigned short *rr,
-                              unsigned short *gg, unsigned short *bb) {
-    size_t len = strlen(spec);
-    if (len < 3) return false;
-    int d;
-    switch (len) {
-    case 3:  d = 1; break;
-    case 6:  d = 2; break;
-    case 9:  d = 3; break;
-    case 12: d = 4; break;
-    default: return false;
-    }
-    int r = parse_hex_component(spec,             d);
-    int g = parse_hex_component(spec + d,         d);
-    int b = parse_hex_component(spec + 2 * d,     d);
-    if (r < 0 || g < 0 || b < 0) return false;
-    *rr = (unsigned short)r;
-    *gg = (unsigned short)g;
-    *bb = (unsigned short)b;
-    return true;
+static bool parse_hex_triplet(const char* spec,
+                              unsigned short* rr,
+                              unsigned short* gg,
+                              unsigned short* bb) {
+  size_t len = strlen(spec);
+  if (len < 3)
+    return false;
+  int d;
+  switch (len) {
+    case 3:
+      d = 1;
+      break;
+    case 6:
+      d = 2;
+      break;
+    case 9:
+      d = 3;
+      break;
+    case 12:
+      d = 4;
+      break;
+    default:
+      return false;
+  }
+  int r = parse_hex_component(spec, d);
+  int g = parse_hex_component(spec + d, d);
+  int b = parse_hex_component(spec + 2 * d, d);
+  if (r < 0 || g < 0 || b < 0)
+    return false;
+  *rr = (unsigned short)r;
+  *gg = (unsigned short)g;
+  *bb = (unsigned short)b;
+  return true;
 }
 
-static bool parse_rgb_slashed(const char *spec, unsigned short *rr,
-                              unsigned short *gg, unsigned short *bb) {
-    /* "rgb:R/G/B" where each component is 1-4 hex digits. */
-    const char *r_start = spec;
-    const char *slash1 = strchr(r_start, '/');
-    if (!slash1) return false;
-    const char *slash2 = strchr(slash1 + 1, '/');
-    if (!slash2) return false;
+static bool parse_rgb_slashed(const char* spec,
+                              unsigned short* rr,
+                              unsigned short* gg,
+                              unsigned short* bb) {
+  /* "rgb:R/G/B" where each component is 1-4 hex digits. */
+  const char* r_start = spec;
+  const char* slash1 = strchr(r_start, '/');
+  if (!slash1)
+    return false;
+  const char* slash2 = strchr(slash1 + 1, '/');
+  if (!slash2)
+    return false;
 
-    int r_digits = (int)(slash1 - r_start);
-    int g_digits = (int)(slash2 - (slash1 + 1));
-    int b_digits = (int)strlen(slash2 + 1);
-    if (r_digits < 1 || r_digits > 4) return false;
-    if (g_digits < 1 || g_digits > 4) return false;
-    if (b_digits < 1 || b_digits > 4) return false;
+  int r_digits = (int)(slash1 - r_start);
+  int g_digits = (int)(slash2 - (slash1 + 1));
+  int b_digits = (int)strlen(slash2 + 1);
+  if (r_digits < 1 || r_digits > 4)
+    return false;
+  if (g_digits < 1 || g_digits > 4)
+    return false;
+  if (b_digits < 1 || b_digits > 4)
+    return false;
 
-    int r = parse_hex_component(r_start,       r_digits);
-    int g = parse_hex_component(slash1 + 1,    g_digits);
-    int b = parse_hex_component(slash2 + 1,    b_digits);
-    if (r < 0 || g < 0 || b < 0) return false;
-    *rr = (unsigned short)r;
-    *gg = (unsigned short)g;
-    *bb = (unsigned short)b;
-    return true;
+  int r = parse_hex_component(r_start, r_digits);
+  int g = parse_hex_component(slash1 + 1, g_digits);
+  int b = parse_hex_component(slash2 + 1, b_digits);
+  if (r < 0 || g < 0 || b < 0)
+    return false;
+  *rr = (unsigned short)r;
+  *gg = (unsigned short)g;
+  *bb = (unsigned short)b;
+  return true;
 }
 
 /* Match X11's grayN / greyN / GrayN / GreyN where N is 0..100. CSS
@@ -115,159 +148,199 @@ static bool parse_rgb_slashed(const char *spec, unsigned short *rr,
  * X11 rgb.txt: each channel = round(N * 255 / 100). Bare "gray" and
  * "grey" (no digits) deliberately fall through to CSS so we match the
  * browser's 190,190,190 value there, not our own. */
-static bool parse_gray_n(const char *spec, unsigned short *rr,
-                         unsigned short *gg, unsigned short *bb) {
-    const char *p = spec;
-    if ((p[0] == 'g' || p[0] == 'G') &&
-        (p[1] == 'r' || p[1] == 'R') &&
-        (p[2] == 'a' || p[2] == 'A' || p[2] == 'e' || p[2] == 'E') &&
-        (p[3] == 'y' || p[3] == 'Y')) {
-        p += 4;
-    } else {
-        return false;
-    }
-    if (!*p) return false;                          /* bare gray/grey */
-    int n = 0;
-    for (; *p; p++) {
-        if (*p < '0' || *p > '9') return false;
-        n = n * 10 + (*p - '0');
-        if (n > 100) return false;
-    }
-    /* round-half-up: (n * 255 + 50) / 100. Matches X11 rgb.txt for
-     * gray30=77, gray70=179, gray85=217. gray50 differs by 1 (128 vs
-     * X11's 127), which no real program cares about. */
-    int v8 = (n * 255 + 50) / 100;
-    int v16 = v8 * 0x101;
-    *rr = (unsigned short)v16;
-    *gg = (unsigned short)v16;
-    *bb = (unsigned short)v16;
-    return true;
+static bool parse_gray_n(const char* spec,
+                         unsigned short* rr,
+                         unsigned short* gg,
+                         unsigned short* bb) {
+  const char* p = spec;
+  if ((p[0] == 'g' || p[0] == 'G') && (p[1] == 'r' || p[1] == 'R') &&
+      (p[2] == 'a' || p[2] == 'A' || p[2] == 'e' || p[2] == 'E') &&
+      (p[3] == 'y' || p[3] == 'Y')) {
+    p += 4;
+  } else {
+    return false;
+  }
+  if (!*p)
+    return false; /* bare gray/grey */
+  int n = 0;
+  for (; *p; p++) {
+    if (*p < '0' || *p > '9')
+      return false;
+    n = n * 10 + (*p - '0');
+    if (n > 100)
+      return false;
+  }
+  /* round-half-up: (n * 255 + 50) / 100. Matches X11 rgb.txt for
+   * gray30=77, gray70=179, gray85=217. gray50 differs by 1 (128 vs
+   * X11's 127), which no real program cares about. */
+  int v8 = (n * 255 + 50) / 100;
+  int v16 = v8 * 0x101;
+  *rr = (unsigned short)v16;
+  *gg = (unsigned short)v16;
+  *bb = (unsigned short)v16;
+  return true;
 }
 
-Status XParseColor(Display *dpy, Colormap cmap, _Xconst char *spec,
-                   XColor *color_out) {
-    (void)dpy; (void)cmap;
-    if (!spec || !color_out) return 0;
+Status XParseColor(Display* dpy,
+                   Colormap cmap,
+                   _Xconst char* spec,
+                   XColor* color_out) {
+  (void)dpy;
+  (void)cmap;
+  if (!spec || !color_out)
+    return 0;
 
-    unsigned short r = 0, g = 0, b = 0;
-    bool ok = false;
+  unsigned short r = 0, g = 0, b = 0;
+  bool ok = false;
 
-    if (spec[0] == '#') {
-        ok = parse_hex_triplet(spec + 1, &r, &g, &b);
-    } else if (strncmp(spec, "rgb:", 4) == 0) {
-        ok = parse_rgb_slashed(spec + 4, &r, &g, &b);
-    } else if (parse_gray_n(spec, &r, &g, &b)) {
-        ok = true;
-    } else {
-        ok = emx11_js_parse_color(spec, &r, &g, &b) != 0;
-    }
-    if (!ok) return 0;
+  if (spec[0] == '#') {
+    ok = parse_hex_triplet(spec + 1, &r, &g, &b);
+  } else if (strncmp(spec, "rgb:", 4) == 0) {
+    ok = parse_rgb_slashed(spec + 4, &r, &g, &b);
+  } else if (parse_gray_n(spec, &r, &g, &b)) {
+    ok = true;
+  } else {
+    ok = em_x11_js_parse_color(spec, &r, &g, &b) != 0;
+  }
+  if (!ok)
+    return 0;
 
-    color_out->red   = r;
-    color_out->green = g;
-    color_out->blue  = b;
-    color_out->flags = DoRed | DoGreen | DoBlue;
-    color_out->pixel =
-        ((unsigned long)(r >> 8) << 16) |
-        ((unsigned long)(g >> 8) << 8)  |
-         (unsigned long)(b >> 8);
-    return 1;
+  color_out->red = r;
+  color_out->green = g;
+  color_out->blue = b;
+  color_out->flags = DoRed | DoGreen | DoBlue;
+  color_out->pixel = ((unsigned long)(r >> 8) << 16) |
+                     ((unsigned long)(g >> 8) << 8) | (unsigned long)(b >> 8);
+  return 1;
 }
 
-Status XAllocColor(Display *dpy, Colormap cmap, XColor *screen_in_out) {
-    (void)dpy; (void)cmap;
-    if (!screen_in_out) return 0;
-    screen_in_out->pixel =
-        ((unsigned long)(screen_in_out->red   >> 8) << 16) |
-        ((unsigned long)(screen_in_out->green >> 8) << 8)  |
-         (unsigned long)(screen_in_out->blue  >> 8);
-    screen_in_out->flags = DoRed | DoGreen | DoBlue;
-    return 1;
+Status XAllocColor(Display* dpy, Colormap cmap, XColor* screen_in_out) {
+  (void)dpy;
+  (void)cmap;
+  if (!screen_in_out)
+    return 0;
+  screen_in_out->pixel = ((unsigned long)(screen_in_out->red >> 8) << 16) |
+                         ((unsigned long)(screen_in_out->green >> 8) << 8) |
+                         (unsigned long)(screen_in_out->blue >> 8);
+  screen_in_out->flags = DoRed | DoGreen | DoBlue;
+  return 1;
 }
 
-Status XAllocNamedColor(Display *dpy, Colormap cmap, _Xconst char *name,
-                        XColor *screen_def_return, XColor *exact_def_return) {
-    XColor parsed;
-    if (!XParseColor(dpy, cmap, name, &parsed)) return 0;
-    if (screen_def_return) *screen_def_return = parsed;
-    if (exact_def_return)  *exact_def_return  = parsed;
-    return 1;
+Status XAllocNamedColor(Display* dpy,
+                        Colormap cmap,
+                        _Xconst char* name,
+                        XColor* screen_def_return,
+                        XColor* exact_def_return) {
+  XColor parsed;
+  if (!XParseColor(dpy, cmap, name, &parsed))
+    return 0;
+  if (screen_def_return)
+    *screen_def_return = parsed;
+  if (exact_def_return)
+    *exact_def_return = parsed;
+  return 1;
 }
 
-int XQueryColor(Display *dpy, Colormap cmap, XColor *def_in_out) {
-    (void)dpy; (void)cmap;
-    if (!def_in_out) return 0;
-    /* TrueColor: decompose pixel back into 16-bit components. */
-    unsigned long p = def_in_out->pixel;
-    unsigned int r8 = (p >> 16) & 0xFF;
-    unsigned int g8 = (p >> 8)  & 0xFF;
-    unsigned int b8 =  p        & 0xFF;
-    def_in_out->red   = (unsigned short)(r8 * 0x101);
-    def_in_out->green = (unsigned short)(g8 * 0x101);
-    def_in_out->blue  = (unsigned short)(b8 * 0x101);
-    def_in_out->flags = DoRed | DoGreen | DoBlue;
-    return 1;
+int XQueryColor(Display* dpy, Colormap cmap, XColor* def_in_out) {
+  (void)dpy;
+  (void)cmap;
+  if (!def_in_out)
+    return 0;
+  /* TrueColor: decompose pixel back into 16-bit components. */
+  unsigned long p = def_in_out->pixel;
+  unsigned int r8 = (p >> 16) & 0xFF;
+  unsigned int g8 = (p >> 8) & 0xFF;
+  unsigned int b8 = p & 0xFF;
+  def_in_out->red = (unsigned short)(r8 * 0x101);
+  def_in_out->green = (unsigned short)(g8 * 0x101);
+  def_in_out->blue = (unsigned short)(b8 * 0x101);
+  def_in_out->flags = DoRed | DoGreen | DoBlue;
+  return 1;
 }
 
-int XQueryColors(Display *dpy, Colormap cmap, XColor *defs, int ncolors) {
-    for (int i = 0; i < ncolors; i++) XQueryColor(dpy, cmap, &defs[i]);
-    return 1;
+int XQueryColors(Display* dpy, Colormap cmap, XColor* defs, int ncolors) {
+  for (int i = 0; i < ncolors; i++)
+    XQueryColor(dpy, cmap, &defs[i]);
+  return 1;
 }
 
-int XFreeColors(Display *dpy, Colormap cmap, unsigned long *pixels,
-                int npixels, unsigned long planes) {
-    (void)dpy; (void)cmap; (void)pixels; (void)npixels; (void)planes;
-    /* No colormap to reference-count: pixel values ARE the colors. */
-    return 1;
+int XFreeColors(Display* dpy,
+                Colormap cmap,
+                unsigned long* pixels,
+                int npixels,
+                unsigned long planes) {
+  (void)dpy;
+  (void)cmap;
+  (void)pixels;
+  (void)npixels;
+  (void)planes;
+  /* No colormap to reference-count: pixel values ARE the colors. */
+  return 1;
 }
 
-int XFreeColormap(Display *dpy, Colormap cmap) {
-    (void)dpy; (void)cmap;
-    return 1;
+int XFreeColormap(Display* dpy, Colormap cmap) {
+  (void)dpy;
+  (void)cmap;
+  return 1;
 }
 
-Colormap XCreateColormap(Display *dpy, Window w, Visual *visual, int alloc) {
-    (void)dpy; (void)w; (void)visual; (void)alloc;
-    return 1;                                   /* same dummy as default cmap */
+Colormap XCreateColormap(Display* dpy, Window w, Visual* visual, int alloc) {
+  (void)dpy;
+  (void)w;
+  (void)visual;
+  (void)alloc;
+  return 1; /* same dummy as default cmap */
 }
 
-Status XLookupColor(Display *dpy, Colormap cmap, _Xconst char *name,
-                    XColor *exact_def_return, XColor *screen_def_return) {
-    return XAllocNamedColor(dpy, cmap, name, screen_def_return, exact_def_return);
+Status XLookupColor(Display* dpy,
+                    Colormap cmap,
+                    _Xconst char* name,
+                    XColor* exact_def_return,
+                    XColor* screen_def_return) {
+  return XAllocNamedColor(dpy, cmap, name, screen_def_return, exact_def_return);
 }
 
 /* -- Visual accessors -- single-screen TrueColor world. ------------------- */
 
-VisualID XVisualIDFromVisual(Visual *visual) {
-    return visual ? visual->visualid : 0;
+VisualID XVisualIDFromVisual(Visual* visual) {
+  return visual ? visual->visualid : 0;
 }
 
 /* Return the single TrueColor visual we always hand out. Tk calls this
  * to enumerate candidates (e.g. to pick a matching 32-bit visual for
  * image import); a one-element list is sufficient. Caller XFrees. */
-XVisualInfo *XGetVisualInfo(Display *dpy, long mask, XVisualInfo *template_,
-                            int *nitems_return) {
-    (void)mask; (void)template_;
-    if (nitems_return) *nitems_return = 0;
-    if (!dpy) return NULL;
-    XVisualInfo *info = calloc(1, sizeof(XVisualInfo));
-    if (!info) return NULL;
-    Visual *v = dpy->screens[0].root_visual;
-    info->visual        = v;
-    info->visualid      = v ? v->visualid : 0;
-    info->screen        = 0;
-    info->depth         = dpy->screens[0].root_depth;
-    info->class         = TrueColor;
-    info->red_mask      = 0x00ff0000;
-    info->green_mask    = 0x0000ff00;
-    info->blue_mask     = 0x000000ff;
-    info->colormap_size = 256;
-    info->bits_per_rgb  = 8;
-    if (nitems_return) *nitems_return = 1;
-    return info;
+XVisualInfo* XGetVisualInfo(Display* dpy,
+                            long mask,
+                            XVisualInfo* template_,
+                            int* nitems_return) {
+  (void)mask;
+  (void)template_;
+  if (nitems_return)
+    *nitems_return = 0;
+  if (!dpy)
+    return NULL;
+  XVisualInfo* info = calloc(1, sizeof(XVisualInfo));
+  if (!info)
+    return NULL;
+  Visual* v = dpy->screens[0].root_visual;
+  info->visual = v;
+  info->visualid = v ? v->visualid : 0;
+  info->screen = 0;
+  info->depth = dpy->screens[0].root_depth;
+  info->class = TrueColor;
+  info->red_mask = 0x00ff0000;
+  info->green_mask = 0x0000ff00;
+  info->blue_mask = 0x000000ff;
+  info->colormap_size = 256;
+  info->bits_per_rgb = 8;
+  if (nitems_return)
+    *nitems_return = 1;
+  return info;
 }
 
-int XSetWindowColormap(Display *dpy, Window w, Colormap cmap) {
-    (void)dpy; (void)w; (void)cmap;
-    return 1;                                   /* single-colormap world */
+int XSetWindowColormap(Display* dpy, Window w, Colormap cmap) {
+  (void)dpy;
+  (void)w;
+  (void)cmap;
+  return 1; /* single-colormap world */
 }

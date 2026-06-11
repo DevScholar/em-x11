@@ -13,7 +13,7 @@
  * poll() is a PURE OBSERVER on Linux — it never consumes fd data.  We
  * preserve this by:
  *
- *   - Display fds (self-pipe read ends): checking the emx11 ring buffer
+ *   - Display fds (self-pipe read ends): checking the em_x11 ring buffer
  *     directly (dpy->event_head != dpy->event_tail), never reading the
  *     pipe.  The pipe bytes are wakeup signals; the ring buffer is the
  *     authoritative data store.
@@ -31,7 +31,7 @@
  *
  *   - ppoll() and pselect() accept the sigmask parameter for API
  *     compatibility; the mask is ignored by default.  Signal delivery
- *     is handled cooperatively via emx11_deliver_pending_signals().
+ *     is handled cooperatively via em_x11_deliver_pending_signals().
  *
  *   - Input validation sets errno (EFAULT, EINVAL) matching Linux.
  *
@@ -49,7 +49,7 @@
  * pipe receives wakeup bytes.  When the sleep expires, stack rewinds,
  * we re-probe all fds, and return immediately if any are ready.
  *
- * After each emscripten_sleep return we call emx11_deliver_pending_signals()
+ * After each emscripten_sleep return we call em_x11_deliver_pending_signals()
  * so SIGALRM / SIGCHLD / SIGINT handlers fire at cooperative yield points.
  *
  * g_in_blocking_poll gates the rAF tick (tick() in tcldide-runtime.c)
@@ -58,12 +58,12 @@
  *
  * This follows the same strong-symbol pattern as process.c (execvp).
  *
- *   emx11_event_queue_push → write(wakeup_fd) → pipe becomes readable
+ *   em_x11_event_queue_push → write(wakeup_fd) → pipe becomes readable
  *                            → poll/select returns → file handler runs
  *                            → XEventsQueued drains pipe → processes events
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <emscripten.h>
 #include <errno.h>
@@ -116,14 +116,14 @@ static int g_peek_valid[PEEKBUF_SIZE];
 static Display* g_poll_fd_display[FD_SETSIZE];
 static int g_poll_display_count;
 
-void emx11_poll_register_display_fd(int fd, Display* dpy) {
+void em_x11_poll_register_display_fd(int fd, Display* dpy) {
   if (fd >= 0 && fd < FD_SETSIZE && !g_poll_fd_display[fd]) {
     g_poll_fd_display[fd] = dpy;
     g_poll_display_count++;
   }
 }
 
-void emx11_poll_unregister_display_fd(int fd) {
+void em_x11_poll_unregister_display_fd(int fd) {
   if (fd >= 0 && fd < FD_SETSIZE && g_poll_fd_display[fd]) {
     g_poll_fd_display[fd] = NULL;
     g_poll_display_count--;
@@ -209,7 +209,7 @@ static int fd_is_writable(int fd) {
 
 /* ---- signal checkpoint (declared in signal.c) ------------------------- */
 
-extern void emx11_deliver_pending_signals(void);
+extern void em_x11_deliver_pending_signals(void);
 
 /* ---- non-blocking poll ------------------------------------------------ */
 
@@ -323,7 +323,7 @@ static int poll_check(struct pollfd* fds, nfds_t nfds) {
 
 static volatile int g_in_blocking_poll = 0;
 
-int emx11_is_blocking_in_poll(void) { return g_in_blocking_poll; }
+int em_x11_is_blocking_in_poll(void) { return g_in_blocking_poll; }
 
 /* ---- poll() -----------------------------------------------------------
  *
@@ -352,7 +352,7 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
    * Interval adapts to the deadline to balance latency and wasm↔JS
    * boundary-crossing overhead.  Each emscripten_sleep suspends the
    * wasm call via JSPI, yielding to the browser event loop.  During
-   * the yield, ccalls from JS (emx11_event_queue_push, etc.) create
+   * the yield, ccalls from JS (em_x11_event_queue_push, etc.) create
    * new wasm stacks and populate the ring buffer — they do not
    * interfere with the suspended poll() stack. */
 
@@ -383,7 +383,7 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
     /* Deliver any pending signals before re-checking fds.
      * The JS host may have set SIGCHLD (child exit), SIGALRM
      * (timer expiry), or SIGINT (Ctrl+C) during the yield. */
-    emx11_deliver_pending_signals();
+    em_x11_deliver_pending_signals();
 
     ready = poll_check(fds, nfds);
     if (ready > 0)
@@ -398,7 +398,7 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
  * Identical to poll() except:
  *   - timeout is a struct timespec* (nanosecond precision) instead of int
  *   - sigmask is accepted for API compat; signal delivery is handled
- *     cooperatively via emx11_deliver_pending_signals() in poll() */
+ *     cooperatively via em_x11_deliver_pending_signals() in poll() */
 
 int ppoll(struct pollfd* fds,
           nfds_t nfds,
@@ -516,7 +516,7 @@ int select(int nfds,
  * Identical to select() except:
  *   - timeout is a struct timespec* (nanosecond precision)
  *   - sigmask is accepted for API compat; signal delivery is handled
- *     cooperatively via emx11_deliver_pending_signals() in poll() */
+ *     cooperatively via em_x11_deliver_pending_signals() in poll() */
 
 int pselect(int nfds,
             fd_set* readfds,

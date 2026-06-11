@@ -2,15 +2,15 @@
 em-x11 Emscripten port.
 
 Usage:
-    emcc myapp.c -sUSE_EMX11 -o myapp.html
-    emcc myapp.c --use-port=emx11 -o myapp.html
+    emcc myapp.c -sUSE_EM_X11 -o myapp.html
+    emcc myapp.c --use-port=em_x11 -o myapp.html
 
 The port links against em-x11's static archives (libX11.a, libXext.a,
 libXft.a, ...) and injects the JS-side bridge library
-(native/src/lib/library_emx11.js) so C code calling Xlib APIs works
+(native/src/lib/library_em-x11.js) so C code calling Xlib APIs works
 in the browser with zero user JS glue.
 
-Set EMX11_SRC to point at the em-x11 clone if the port script isn't
+Set EM_X11_SRC to point at the em-x11 clone if the port script isn't
 co-located with the source tree.
 """
 
@@ -21,7 +21,7 @@ import subprocess
 VERSION = '0.0.1'
 LICENSE = 'MIT'
 
-logger = logging.getLogger('emx11')
+logger = logging.getLogger('em_x11')
 
 # All static archives the port provides, in link order (higher-level first).
 # Order matches a standard Xaw program's link line:
@@ -44,32 +44,32 @@ _PORT_LIBS = [
 
 
 def needed(settings):
-    """Return True when -sUSE_EMX11 or --use-port=emx11 is active.
+    """Return True when -sUSE_EM_X11 or --use-port=em_x11 is active.
 
     Emscripten >= 5.0.0 asserts in settings.__getattr__ when an unknown
     key is read in limited-settings mode, so the usual getattr default
     doesn't help.  Catch the assertion and treat it as False.
     """
     try:
-        return getattr(settings, 'USE_EMX11', False)
+        return getattr(settings, 'USE_EM_X11', False)
     except AssertionError:
         return False
 
 
 def get_lib_name(settings):
-    return 'libemx11.a'
+    return 'libem_x11.a'
 
 
-def find_emx11_root():
+def find_em_x11_root():
     """Walk up from this script to find the em-x11 project root."""
-    env = os.environ.get('EMX11_SRC', '')
+    env = os.environ.get('EM_X11_SRC', '')
     if env:
         root = os.path.abspath(env)
         if os.path.isdir(root):
             return root
-        logger.warning('EMX11_SRC is set but not a directory: %s', root)
+        logger.warning('EM_X11_SRC is set but not a directory: %s', root)
 
-    # Script is at <root>/tools/ports/emx11.py
+    # Script is at <root>/tools/ports/em_x11.py
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root = os.path.normpath(os.path.join(script_dir, '..', '..'))
     if os.path.isdir(os.path.join(root, 'native')):
@@ -84,7 +84,7 @@ def find_emx11_root():
     return None
 
 
-def _find_artifacts(emx11_root):
+def _find_artifacts(em_x11_root):
     """Return the path to the artifacts directory, or None.
 
     Prefers the main cmake build output (build/artifacts/) which is
@@ -92,41 +92,41 @@ def _find_artifacts(emx11_root):
     back to a dedicated port-build directory.
     """
     # Main build — the fast path. Already built by pnpm build:native.
-    main = os.path.join(emx11_root, 'build', 'artifacts')
+    main = os.path.join(em_x11_root, 'build', 'artifacts')
     if os.path.isdir(main) and os.path.exists(os.path.join(main, 'libX11.a')):
         return main
 
     # Port-specific build — only used by external projects that point
     # at a clean em-x11 clone.
-    port_build = os.path.join(emx11_root, 'build', 'port-build', 'artifacts')
+    port_build = os.path.join(em_x11_root, 'build', 'port-build', 'artifacts')
     if os.path.isdir(port_build) and os.path.exists(os.path.join(port_build, 'libX11.a')):
         return port_build
 
     return None
 
 
-def _ensure_built(emx11_root, artifacts_dir):
+def _ensure_built(em_x11_root, artifacts_dir):
     """Build em-x11 via cmake if artifacts don't exist yet."""
     if artifacts_dir and os.path.exists(os.path.join(artifacts_dir, 'libX11.a')):
         return artifacts_dir
 
     # Check third-party sources
-    third_party = os.path.join(emx11_root, 'ignored-area', 'third-party')
+    third_party = os.path.join(em_x11_root, 'ignored-area', 'third-party')
     if not os.path.isdir(os.path.join(third_party, 'libXt')):
-        script = os.path.join(emx11_root, 'scripts', 'fetch-third-party.sh')
+        script = os.path.join(em_x11_root, 'scripts', 'fetch-third-party.sh')
         if os.path.isfile(script):
             logger.info('Third-party sources missing; running fetch-third-party.sh ...')
-            subprocess.run(['bash', script], cwd=emx11_root, check=True)
+            subprocess.run(['bash', script], cwd=em_x11_root, check=True)
 
-    build_dir = os.path.join(emx11_root, 'build', 'port-build')
+    build_dir = os.path.join(em_x11_root, 'build', 'port-build')
     out = os.path.join(build_dir, 'artifacts')
-    marker = os.path.join(out, '.emx11-port-built')
+    marker = os.path.join(out, '.em-x11-port-built')
 
     # Check freshness
     need_build = not os.path.exists(marker)
     if not need_build:
         marker_mtime = os.path.getmtime(marker)
-        native_dir = os.path.join(emx11_root, 'native')
+        native_dir = os.path.join(em_x11_root, 'native')
         for dirpath, _dirnames, filenames in os.walk(native_dir):
             for fn in filenames:
                 if fn.endswith(('.c', '.h')):
@@ -139,17 +139,17 @@ def _ensure_built(emx11_root, artifacts_dir):
     if need_build:
         cmake_cmd = [
             'emcmake', 'cmake',
-            '-S', emx11_root,
+            '-S', em_x11_root,
             '-B', build_dir,
             '-DCMAKE_BUILD_TYPE=Release',
-            '-DEMX11_BUILD_SIDE_MODULE=OFF',
+            '-DEM_X11_BUILD_SIDE_MODULE=OFF',
         ]
         logger.info('Configuring em-x11: %s', ' '.join(cmake_cmd))
-        subprocess.run(cmake_cmd, cwd=emx11_root, check=True)
+        subprocess.run(cmake_cmd, cwd=em_x11_root, check=True)
 
         build_cmd = ['cmake', '--build', build_dir, '-j']
         logger.info('Building em-x11: %s', ' '.join(build_cmd))
-        subprocess.run(build_cmd, cwd=emx11_root, check=True)
+        subprocess.run(build_cmd, cwd=em_x11_root, check=True)
 
         open(marker, 'w').close()
 
@@ -165,20 +165,20 @@ def get(ports, settings, shared):
     TODO: wrap with shared.cache.get_lib() once the port lands in
     upstream emscripten and can use ports.install_file / install_header_dir.
     """
-    emx11_root = find_emx11_root()
-    if not emx11_root:
+    em_x11_root = find_em_x11_root()
+    if not em_x11_root:
         logger.error(
             'Cannot find em-x11 source root. '
-            'Set EMX11_SRC=/path/to/em-x11 or place this script under '
-            '<emx11>/tools/ports/emx11.py'
+            'Set EM_X11_SRC=/path/to/em-x11 or place this script under '
+            '<em_x11>/tools/ports/em_x11.py'
         )
         return []
 
-    artifacts_dir = _find_artifacts(emx11_root)
+    artifacts_dir = _find_artifacts(em_x11_root)
     if artifacts_dir:
         logger.debug('Using pre-built artifacts: %s', artifacts_dir)
     else:
-        artifacts_dir = _ensure_built(emx11_root, artifacts_dir)
+        artifacts_dir = _ensure_built(em_x11_root, artifacts_dir)
 
     lib_paths = []
     for lib in _PORT_LIBS:
@@ -193,11 +193,11 @@ def get(ports, settings, shared):
 
 def clear(ports, settings, shared):
     shared.cache.erase_lib(get_lib_name(settings))
-    emx11_root = find_emx11_root()
-    if not emx11_root:
+    em_x11_root = find_em_x11_root()
+    if not em_x11_root:
         return
     import shutil
-    port_build = os.path.join(emx11_root, 'build', 'port-build')
+    port_build = os.path.join(em_x11_root, 'build', 'port-build')
     if os.path.isdir(port_build):
         logger.info('Clearing em-x11 port build: %s', port_build)
         shutil.rmtree(port_build)
@@ -209,22 +209,22 @@ def process_args(ports):
     --js-library injects the bridge functions.  --pre-js injects the
     default Host IIFE so Layer 1 (zero JS) mode auto-creates a Host
     on Module.canvas.  Users who want a custom Host can set
-    Module['emx11NoAutoStart'] = true and call initEmX11() manually.
+    Module['emX11NoAutoStart'] = true and call initEmX11() manually.
 
     In the SIDE_MODULE path (Pyodide dlopen) the EM_JS bodies carry
     the implementations; the JS library and default host are only
     needed for the static-link path.
     """
-    emx11_root = find_emx11_root()
-    if not emx11_root:
+    em_x11_root = find_em_x11_root()
+    if not em_x11_root:
         return []
-    include_dir = os.path.join(emx11_root, 'native', 'include')
-    js_library = os.path.join(emx11_root, 'native', 'src', 'lib', 'library_emx11.js')
-    default_host = os.path.join(emx11_root, 'build', 'artifacts', 'emx11-default-host.js')
+    include_dir = os.path.join(em_x11_root, 'native', 'include')
+    js_library = os.path.join(em_x11_root, 'native', 'src', 'lib', 'library_em-x11.js')
+    default_host = os.path.join(em_x11_root, 'build', 'artifacts', 'em-x11-default-host.js')
     args = ['-I' + include_dir]
     if os.path.exists(js_library):
         args.append('--js-library=' + js_library)
-    shell_file = os.path.join(emx11_root, 'tools', 'ports', 'shell.html')
+    shell_file = os.path.join(em_x11_root, 'tools', 'ports', 'shell.html')
     if os.path.exists(default_host):
         args.append('--pre-js=' + default_host)
     if os.path.exists(shell_file):
@@ -252,4 +252,4 @@ def process_dependencies(settings):
 
 
 def show():
-    return 'em-x11 (-sUSE_EMX11 or --use-port=emx11; %s license)' % LICENSE
+    return 'em-x11 (-sUSE_EM_X11 or --use-port=em_x11; %s license)' % LICENSE

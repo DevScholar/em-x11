@@ -14,7 +14,7 @@
  * anything.
  */
 
-import type { EmX11 } from '../api/emx11.js';
+import type { EmX11 } from '../api/em-x11.js';
 import type { Process } from '../api/types.js';
 
 export interface LaunchXcalcOptions {

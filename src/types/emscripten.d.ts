@@ -121,22 +121,22 @@ export interface Point {
 /**
  * The em-x11 Host interface. The TypeScript Host class in
  * src/host/index.ts implements this so the C-side EM_JS bridges
- * (native/emx11/bridges.c) and the JS library
- * (native/src/lib/library_emx11.js) share one dispatch table.
+ * (native/em_x11/bridges.c) and the JS library
+ * (native/src/lib/library_em-x11.js) share one dispatch table.
  *
- * The Host is passed to the wasm Module via Module['emx11Host']
+ * The Host is passed to the wasm Module via Module['emX11Host']
  * (flat Module property, per emscripten convention), set by
  * createEmX11() through moduleOverrides.
- * library_emx11.js reads it in $EmX11Host.init() at startup.
+ * library_em-x11.js reads it in $EmX11Host.init() at startup.
  */
 /** Legacy type bundle for the internal Host slots. These are now set
- * on Module['emx11Host'] / Module['emx11Caches'] / Module['emx11Debug']
+ * on Module['emX11Host'] / Module['emX11Caches'] / Module['emX11Debug']
  * (flat Module properties per emscripten convention), not on a
  * globalThis namespace. The types remain so Host and the JS library
  * share the same shape; only the access path changed. */
 export interface EmX11Global {
   /** Host facade dispatched into by every EM_JS body.
-   *  Set via Module['emx11Host'] by createEmX11. */
+   *  Set via Module['emX11Host'] by createEmX11. */
   _bridge?: EmX11Host;
   /** Bridge-owned scratchpads (font measure ctx, font cache, text
    *  cache, property stash). Lazy-initialised by the bridges
@@ -176,10 +176,10 @@ export interface EmX11Global {
 }
 
 /**
- * The em-x11 host bridge facade, installed under Module['emx11Host']
+ * The em-x11 host bridge facade, installed under Module['emX11Host']
  * by Host.attachToBridge(). The C side calls into this via EM_JS bodies
- * in native/emx11/bridges.c (side-module path) or via the JS library
- * in native/src/lib/library_emx11.js (static-link path).
+ * in native/em_x11/bridges.c (side-module path) or via the JS library
+ * in native/src/lib/library_em-x11.js (static-link path).
  */
 export interface EmX11Host {
   onInit(screenWidth: number, screenHeight: number): void;
@@ -444,7 +444,7 @@ export interface EmX11Host {
   /** Defer pointer-window repoll across one event-loop tick. C-side
    *  XMapWindow / XUnmapWindow request this when state actually
    *  changed; the host setTimeout(0)s a ccall back into the named
-   *  conn's `emx11_repoll_pointer_window_now` so the synthetic
+   *  conn's `em_x11_repoll_pointer_window_now` so the synthetic
    *  crossings hit the queue only after the caller's wasm dispatch
    *  has unwound. Coalesces bursts on the same conn. */
   onScheduleRepoll(connId: number): void;
@@ -458,7 +458,7 @@ export interface EmX11Host {
   onXimClearFocus(): void;
   onXimSetSpot(window: number, x: number, y: number): void;
 
-  /** Tcl notifier setTimerProc bridge (libemx11/notifier.c). `ms < 0`
+  /** Tcl notifier setTimerProc bridge (libem_x11/notifier.c). `ms < 0`
    *  means Tcl passed timePtr == NULL ("no timer"); otherwise schedule
    *  a pump wake at +ms relative. */
   onTclSetTimer(ms: number): void;
@@ -476,7 +476,7 @@ export interface EmX11Host {
 
   /** Cross-process signal delivery (signal.c `kill()` bridge).  The
    *  host finds the target wasm module by pid (= connId) and ccalls
-   *  `emx11_signal_set_pending` on it.  The signal is delivered at the
+   *  `em_x11_signal_set_pending` on it.  The signal is delivered at the
    *  target's next cooperative yield point. */
   onSignalDeliver(pid: number, sig: number): void;
 
@@ -497,8 +497,8 @@ declare global {
    */
   // eslint-disable-next-line no-var
   var Module: {
-    emx11Host?: import('./emscripten.js').EmX11Host;
-    emx11Caches?: {
+    emX11Host?: import('./emscripten.js').EmX11Host;
+    emX11Caches?: {
       measureCtx?: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
       fontCache?: Map<string, { ascent: number; descent: number; maxW: number; widths: Int32Array }>;
       textCache?: Map<string, number>;
@@ -506,7 +506,7 @@ declare global {
       shapeStash?: { id: number; rects: import('./emscripten.js').ShapeRect[] } | null;
       childrenStash?: { parent: number; kids: number[] } | null;
     };
-    emx11Debug?: {
+    emX11Debug?: {
       traceHit: boolean;
       traceHitNext: boolean;
       traceMotion: boolean;
@@ -517,10 +517,10 @@ declare global {
       traceMove: boolean;
       traceQp: boolean;
     };
-    emx11ClipboardBytes?: Uint8Array | null;
+    emX11ClipboardBytes?: Uint8Array | null;
     specialHTMLTargets?: Record<string, unknown>;
   };
 }
 
-// The Host is passed via Module['emx11Host'] (flat Module property,
-// per emscripten convention).  See library_emx11.js $EmX11Host.init().
+// The Host is passed via Module['emX11Host'] (flat Module property,
+// per emscripten convention).  See library_em-x11.js $EmX11Host.init().

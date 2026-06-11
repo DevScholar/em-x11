@@ -282,7 +282,7 @@ export class InputBridge {
     const lx = origin ? e.x - origin.ax : e.x;
     const ly = origin ? e.y - origin.ay : e.y;
     module.ccall(
-      'emx11_push_motion_event',
+      'em_x11_push_motion_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number'],
       [target, lx, ly, e.x, e.y, e.modifiers],
@@ -300,15 +300,15 @@ export class InputBridge {
     /* Stage the typed UTF-8 (if any) so Xutf8LookupString in wasm
      * returns it for the matching XKeyEvent. Empty string clears the
      * slot so a KeyRelease can't inherit text from a previous KeyPress. */
-    module.ccall('emx11_set_pending_key_text', null, ['string'],
+    module.ccall('em_x11_set_pending_key_text', null, ['string'],
                  [e.text ?? '']);
     /* New entry point: pass keycode + keysym separately so the wasm
      * side stores the layout-independent physical key in XKeyEvent
      * (XkbGetMap-friendly) without losing the layout-resolved keysym
-     * that drives bindings. Old emx11_push_key_event is still exported
+     * that drives bindings. Old em_x11_push_key_event is still exported
      * for legacy consumers (it derives keycode by reverse keysym lookup). */
     module.ccall(
-      'emx11_push_key_event_kc',
+      'em_x11_push_key_event_kc',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
       [xType, focus, e.keycode, e.keysym, e.modifiers, 0, 0],
@@ -329,18 +329,18 @@ export class InputBridge {
     if (focus === null) return;
     const module = this.moduleForWindow(focus);
     if (!module) return;
-    module.ccall('emx11_set_pending_key_text', null, ['string'], [text]);
+    module.ccall('em_x11_set_pending_key_text', null, ['string'], [text]);
     /* Synthetic text-only keys have no physical origin -- keycode 0
      * so XkbGetMap consumers don't misattribute IME / paste bytes to
      * a real key on the user's keyboard. */
     module.ccall(
-      'emx11_push_key_event_kc', null,
+      'em_x11_push_key_event_kc', null,
       ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
       [X_KeyPress, focus, 0, 0, 0, 0, 0],
     );
-    module.ccall('emx11_set_pending_key_text', null, ['string'], ['']);
+    module.ccall('em_x11_set_pending_key_text', null, ['string'], ['']);
     module.ccall(
-      'emx11_push_key_event_kc', null,
+      'em_x11_push_key_event_kc', null,
       ['number', 'number', 'number', 'number', 'number', 'number', 'number'],
       [X_KeyRelease, focus, 0, 0, 0, 0, 0],
     );
@@ -403,7 +403,7 @@ export class InputBridge {
         this.dragModule = null;
       }
       grab.module.ccall(
-        'emx11_push_button_event',
+        'em_x11_push_button_event',
         null,
         ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
         [xType, target, lx, ly, e.x, e.y, e.button, x11State],
@@ -491,7 +491,7 @@ export class InputBridge {
         const lx = origin ? e.x - origin.ax : e.x;
         const ly = origin ? e.y - origin.ay : e.y;
         this.dragModule.ccall(
-          'emx11_push_button_event',
+          'em_x11_push_button_event',
           null,
           ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
           [xType, deliveryWin, lx, ly, e.x, e.y, e.button, x11State],
@@ -547,7 +547,7 @@ export class InputBridge {
       this.dragModule = module;
     }
     module.ccall(
-      'emx11_push_button_event',
+      'em_x11_push_button_event',
       null,
       ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
       [xType, deliveryWin, lx, ly, e.x, e.y, e.button, x11State],
@@ -677,10 +677,10 @@ export class InputBridge {
     });
 
     /* Browser → Tk clipboard staging. The C-side bridge
-     * (emx11_js_clipboard_read_begin / _fetch in native/emx11/bridges.c) has
+     * (em_x11_js_clipboard_read_begin / _fetch in native/em_x11/bridges.c) has
      * to answer synchronously because runTcl is sync (no JSPI unwinding
      * on the clipboard path), so we
-     * pre-fill `Module?.['emx11ClipboardBytes']` ahead of every paste-
+     * pre-fill `Module?.['emX11ClipboardBytes']` ahead of every paste-
      * equivalent gesture:
      *
      *   1. document `paste` events — ClipboardEvent.clipboardData is
@@ -696,7 +696,7 @@ export class InputBridge {
       const text = e.clipboardData?.getData('text/plain');
       if (typeof text === 'string') {
         if (typeof Module !== 'undefined') {
-          Module['emx11ClipboardBytes'] = new TextEncoder().encode(text);
+          Module['emX11ClipboardBytes'] = new TextEncoder().encode(text);
         }
       }
     });
@@ -737,12 +737,12 @@ export class InputBridge {
       if (hasFocus && isPasteCombo(e) && navigator.clipboard?.readText) {
         /* Defer the keydown until clipboard text is staged. Tk processes
          * the Ctrl+V on its next event-pump tick, by which point
-         * __emx11ClipboardBytes is set. We dispatch the keydown
+         * __emX11ClipboardBytes is set. We dispatch the keydown
          * unconditionally on resolve OR reject so a denied permission
          * doesn't swallow the keystroke. */
         navigator.clipboard.readText().then((text) => {
           if (typeof Module !== 'undefined') {
-            Module['emx11ClipboardBytes'] = new TextEncoder().encode(text);
+            Module['emX11ClipboardBytes'] = new TextEncoder().encode(text);
           }
         }).catch(() => {
           /* permission denied / not focused — leave cache as-is */
@@ -800,5 +800,5 @@ function isPasteCombo(e: KeyboardEvent): boolean {
 
 declare global {
   // eslint-disable-next-line no-var
-  var __emx11ClipboardBytes: Uint8Array | null | undefined;
+  var __emX11ClipboardBytes: Uint8Array | null | undefined;
 }

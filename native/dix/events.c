@@ -1,13 +1,13 @@
 /*
  * Input dispatch: hit-testing, pointer-window tracking, and the C entry
- * points the JS host calls (emx11_push_button_event / motion / key /
+ * points the JS host calls (em_x11_push_button_event / motion / key /
  * expose / map_request / reparent_notify). Queue plumbing lives in
  * event_queue.c; XSendEvent + focus in event_send.c; keysyms in
  * event_keysym.c.
  */
 
-#include "emx11_internal.h"
-#include "emx11_meta_layout.h"
+#include "em_x11_internal.h"
+#include "em_x11_meta_layout.h"
 
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/shape.h>
@@ -24,12 +24,12 @@ static void window_abs_origin(
   Display* dpy, EmxWindow* w, int* ax_out, int* ay_out, int* depth_out) {
   int ax = 0, ay = 0, depth = 0;
   EmxWindow* cur = w;
-  for (int guard = 0; cur && guard < EMX11_MAX_WINDOWS; guard++, depth++) {
+  for (int guard = 0; cur && guard < EM_X11_MAX_WINDOWS; guard++, depth++) {
     ax += cur->x;
     ay += cur->y;
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* parent = emx11_window_find(dpy, cur->parent);
+    EmxWindow* parent = em_x11_window_find(dpy, cur->parent);
     if (!parent) {
       /* Parent is owned by a different connection (e.g. xcalc
        * shell reparented under a twm-owned frame). Our local table
@@ -39,11 +39,11 @@ static void window_abs_origin(
        * input event lands at canvas-absolute - frame.position
        * inside the conn's coordinate system, and Xaw widgets
        * highlight the wrong button on hover. */
-      int buf[EMX11_ABS_ORIGIN_SIZE] = {0};
-      emx11_js_get_window_abs_origin(cur->parent, buf);
-      if (buf[EMX11_ABS_ORIGIN_PRESENT]) {
-        ax += buf[EMX11_ABS_ORIGIN_AX];
-        ay += buf[EMX11_ABS_ORIGIN_AY];
+      int buf[EM_X11_ABS_ORIGIN_SIZE] = {0};
+      em_x11_js_get_window_abs_origin(cur->parent, buf);
+      if (buf[EM_X11_ABS_ORIGIN_PRESENT]) {
+        ax += buf[EM_X11_ABS_ORIGIN_AX];
+        ay += buf[EM_X11_ABS_ORIGIN_AY];
       }
       break;
     }
@@ -77,7 +77,7 @@ static EmxWindow* hit_test(
   int best_depth = -1;
   int best_ax = 0, best_ay = 0;
 
-  for (int i = 0; i < EMX11_MAX_WINDOWS; i++) {
+  for (int i = 0; i < EM_X11_MAX_WINDOWS; i++) {
     EmxWindow* w = &dpy->windows[i];
     if (!w->in_use || !w->mapped)
       continue;
@@ -116,7 +116,7 @@ static EmxWindow* hit_test(
     }
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* p = emx11_window_find(dpy, cur->parent);
+    EmxWindow* p = em_x11_window_find(dpy, cur->parent);
     if (!p)
       break;      /* parent in another conn's table */
     ax -= cur->x; /* un-offset into parent frame */
@@ -171,7 +171,7 @@ static EmxWindow* walk_up_for_mask(Display* dpy,
     }
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* p = emx11_window_find(dpy, cur->parent);
+    EmxWindow* p = em_x11_window_find(dpy, cur->parent);
     if (!p)
       break;
     ax -= cur->x;
@@ -198,7 +198,7 @@ static unsigned int grab_button_count = 0;
 
 /* Active pointer grab (XGrabPointer). Tracked separately from the implicit
  * grab so crossing events carry mode=NotifyGrab (emit_crossing) and the
- * motion_target fallback (emx11_push_motion_event) can route to the grab
+ * motion_target fallback (em_x11_push_motion_event) can route to the grab
  * window when hit_test finds nothing. XGrabPointer also resets the stale
  * implicit grab so ButtonRelease routes to the window under the pointer
  * instead of the original press window -- needed for MenuButton/ComboBox
@@ -236,7 +236,7 @@ static Window last_pointer_window = None;
  * entries never see ButtonRelease: the C-side grab_window stays on the
  * button that opened the menu, and every subsequent button-up gets delivered
  * there instead of to the menu entry under the pointer. */
-void emx11_reset_implicit_grab(void) {
+void em_x11_reset_implicit_grab(void) {
   grab_window = None;
   grab_button_count = 0;
 }
@@ -249,11 +249,11 @@ static int
 win_is_inferior_of(Display* dpy, Window descendant, Window ancestor) {
   if (descendant == None || ancestor == None || descendant == ancestor)
     return 0;
-  EmxWindow* cur = emx11_window_find(dpy, descendant);
+  EmxWindow* cur = em_x11_window_find(dpy, descendant);
   while (cur && cur->parent != None && cur->parent != cur->id) {
     if (cur->parent == ancestor)
       return 1;
-    cur = emx11_window_find(dpy, cur->parent);
+    cur = em_x11_window_find(dpy, cur->parent);
   }
   return 0;
 }
@@ -296,7 +296,7 @@ static void emit_crossing(Display* dpy,
                           int x_root,
                           int y_root,
                           unsigned int state) {
-  EmxWindow* win = emx11_window_find(dpy, w);
+  EmxWindow* win = em_x11_window_find(dpy, w);
   if (!win)
     return;
   long mask = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
@@ -342,14 +342,14 @@ static void emit_crossing(Display* dpy,
   ev.xcrossing.focus = (w == dpy->focus_window);
   ev.xcrossing.state = state;
   ev.xcrossing.time = event_now();
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* Update last_pointer_window, emitting Leave on the outgoing window and
  * Enter on the incoming one. Called on every motion, on ButtonPress
  * (so the "first interaction is a click, no prior mousemove" path still
  * delivers the Enter that Tk's button bindings depend on), and from
- * emx11_repoll_pointer_window after a map/unmap that may have changed
+ * em_x11_repoll_pointer_window after a map/unmap that may have changed
  * the topmost window under a static pointer (twm root menu pop-up). */
 static void update_pointer_window(
   Display* dpy, Window cur, int x_root, int y_root, unsigned int state) {
@@ -379,11 +379,11 @@ static void update_pointer_window(
  * Called from window.c after XMapWindow / XUnmapWindow on this display.
  * `state` defaults to 0 since we have no fresh modifier sample to attach;
  * Tk and twm don't read xcrossing.state for menu logic. */
-void emx11_repoll_pointer_window(Display* dpy) {
+void em_x11_repoll_pointer_window(Display* dpy) {
   if (!dpy)
     return;
   int px = 0, py = 0;
-  emx11_js_pointer_xy(&px, &py);
+  em_x11_js_pointer_xy(&px, &py);
   int lx = 0, ly = 0;
   EmxWindow* cur = hit_test(dpy, px, py, 0, &lx, &ly);
   Window cur_id = cur ? cur->id : None;
@@ -400,24 +400,24 @@ void emx11_repoll_pointer_window(Display* dpy) {
  * divergence. cur_hint may name a window owned by another connection or
  * may be 0 (None); both are valid -- emit_crossing's mask check handles
  * the foreign / unowned cases by no-op'ing. */
-void emx11_repoll_pointer_window_hint(Display* dpy, Window cur_hint) {
+void em_x11_repoll_pointer_window_hint(Display* dpy, Window cur_hint) {
   if (!dpy)
     return;
   int px = 0, py = 0;
-  emx11_js_pointer_xy(&px, &py);
+  em_x11_js_pointer_xy(&px, &py);
   update_pointer_window(dpy, cur_hint, px, py, 0);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_button_event(int type,
-                             Window window,
-                             int x,
-                             int y,
-                             int x_root,
-                             int y_root,
-                             unsigned int button,
-                             unsigned int state) {
-  Display* dpy = emx11_get_display();
+void em_x11_push_button_event(int type,
+                              Window window,
+                              int x,
+                              int y,
+                              int x_root,
+                              int y_root,
+                              unsigned int button,
+                              unsigned int state) {
+  Display* dpy = em_x11_get_display();
   int lx = 0, ly = 0;
   EmxWindow* target;
 
@@ -425,7 +425,7 @@ void emx11_push_button_event(int type,
     /* Implicit grab: deliver ButtonRelease to the grab window even if
      * the pointer has moved elsewhere. Compute local coords from the
      * grab window's current absolute position. */
-    target = emx11_window_find(dpy, grab_window);
+    target = em_x11_window_find(dpy, grab_window);
     if (target) {
       int ax = 0, ay = 0, depth;
       window_abs_origin(dpy, target, &ax, &ay, &depth);
@@ -446,7 +446,7 @@ void emx11_push_button_event(int type,
      *   to frame/root with the mask → correct subscriber chosen
      * - Foreign host hint: not in this Display → fallback to hit_test */
     long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
-    target = emx11_window_find(dpy, window);
+    target = em_x11_window_find(dpy, window);
     if (target) {
       target = walk_up_for_mask(dpy, target, x_root, y_root, mask, &lx, &ly);
     } else {
@@ -457,7 +457,7 @@ void emx11_push_button_event(int type,
      * windows owned by another connection), route to the active
      * grab window. */
     if (!target && active_grab) {
-      target = emx11_window_find(dpy, active_grab_window);
+      target = em_x11_window_find(dpy, active_grab_window);
       if (target) {
         int ax = 0, ay = 0, depth;
         window_abs_origin(dpy, target, &ax, &ay, &depth);
@@ -480,11 +480,11 @@ void emx11_push_button_event(int type,
 
   /* Diagnostic trace: dump the C-side resolution so we can see what
    * each wasm process receives. Toggled via
-   * `Module['emx11Debug'].traceCBtn` (set from DevTools). Gated
+   * `Module['emX11Debug'].traceCBtn` (set from DevTools). Gated
    * inside EM_ASM so it's effectively free when disabled. */
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceCBtn) {
         console.log('[c-btn] conn=' + $0 + ' type=' + $1 + ' hint=' +
                     ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 + ' button=' + $5 +
@@ -520,13 +520,13 @@ void emx11_push_button_event(int type,
   ev.xbutton.state = state;
   ev.xbutton.same_screen = True;
   ev.xbutton.time = event_now();
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_motion_event(
+void em_x11_push_motion_event(
   Window window, int x, int y, int x_root, int y_root, unsigned int state) {
-  Display* dpy = emx11_get_display();
+  Display* dpy = em_x11_get_display();
 
   /* Pointer-window tracking: JS host's findWindowAt is z-order-
    * aware. Trust it first; hit_test is depth-based and can't
@@ -546,7 +546,7 @@ void emx11_push_motion_event(
    * (emit_crossing checks active_grab). */
   {
     Window cur_pw = window;
-    if (cur_pw == None || !emx11_window_find(dpy, cur_pw)) {
+    if (cur_pw == None || !em_x11_window_find(dpy, cur_pw)) {
       int lx_fb = 0, ly_fb = 0;
       EmxWindow* pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
       cur_pw = pt ? pt->id : None;
@@ -564,13 +564,13 @@ void emx11_push_motion_event(
   bool via_grab = false;
   const char* path_label = "none";
   if (grab_window != None) {
-    motion_target = emx11_window_find(dpy, grab_window);
+    motion_target = em_x11_window_find(dpy, grab_window);
     if (!motion_target || !motion_target->mapped)
       return;
     via_grab = true;
     path_label = "implicit_grab";
   } else {
-    motion_target = emx11_window_find(dpy, window);
+    motion_target = em_x11_window_find(dpy, window);
     if (motion_target) {
       int unused_lx = 0, unused_ly = 0;
       motion_target = walk_up_for_mask(dpy,
@@ -592,7 +592,7 @@ void emx11_push_motion_event(
       path_label = motion_target ? "hit_test" : "none";
     }
     if (!motion_target && active_grab) {
-      motion_target = emx11_window_find(dpy, active_grab_window);
+      motion_target = em_x11_window_find(dpy, active_grab_window);
       path_label = motion_target ? "active_grab_fb" : "none";
     }
     if (!motion_target)
@@ -609,10 +609,10 @@ void emx11_push_motion_event(
    * without the gate there's nothing to bypass. */
 
   /* Decision-path diagnostic trace. Toggled via
-   * `Module['emx11Debug'].traceCMot` (set from DevTools). */
+   * `Module['emX11Debug'].traceCMot` (set from DevTools). */
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceCMot) {
         console.log('[c-mot] conn=' + $0 + ' rx=' + $1 + ' ry=' + $2 +
                     ' hint=' + ($3 >>> 0) + ' path=' +
@@ -649,45 +649,45 @@ void emx11_push_motion_event(
   ev.xmotion.is_hint = NotifyNormal;
   ev.xmotion.same_screen = True;
   ev.xmotion.time = event_now();
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_key_event_kc(int type,
-                             Window window,
-                             unsigned int keycode,
-                             unsigned int keysym,
-                             unsigned int state,
-                             int x,
-                             int y);
+void em_x11_push_key_event_kc(int type,
+                              Window window,
+                              unsigned int keycode,
+                              unsigned int keysym,
+                              unsigned int state,
+                              int x,
+                              int y);
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_key_event(int type,
-                          Window window,
-                          unsigned int keysym,
-                          unsigned int state,
-                          int x,
-                          int y) {
+void em_x11_push_key_event(int type,
+                           Window window,
+                           unsigned int keysym,
+                           unsigned int state,
+                           int x,
+                           int y) {
   /* Legacy entry point: only the keysym is supplied; we derive a
    * synthetic keycode by reverse-looking-up the keysym in
    * keysym_table. Kept so external consumers built against an older
    * em-x11 still link. New host bridges should call
-   * emx11_push_key_event_kc which threads the physical keycode
+   * em_x11_push_key_event_kc which threads the physical keycode
    * through from the browser's KeyboardEvent.code. */
-  Display* dpy = emx11_get_display();
-  KeyCode kc = emx11_keysym_to_keycode(dpy, (KeySym)keysym);
-  emx11_push_key_event_kc(type, window, (unsigned int)kc, keysym, state, x, y);
+  Display* dpy = em_x11_get_display();
+  KeyCode kc = em_x11_keysym_to_keycode(dpy, (KeySym)keysym);
+  em_x11_push_key_event_kc(type, window, (unsigned int)kc, keysym, state, x, y);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_key_event_kc(int type,
-                             Window window,
-                             unsigned int keycode,
-                             unsigned int keysym,
-                             unsigned int state,
-                             int x,
-                             int y) {
-  Display* dpy = emx11_get_display();
+void em_x11_push_key_event_kc(int type,
+                              Window window,
+                              unsigned int keycode,
+                              unsigned int keysym,
+                              unsigned int state,
+                              int x,
+                              int y) {
+  Display* dpy = em_x11_get_display();
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xkey.type = type;
@@ -709,12 +709,12 @@ void emx11_push_key_event_kc(int type,
   if (keycode > 0 && keycode < 256 && keysym != 0) {
     dpy->keysym_table[keycode] = (KeySym)keysym;
   }
-  /* Record the slot BEFORE push -- emx11_event_queue_push will write
+  /* Record the slot BEFORE push -- em_x11_event_queue_push will write
    * to dpy->event_tail then advance it. The text snapshot has to land
    * in the same slot. */
   unsigned int slot = dpy->event_tail;
-  if (emx11_event_queue_push(dpy, &ev)) {
-    emx11_xim_capture_key_text(dpy, slot);
+  if (em_x11_event_queue_push(dpy, &ev)) {
+    em_x11_xim_capture_key_text(dpy, slot);
   } else {
     /* Queue full: drop the staged text too so the next successful
      * push doesn't claim text that belonged to the dropped event. */
@@ -724,8 +724,8 @@ void emx11_push_key_event_kc(int type,
 }
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_expose_event(Window window, int x, int y, int w, int h) {
-  Display* dpy = emx11_get_display();
+void em_x11_push_expose_event(Window window, int x, int y, int w, int h) {
+  Display* dpy = em_x11_get_display();
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xexpose.type = Expose;
@@ -735,7 +735,7 @@ void emx11_push_expose_event(Window window, int x, int y, int w, int h) {
   ev.xexpose.y = y;
   ev.xexpose.width = w;
   ev.xexpose.height = h;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* -- Substructure redirect dispatch ---------------------------------------
@@ -747,15 +747,15 @@ void emx11_push_expose_event(Window window, int x, int y, int w, int h) {
  */
 
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_map_request(Window parent, Window window) {
-  Display* dpy = emx11_get_display();
+void em_x11_push_map_request(Window parent, Window window) {
+  Display* dpy = em_x11_get_display();
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xmaprequest.type = MapRequest;
   ev.xmaprequest.display = dpy;
   ev.xmaprequest.parent = parent;
   ev.xmaprequest.window = window;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* Cross-connection ReparentNotify delivery. Called by the Host on the
@@ -769,7 +769,7 @@ void emx11_push_map_request(Window parent, Window window) {
  *      pre-reparent absolute coords; ButtonPress/Motion get translated
  *      with the wrong offset, hover/click hit the wrong widget, and
  *      Tk/Xt's redraw paths (which read x,y from local shadow) draw at
- *      the wrong place too. See project_emx11_mask_gating.md for the
+ *      the wrong place too. See project_em_x11_mask_gating.md for the
  *      adjacent crash this enables, and the session notes for why the
  *      shadow fix has to be unconditional rather than mask-gated.
  *
@@ -779,9 +779,9 @@ void emx11_push_map_request(Window parent, Window window) {
  *      DeliverEvents gating; Xt's Shell widget selects StructureNotify
  *      on its shell, so it does receive this. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_reparent_notify(Window window, Window parent, int x, int y) {
-  Display* dpy = emx11_get_display();
-  EmxWindow* win = emx11_window_find(dpy, window);
+void em_x11_push_reparent_notify(Window window, Window parent, int x, int y) {
+  Display* dpy = em_x11_get_display();
+  EmxWindow* win = em_x11_window_find(dpy, window);
   if (win) {
     win->parent = parent;
     win->x = x;
@@ -794,7 +794,7 @@ void emx11_push_reparent_notify(Window window, Window parent, int x, int y) {
   if (win && (win->event_mask & StructureNotifyMask))
     wants = true;
   if (!wants && parent != None) {
-    EmxWindow* p = emx11_window_find(dpy, parent);
+    EmxWindow* p = em_x11_window_find(dpy, parent);
     if (p && (p->event_mask & SubstructureNotifyMask))
       wants = true;
   }
@@ -811,13 +811,13 @@ void emx11_push_reparent_notify(Window window, Window parent, int x, int y) {
   ev.xreparent.x = x;
   ev.xreparent.y = y;
   ev.xreparent.override_redirect = win ? win->override_redirect : False;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* Cross-connection ConfigureNotify delivery. Called by the Host on the
  * window's *owner* module after a (typically WM-issued) XConfigureWindow
  * / XMoveResizeWindow / XResizeWindow / XMoveWindow on the owner's
- * shell. Mirrors emx11_push_reparent_notify:
+ * shell. Mirrors em_x11_push_reparent_notify:
  *
  *   1. Update the local EmxWindow shadow unconditionally so subsequent
  *      drawing / hit-testing on the owner uses the correct geometry.
@@ -830,10 +830,10 @@ void emx11_push_reparent_notify(Window window, Window parent, int x, int y) {
  *      Xt's Shell widget and Tk's TopLevel both select StructureNotify
  *      on their shells, which is what triggers their re-layout pass. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_configure_notify(
+void em_x11_push_configure_notify(
   Window window, int x, int y, int width, int height, int border_width) {
-  Display* dpy = emx11_get_display();
-  EmxWindow* win = emx11_window_find(dpy, window);
+  Display* dpy = em_x11_get_display();
+  EmxWindow* win = em_x11_window_find(dpy, window);
   if (win) {
     win->x = x;
     win->y = y;
@@ -846,7 +846,7 @@ void emx11_push_configure_notify(
   if (win && (win->event_mask & StructureNotifyMask))
     wants = true;
   if (!wants && win && win->parent != None) {
-    EmxWindow* p = emx11_window_find(dpy, win->parent);
+    EmxWindow* p = em_x11_window_find(dpy, win->parent);
     if (p && (p->event_mask & SubstructureNotifyMask))
       wants = true;
   }
@@ -874,7 +874,7 @@ void emx11_push_configure_notify(
   ev.xconfigure.border_width = border_width;
   ev.xconfigure.above = None;
   ev.xconfigure.override_redirect = win ? win->override_redirect : False;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* Cross-connection DestroyNotify dispatch. Called by the Host when a
@@ -890,9 +890,9 @@ void emx11_push_configure_notify(
  * here because by the time this fires, the window's own owner is
  * already gone -- nobody on this side cares. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_destroy_notify(Window window, Window event_window) {
-  Display* dpy = emx11_get_display();
-  EmxWindow* evw = emx11_window_find(dpy, event_window);
+void em_x11_push_destroy_notify(Window window, Window event_window) {
+  Display* dpy = em_x11_get_display();
+  EmxWindow* evw = em_x11_window_find(dpy, event_window);
   if (!evw || !(evw->event_mask & SubstructureNotifyMask))
     return;
 
@@ -902,7 +902,7 @@ void emx11_push_destroy_notify(Window window, Window event_window) {
   ev.xdestroywindow.display = dpy;
   ev.xdestroywindow.event = event_window;
   ev.xdestroywindow.window = window;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* Cross-connection ShapeNotify dispatch. Called by the Host when a window's
@@ -910,15 +910,15 @@ void emx11_push_destroy_notify(Window window, Window event_window) {
  * Mirrors the ShapeNotify event layout in shapeproto.h: eventBase (64) +
  * ShapeNotify (0) = type 64. */
 EMSCRIPTEN_KEEPALIVE
-void emx11_push_shape_notify(Window window,
-                             int kind,
-                             int x,
-                             int y,
-                             unsigned int width,
-                             unsigned int height,
-                             Bool shaped) {
-  Display* dpy = emx11_get_display();
-  EmxWindow* win = emx11_window_find(dpy, window);
+void em_x11_push_shape_notify(Window window,
+                              int kind,
+                              int x,
+                              int y,
+                              unsigned int width,
+                              unsigned int height,
+                              Bool shaped) {
+  Display* dpy = em_x11_get_display();
+  EmxWindow* win = em_x11_window_find(dpy, window);
   /* Gate when the window is local: only deliver if the owner selected
    * ShapeNotifyMask. When win==NULL the window is foreign and the Host
    * already filtered subscribers before ccalling us. */
@@ -940,7 +940,7 @@ void emx11_push_shape_notify(Window window,
   sev->height = height;
   sev->time = event_now();
   sev->shaped = shaped;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* -- Passive input grabs -- */
@@ -956,15 +956,15 @@ int XGrabButton(Display* dpy,
                 Window confine_to,
                 Cursor cursor) {
   (void)dpy;
-  emx11_js_grab_button(grab_window,
-                       button,
-                       modifiers,
-                       owner_events ? 1 : 0,
-                       event_mask,
-                       pointer_mode,
-                       keyboard_mode,
-                       confine_to,
-                       cursor);
+  em_x11_js_grab_button(grab_window,
+                        button,
+                        modifiers,
+                        owner_events ? 1 : 0,
+                        event_mask,
+                        pointer_mode,
+                        keyboard_mode,
+                        confine_to,
+                        cursor);
   return 1;
 }
 
@@ -973,7 +973,7 @@ int XUngrabButton(Display* dpy,
                   unsigned int modifiers,
                   Window grab_window) {
   (void)dpy;
-  emx11_js_ungrab_button(grab_window, button, modifiers);
+  em_x11_js_ungrab_button(grab_window, button, modifiers);
   return 1;
 }
 
@@ -1000,8 +1000,8 @@ int XUngrabPointer(Display* dpy, Time t) {
   dpy->request++;
   active_grab = false;
   active_grab_window = None;
-  emx11_js_set_grab_cursor(0);
-  emx11_js_ungrab_pointer();
+  em_x11_js_set_grab_cursor(0);
+  em_x11_js_ungrab_pointer();
   return 1;
 }
 
@@ -1021,7 +1021,7 @@ int XGrabPointer(Display* dpy,
   (void)t;
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceGrab) {
         console.log('[c-grab] XGrabPointer conn=' + $0 + ' grab_win=' +
                     ($1 >>> 0) + ' owner_events=' + $2 + ' cursor=' + $3);
@@ -1032,11 +1032,11 @@ int XGrabPointer(Display* dpy,
     owner_events ? 1 : 0,
     (unsigned int)cursor);
   dpy->request++;
-  emx11_reset_implicit_grab();
+  em_x11_reset_implicit_grab();
   active_grab = true;
   active_grab_window = grab_window;
-  emx11_js_set_grab_cursor((unsigned int)cursor);
-  emx11_js_grab_pointer(
+  em_x11_js_set_grab_cursor((unsigned int)cursor);
+  em_x11_js_grab_pointer(
     (unsigned int)dpy->conn_id, grab_window, owner_events ? 1 : 0);
   return GrabSuccess;
 }
@@ -1100,19 +1100,19 @@ Bool XQueryPointer(Display* dpy,
                    int* win_y_return,
                    unsigned int* mask_return) {
   int px = 0, py = 0;
-  emx11_js_pointer_xy(&px, &py);
+  em_x11_js_pointer_xy(&px, &py);
   int wx = px, wy = py;
   if (w != None) {
-    int origin[EMX11_ABS_ORIGIN_SIZE] = {0};
-    emx11_js_get_window_abs_origin(w, origin);
-    if (origin[EMX11_ABS_ORIGIN_PRESENT]) {
-      wx = px - origin[EMX11_ABS_ORIGIN_AX];
-      wy = py - origin[EMX11_ABS_ORIGIN_AY];
+    int origin[EM_X11_ABS_ORIGIN_SIZE] = {0};
+    em_x11_js_get_window_abs_origin(w, origin);
+    if (origin[EM_X11_ABS_ORIGIN_PRESENT]) {
+      wx = px - origin[EM_X11_ABS_ORIGIN_AX];
+      wy = py - origin[EM_X11_ABS_ORIGIN_AY];
     }
   }
   EM_ASM(
     {
-      var d = Module['emx11Debug'];
+      var d = Module['emX11Debug'];
       if (d && d.traceQp) {
         console.log('[c-qp] conn=' + $0 + ' win=' + $1 + ' root=(' + $2 + ',' +
                     $3 + ')' + ' local=(' + $4 + ',' + $5 + ')');

@@ -3,8 +3,8 @@
  *
  * Per-context model:
  *   - Each GLXContext owns an OffscreenCanvas (allocated host-side via
- *     emx11_js_glx_create_context, registered in
- *     Module.specialHTMLTargets["!emx11-glx-N"]) and the
+ *     em_x11_js_glx_create_context, registered in
+ *     Module.specialHTMLTargets["!em-x11-glx-N"]) and the
  *     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE that emscripten_webgl_create_context
  *     returns when we point it at that target.
  *   - glXMakeCurrent toggles the active emscripten WebGL context. The
@@ -18,7 +18,7 @@
  * FBConfig query is canned (single 32-bit RGBA + 24-bit depth).
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <GL/gl.h>
 #include <GL/glx.h>
@@ -32,27 +32,27 @@
 #include <string.h>
 
 /* Bridges in src/bridges.c (EM_JS). */
-extern int emx11_js_glx_create_context(int width,
-                                       int height,
-                                       int outTargetIdPtr,
-                                       int outTargetIdLen);
-extern void emx11_js_glx_destroy_context(int id);
-extern void emx11_js_glx_swap_buffers(int id, unsigned int drawable);
-extern void emx11_js_glx_resize(int id, int width, int height);
-extern void emx11_js_glx_legacy_init_once(void);
+extern int em_x11_js_glx_create_context(int width,
+                                        int height,
+                                        int outTargetIdPtr,
+                                        int outTargetIdLen);
+extern void em_x11_js_glx_destroy_context(int id);
+extern void em_x11_js_glx_swap_buffers(int id, unsigned int drawable);
+extern void em_x11_js_glx_resize(int id, int width, int height);
+extern void em_x11_js_glx_legacy_init_once(void);
 
 /* Default initial GL surface size. glXCreateContext doesn't get a
  * drawable, so we allocate at a reasonable default and resize on first
  * MakeCurrent. glxgears starts at 300x300; pick something close. */
-#define EMX11_GLX_DEFAULT_W 300
-#define EMX11_GLX_DEFAULT_H 300
+#define EM_X11_GLX_DEFAULT_W 300
+#define EM_X11_GLX_DEFAULT_H 300
 
 struct __GLXcontextRec {
   Display* dpy;
   XVisualInfo vis;
   Bool direct;
   int js_id;          /* GlxManager-side id; 0 means uninitialised. */
-  char target_id[32]; /* "!emx11-glx-N" registered in specialHTMLTargets. */
+  char target_id[32]; /* "!em-x11-glx-N" registered in specialHTMLTargets. */
   EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webgl; /* 0 until first MakeCurrent. */
   int width;
   int height;
@@ -110,7 +110,7 @@ const char* glXGetClientString(Display* dpy, int name) {
 
 /* --- visual / fbconfig --------------------------------------------------- */
 
-static void emx11_fill_default_visual(Display* dpy, XVisualInfo* out) {
+static void em_x11_fill_default_visual(Display* dpy, XVisualInfo* out) {
   memset(out, 0, sizeof(*out));
   /* Use the display's actual root visual so XCreateColormap /
    * XCreateWindow accept the visinfo->visual pointer. display.c
@@ -133,7 +133,7 @@ XVisualInfo* glXChooseVisual(Display* dpy, int screen, int* attribList) {
   XVisualInfo* vi = (XVisualInfo*)malloc(sizeof(*vi));
   if (!vi)
     return NULL;
-  emx11_fill_default_visual(dpy, vi);
+  em_x11_fill_default_visual(dpy, vi);
   return vi;
 }
 
@@ -230,14 +230,14 @@ static Display* g_current_display = NULL;
 
 /* Lazy WebGL context creation: postponed until first MakeCurrent so
  * the GL surface size can match the drawable. Returns True on success. */
-static Bool emx11_glx_realize(GLXContext ctx) {
+static Bool em_x11_glx_realize(GLXContext ctx) {
   if (ctx->webgl)
     return True;
 
-  int js_id = emx11_js_glx_create_context(ctx->width,
-                                          ctx->height,
-                                          (int)(uintptr_t)ctx->target_id,
-                                          (int)sizeof(ctx->target_id));
+  int js_id = em_x11_js_glx_create_context(ctx->width,
+                                           ctx->height,
+                                           (int)(uintptr_t)ctx->target_id,
+                                           (int)sizeof(ctx->target_id));
   if (js_id <= 0)
     return False;
   ctx->js_id = js_id;
@@ -258,7 +258,7 @@ static Bool emx11_glx_realize(GLXContext ctx) {
 
   ctx->webgl = emscripten_webgl_create_context(ctx->target_id, &attrs);
   if (!ctx->webgl) {
-    emx11_js_glx_destroy_context(ctx->js_id);
+    em_x11_js_glx_destroy_context(ctx->js_id);
     ctx->js_id = 0;
     return False;
   }
@@ -277,8 +277,8 @@ GLXContext glXCreateContext(Display* dpy,
   if (vis)
     ctx->vis = *vis;
   ctx->direct = direct;
-  ctx->width = EMX11_GLX_DEFAULT_W;
-  ctx->height = EMX11_GLX_DEFAULT_H;
+  ctx->width = EM_X11_GLX_DEFAULT_W;
+  ctx->height = EM_X11_GLX_DEFAULT_H;
   /* webgl context creation deferred to MakeCurrent so we know the
    * drawable's actual size before allocating the GL surface. */
   return ctx;
@@ -292,7 +292,7 @@ void glXDestroyContext(Display* dpy, GLXContext ctx) {
     emscripten_webgl_destroy_context(ctx->webgl);
   }
   if (ctx->js_id) {
-    emx11_js_glx_destroy_context(ctx->js_id);
+    em_x11_js_glx_destroy_context(ctx->js_id);
   }
   if (ctx == g_current_ctx) {
     g_current_ctx = NULL;
@@ -306,7 +306,7 @@ void glXDestroyContext(Display* dpy, GLXContext ctx) {
  * the demo's glViewport (sized after the X window) hits an identically
  * sized framebuffer. */
 static void
-emx11_glx_match_drawable(GLXContext ctx, Display* dpy, GLXDrawable drawable) {
+em_x11_glx_match_drawable(GLXContext ctx, Display* dpy, GLXDrawable drawable) {
   if (!dpy || !drawable)
     return;
   XWindowAttributes wa;
@@ -319,7 +319,7 @@ emx11_glx_match_drawable(GLXContext ctx, Display* dpy, GLXDrawable drawable) {
   ctx->width = w;
   ctx->height = h;
   if (ctx->js_id)
-    emx11_js_glx_resize(ctx->js_id, w, h);
+    em_x11_js_glx_resize(ctx->js_id, w, h);
 }
 
 Bool glXMakeCurrent(Display* dpy, GLXDrawable drawable, GLXContext ctx) {
@@ -334,9 +334,9 @@ Bool glXMakeCurrent(Display* dpy, GLXDrawable drawable, GLXContext ctx) {
    * first frame is rendered at the right resolution. */
   if (drawable) {
     ctx->drawable = drawable;
-    emx11_glx_match_drawable(ctx, dpy, drawable);
+    em_x11_glx_match_drawable(ctx, dpy, drawable);
   }
-  if (!emx11_glx_realize(ctx))
+  if (!em_x11_glx_realize(ctx))
     return False;
   if (emscripten_webgl_make_context_current(ctx->webgl) !=
       EMSCRIPTEN_RESULT_SUCCESS) {
@@ -344,7 +344,7 @@ Bool glXMakeCurrent(Display* dpy, GLXDrawable drawable, GLXContext ctx) {
   }
   /* GLctx is now bound; safe to drive emscripten's LEGACY_GL_EMULATION
    * one-time init that Browser.createContext would normally do. */
-  emx11_js_glx_legacy_init_once();
+  em_x11_js_glx_legacy_init_once();
   g_current_display = dpy;
   g_current_drawable = drawable;
   g_current_ctx = ctx;
@@ -379,13 +379,13 @@ void glXSwapBuffers(Display* dpy, GLXDrawable drawable) {
    * surface here so the next frame draws at the new size. The demo
    * still has to re-issue glViewport on its own ConfigureNotify --
    * we just keep the destination buffer matched. */
-  emx11_glx_match_drawable(ctx, ctx->dpy ? ctx->dpy : dpy, drawable);
+  em_x11_glx_match_drawable(ctx, ctx->dpy ? ctx->dpy : dpy, drawable);
   /* Flush the LEGACY_GL_EMULATION immediate-mode buffer so all GL
    * commands are committed to the OffscreenCanvas before we blit it
    * into the X window backing surface. Without this the canvas may
    * be blank/stale. */
   glFlush();
-  emx11_js_glx_swap_buffers(ctx->js_id, (unsigned int)drawable);
+  em_x11_js_glx_swap_buffers(ctx->js_id, (unsigned int)drawable);
   /* Yield to the browser so the compositor's requestAnimationFrame
    * callback can fire and paint the backing surface to the display
    * canvas. Without this the wasm render loop starves rAF and only

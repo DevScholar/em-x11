@@ -9,14 +9,14 @@
  * backing pixels were wiped — the compositor blits the cleared
  * backing to canvas forever.
  */
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 #include <string.h>
 
 int XClearWindow(Display* display, Window w) {
-  EmxWindow* win = emx11_window_find(display, w);
+  EmxWindow* win = em_x11_window_find(display, w);
   if (!win)
     return 0;
-  emx11_js_clear_area(w, 0, 0, win->width, win->height);
+  em_x11_js_clear_area(w, 0, 0, win->width, win->height);
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.type = Expose;
@@ -27,6 +27,6 @@ int XClearWindow(Display* display, Window w) {
   ev.xexpose.width = (int)win->width;
   ev.xexpose.height = (int)win->height;
   ev.xexpose.count = 0;
-  emx11_event_queue_push(display, &ev);
+  em_x11_event_queue_push(display, &ev);
   return 1;
 }

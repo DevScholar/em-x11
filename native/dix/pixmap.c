@@ -2,13 +2,13 @@
  * Pixmap lifecycle.
  *
  * X Pixmaps are server-side offscreen drawables. In em-x11 each Pixmap
- * is backed by an OffscreenCanvas on the JS side (the emx11_js_pixmap_*
- * EM_JS bridges in native/emx11/bridges.c). The C side only tracks the
+ * is backed by an OffscreenCanvas on the JS side (the em_x11_js_pixmap_*
+ * EM_JS bridges in native/em_x11/bridges.c). The C side only tracks the
  * (id, width, height, depth) triple so drawing calls and SHAPE can
  * resolve ids without round-tripping through JS.
  *
  * Drawing routing: XFillRectangle / XFillArc / XDrawLine / etc. all
- * push through emx11_js_fill_rect et al. keyed on a Drawable id. The
+ * push through em_x11_js_fill_rect et al. keyed on a Drawable id. The
  * JS host recognises pixmap ids and dispatches to the pixmap's own
  * ctx; windows go through the compositor as before. The C side does
  * not need to know the difference.
@@ -18,7 +18,7 @@
  * but are not exercised yet.
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <X11/Xutil.h>
 #include <stdlib.h>
@@ -75,14 +75,14 @@ Pixmap XCreatePixmap(Display* dpy,
    * range -- twm's siconifyPm (id 30000001) got clobbered by xeyes's
    * first pixmap on the JS-side `pixmaps` Map, so XCopyPlane drew the
    * wrong canvas into icon-manager rows. */
-  p->id = emx11_next_xid(dpy);
+  p->id = em_x11_next_xid(dpy);
   p->width = width;
   p->height = height;
   p->depth = depth;
   p->refcount = 1;
   p->next = g_pixmaps;
   g_pixmaps = p;
-  emx11_js_pixmap_create(p->id, (int)width, (int)height, (int)depth);
+  em_x11_js_pixmap_create(p->id, (int)width, (int)height, (int)depth);
   return p->id;
 }
 
@@ -107,7 +107,7 @@ int XFreePixmap(Display* dpy, Pixmap pixmap) {
     EmxPixmap* doomed = *prev;
     *prev = doomed->next;
     free(doomed);
-    emx11_js_pixmap_destroy(pixmap);
+    em_x11_js_pixmap_destroy(pixmap);
   }
   return 1;
 }
@@ -115,7 +115,7 @@ int XFreePixmap(Display* dpy, Pixmap pixmap) {
 /* Window-side hooks for "this window is now using pm as bg" / "no
  * longer using it". window.c must call these so the canvas survives a
  * client XFreePixmap that races the bg binding. */
-void emx11_pixmap_acquire(Pixmap id) {
+void em_x11_pixmap_acquire(Pixmap id) {
   if (id == 0)
     return;
   EmxPixmap* p = pixmap_find(id);
@@ -123,7 +123,7 @@ void emx11_pixmap_acquire(Pixmap id) {
     p->refcount++;
 }
 
-void emx11_pixmap_release(Display* dpy, Pixmap id) {
+void em_x11_pixmap_release(Display* dpy, Pixmap id) {
   if (id == 0)
     return;
   /* Mirrors XFreePixmap's decrement-or-destroy: a window letting go
@@ -135,9 +135,9 @@ void emx11_pixmap_release(Display* dpy, Pixmap id) {
 /* Internal accessors --------------------------------------------------------
  */
 
-Bool emx11_pixmap_exists(Pixmap id) { return pixmap_find(id) != NULL; }
+Bool em_x11_pixmap_exists(Pixmap id) { return pixmap_find(id) != NULL; }
 
-unsigned int emx11_pixmap_depth(Pixmap id) {
+unsigned int em_x11_pixmap_depth(Pixmap id) {
   EmxPixmap* p = pixmap_find(id);
   return p ? p->depth : 0;
 }
@@ -157,18 +157,18 @@ Pixmap XCreatePixmapFromBitmapData(Display* dpy,
     return pm;
   int bpl = (int)((w + 7u) / 8u);
   int data_len = bpl * (int)h;
-  emx11_js_put_image(pm,
-                     0,
-                     0,
-                     w,
-                     h,
-                     XYBitmap,
-                     1,
-                     bpl,
-                     (const unsigned char*)data,
-                     data_len,
-                     fg,
-                     bg);
+  em_x11_js_put_image(pm,
+                      0,
+                      0,
+                      w,
+                      h,
+                      XYBitmap,
+                      1,
+                      bpl,
+                      (const unsigned char*)data,
+                      data_len,
+                      fg,
+                      bg);
   return pm;
 }
 
@@ -238,7 +238,7 @@ Pixmap XCreateBitmapFromData(Display* dpy,
 
 #define ROUNDUP(nbytes, pad) (((((nbytes) - 1) + (pad)) / (pad)) * (pad))
 
-static int _emx11_bits_per_pixel(Display* dpy, int depth) {
+static int _em_x11_bits_per_pixel(Display* dpy, int depth) {
   ScreenFormat* fmt = dpy->pixmap_format;
   for (int i = dpy->nformats; i > 0; i--, fmt++) {
     if (fmt->depth == depth)
@@ -300,7 +300,7 @@ XImage* XCreateImage(Display* dpy,
     img->blue_mask = visual->blue_mask;
   }
 
-  int bpp = (format == ZPixmap) ? _emx11_bits_per_pixel(dpy, (int)depth) : 1;
+  int bpp = (format == ZPixmap) ? _em_x11_bits_per_pixel(dpy, (int)depth) : 1;
   img->bits_per_pixel = bpp;
 
   int min_bpl;
@@ -321,14 +321,14 @@ XImage* XCreateImage(Display* dpy,
   return img;
 }
 
-static unsigned long _emx11_get_pixel(XImage* img, int x, int y) {
+static unsigned long _em_x11_get_pixel(XImage* img, int x, int y) {
   unsigned char* p =
     (unsigned char*)img->data + y * img->bytes_per_line + x * 4;
   return ((unsigned long)p[2] << 16) | ((unsigned long)p[1] << 8) |
          (unsigned long)p[0];
 }
 
-static int _emx11_put_pixel(XImage* img, int x, int y, unsigned long pixel) {
+static int _em_x11_put_pixel(XImage* img, int x, int y, unsigned long pixel) {
   unsigned char* p =
     (unsigned char*)img->data + y * img->bytes_per_line + x * 4;
   p[0] = (unsigned char)(pixel & 0xff);
@@ -338,7 +338,7 @@ static int _emx11_put_pixel(XImage* img, int x, int y, unsigned long pixel) {
   return 1;
 }
 
-static int _emx11_destroy_image(XImage* img) {
+static int _em_x11_destroy_image(XImage* img) {
   free(img->data);
   img->data = NULL;
   free(img);
@@ -348,9 +348,9 @@ static int _emx11_destroy_image(XImage* img) {
 int _XInitImageFuncPtrs(XImage* image) {
   if (!image)
     return 0;
-  image->f.get_pixel = _emx11_get_pixel;
-  image->f.put_pixel = _emx11_put_pixel;
-  image->f.destroy_image = _emx11_destroy_image;
+  image->f.get_pixel = _em_x11_get_pixel;
+  image->f.put_pixel = _em_x11_put_pixel;
+  image->f.destroy_image = _em_x11_destroy_image;
   return 1;
 }
 
@@ -382,6 +382,6 @@ XImage* XGetImage(Display* dpy,
     free(img);
     return NULL;
   }
-  emx11_js_get_image(d, x, y, w, h, (unsigned char*)img->data, data_size);
+  em_x11_js_get_image(d, x, y, w, h, (unsigned char*)img->data, data_size);
   return img;
 }

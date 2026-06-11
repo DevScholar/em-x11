@@ -1,7 +1,7 @@
 /**
  * Host facade: the single object every wasm client (and every demo
  * harness) talks to. Implements the EmX11Host interface used by the
- * EM_JS bridges in native/emx11/bridges.c, plus the launchClient
+ * EM_JS bridges in native/em_x11/bridges.c, plus the launchClient
  * coordination that dev demos use to start each wasm.
  *
  * Internally Host is a thin coordinator over a set of manager classes,
@@ -21,11 +21,11 @@
  * have one. See src/host/README in xserver-counterpart comments for
  * what each method's authoritative source-of-truth is.
  *
- * Host installs itself under Module?.['emx11Host'] via attachToBridge()
- * so the C-side bridges (native/emx11/bridges.c EM_JS bodies, or
- * native/src/lib/library_emx11.js in the static-link path) can reach
+ * Host installs itself under Module?.['emX11Host'] via attachToBridge()
+ * so the C-side bridges (native/em_x11/bridges.c EM_JS bodies, or
+ * native/src/lib/library_em-x11.js in the static-link path) can reach
  * it synchronously.  Internal caches / debug flags go under
- * Module?.['emx11Caches'] / Module?.['emx11Debug'].  Public-facing
+ * Module?.['emX11Caches'] / Module?.['emX11Debug'].  Public-facing
  * surfaces (fs, spawn, display, debug) are on the TypeScript Host
  * object, wired by createEmX11() in src/api/.
  */
@@ -137,10 +137,10 @@ export class Host implements EmX11Host {
     this.keyboardLock.disable();
   }
 
-  /** Install this Host under Module?.['emx11Host'] (flat Module property,
+  /** Install this Host under Module?.['emX11Host'] (flat Module property,
    *  per emscripten convention) so EM_JS bodies in bridges.c can reach
-   *  it via `Module?.['emx11Host']`.  Also initialises Module?.['emx11Caches']
-   *  and Module?.['emx11Debug'] (internal scratchpads shared by the bridges).
+   *  it via `Module?.['emX11Host']`.  Also initialises Module?.['emX11Caches']
+   *  and Module?.['emX11Debug'] (internal scratchpads shared by the bridges).
    *
    *  Must be called BEFORE any wasm module starts. createEmX11()
    *  does this for you. */
@@ -154,21 +154,21 @@ export class Host implements EmX11Host {
     /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
     const M = (typeof Module !== 'undefined' ? Module : null) as Record<string, any> | null;
     if (M) {
-      M['emx11Host'] = this;
-      if (!M['emx11Caches']) M['emx11Caches'] = {};
-      M['emx11Debug'] = surface;
+      M['emX11Host'] = this;
+      if (!M['emX11Caches']) M['emX11Caches'] = {};
+      M['emX11Debug'] = surface;
     }
     // Fallback for L2/L3 paths where Module isn't a global yet
     // (createEmX11 before any emscripten factory runs).
-    (globalThis as any).__emx11Debug = surface;
+    (globalThis as any).__emX11Debug = surface;
     // Side-module path (Pyodide dlopen in a Worker): Module isn't a
     // global and the side module's own Module scope doesn't inherit
-    // from it.  Export the Host on globalThis so emx11_js_open_display
+    // from it.  Export the Host on globalThis so em_x11_js_open_display
     // can find it before open() writes it onto the side module's scope.
-    (globalThis as Record<string, unknown>).__emx11Host = this;
+    (globalThis as Record<string, unknown>).__emX11Host = this;
   }
 
-  /** Build the debug surface exposed as Module['emx11Debug'].
+  /** Build the debug surface exposed as Module['emX11Debug'].
    *  Combines trace flags (from debug-flags.ts) with pixel-dump
    *  methods and auto-snapshot controls. */
   private _buildDebugSurface(dbg: ReturnType<typeof ensureDebugFlags>) {
@@ -393,7 +393,7 @@ export class Host implements EmX11Host {
   onFlush(): void { this.gc.onFlush(); }
   onFlushRoundtrip(): void {
     /* Hook for XSync: commit any deferred rendering before events are
-     * discarded. Currently a no-op; see bridges.c emx11_js_flush_roundtrip. */
+     * discarded. Currently a no-op; see bridges.c em_x11_js_flush_roundtrip. */
   }
   onWindowShape(id: number, rects: ShapeRect[]): void { this.gc.onWindowShape(id, rects); }
 
@@ -475,7 +475,7 @@ export class Host implements EmX11Host {
       const cur = this.renderer.findWindowAt(x, y) ?? 0;
       try {
         mod.ccall(
-          'emx11_repoll_pointer_window_hint_now',
+          'em_x11_repoll_pointer_window_hint_now',
           null,
           ['number'],
           [cur],
@@ -514,7 +514,7 @@ export class Host implements EmX11Host {
   onExecSelf(connId: number, argv: string[]): void {
     const handler = this.execHandlers.get(connId);
     if (!handler) {
-      console.warn(`[emx11] onExecSelf: no handler for conn ${connId}`);
+      console.warn(`[em-x11] onExecSelf: no handler for conn ${connId}`);
       return;
     }
     /* Defer to a fresh macrotask so the respawn launches OUTSIDE the
@@ -525,7 +525,7 @@ export class Host implements EmX11Host {
       try {
         handler(argv);
       } catch (err) {
-        console.error('[emx11] exec-self respawn failed:', err);
+        console.error('[em-x11] exec-self respawn failed:', err);
       }
     }, 0);
   }
@@ -533,7 +533,7 @@ export class Host implements EmX11Host {
   /* -- EmX11Host: cross-process signals (signal.c) ---------------------- */
 
   /** Cross-process kill(): find the target wasm module by pid (=connId)
-   *  and ccall emx11_signal_set_pending on it. The signal is delivered
+   *  and ccall em_x11_signal_set_pending on it. The signal is delivered
    *  at the target's next cooperative yield point (emscripten_sleep,
    *  XNextEvent, poll, etc.). No-op for unknown pids or exited modules. */
   onSignalDeliver(pid: number, sig: number): void {
@@ -541,7 +541,7 @@ export class Host implements EmX11Host {
     if (!conn || !conn.module) return;
     try {
       conn.module.ccall(
-        'emx11_signal_set_pending',
+        'em_x11_signal_set_pending',
         null,
         ['number'],
         [sig],
@@ -582,7 +582,7 @@ export class Host implements EmX11Host {
 
   /** Wake target for the Tcl notifier. Hosts register their pump's
    *  scheduler here (typically via emX11.display.installEventLoopWake).
-   *  When unset, setTimer/alert bridges from libemx11 are no-ops --
+   *  When unset, setTimer/alert bridges from libem_x11 are no-ops --
    *  callers without a pump (test harnesses, demos that never enter
    *  Tk's event loop) don't need to install anything. */
   private eventLoopWake: { onTimer: (ms: number) => void; onAlert: () => void } | null = null;
@@ -591,7 +591,7 @@ export class Host implements EmX11Host {
     this.eventLoopWake = wake;
   }
 
-  /** Bridge target for libemx11/notifier.c real_SetTimer. ms < 0 means
+  /** Bridge target for libem_x11/notifier.c real_SetTimer. ms < 0 means
    *  "no timer scheduled" (Tcl passed timePtr == NULL); otherwise
    *  schedule a pump wake at +ms relative. The host pump translates
    *  this to a real setTimeout / Atomics.wait timeout as appropriate. */
@@ -599,7 +599,7 @@ export class Host implements EmX11Host {
     this.eventLoopWake?.onTimer(ms);
   }
 
-  /** Bridge target for libemx11/notifier.c real_AlertNotifier. Tcl's
+  /** Bridge target for libem_x11/notifier.c real_AlertNotifier. Tcl's
    *  cross-thread "break out of waitForEvent" primitive. Hosts use
    *  this to drive an immediate drain regardless of the current timer
    *  schedule. */

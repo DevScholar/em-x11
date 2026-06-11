@@ -20,38 +20,38 @@
  *   3. Mirror the change in src/host/index.ts (the TS data source).
  */
 
-#ifndef EMX11_META_LAYOUT_H
-#define EMX11_META_LAYOUT_H
+#ifndef EM_X11_META_LAYOUT_H
+#define EM_X11_META_LAYOUT_H
 
-/* emx11_js_get_window_attrs: 8 ints. */
-#define EMX11_WIN_ATTRS_PRESENT       0
-#define EMX11_WIN_ATTRS_X             1
-#define EMX11_WIN_ATTRS_Y             2
-#define EMX11_WIN_ATTRS_WIDTH         3
-#define EMX11_WIN_ATTRS_HEIGHT        4
-#define EMX11_WIN_ATTRS_MAPPED        5
-#define EMX11_WIN_ATTRS_OVERRIDE_RED  6
-#define EMX11_WIN_ATTRS_BORDER_WIDTH  7
-#define EMX11_WIN_ATTRS_SIZE          8
+/* em_x11_js_get_window_attrs: 8 ints. */
+#define EM_X11_WIN_ATTRS_PRESENT 0
+#define EM_X11_WIN_ATTRS_X 1
+#define EM_X11_WIN_ATTRS_Y 2
+#define EM_X11_WIN_ATTRS_WIDTH 3
+#define EM_X11_WIN_ATTRS_HEIGHT 4
+#define EM_X11_WIN_ATTRS_MAPPED 5
+#define EM_X11_WIN_ATTRS_OVERRIDE_RED 6
+#define EM_X11_WIN_ATTRS_BORDER_WIDTH 7
+#define EM_X11_WIN_ATTRS_SIZE 8
 
-/* emx11_js_get_window_abs_origin: 3 ints. */
-#define EMX11_ABS_ORIGIN_PRESENT 0
-#define EMX11_ABS_ORIGIN_AX      1
-#define EMX11_ABS_ORIGIN_AY      2
-#define EMX11_ABS_ORIGIN_SIZE    3
+/* em_x11_js_get_window_abs_origin: 3 ints. */
+#define EM_X11_ABS_ORIGIN_PRESENT 0
+#define EM_X11_ABS_ORIGIN_AX 1
+#define EM_X11_ABS_ORIGIN_AY 2
+#define EM_X11_ABS_ORIGIN_SIZE 3
 
-/* emx11_js_get_property_meta: 8 ints.
+/* em_x11_js_get_property_meta: 8 ints.
  *
  * Slot 6 (PRESENT) is the window-existence bit; slot 0 (FOUND) is the
  * property-existence bit on a known window. The two are distinct: a
  * known window with no such property returns PRESENT=1, FOUND=0. */
-#define EMX11_PROP_META_FOUND        0
-#define EMX11_PROP_META_TYPE         1
-#define EMX11_PROP_META_FORMAT       2
-#define EMX11_PROP_META_NITEMS       3
-#define EMX11_PROP_META_BYTES_AFTER  4
-#define EMX11_PROP_META_DATA_LEN     5
-#define EMX11_PROP_META_PRESENT      6
-#define EMX11_PROP_META_SIZE         8
+#define EM_X11_PROP_META_FOUND 0
+#define EM_X11_PROP_META_TYPE 1
+#define EM_X11_PROP_META_FORMAT 2
+#define EM_X11_PROP_META_NITEMS 3
+#define EM_X11_PROP_META_BYTES_AFTER 4
+#define EM_X11_PROP_META_DATA_LEN 5
+#define EM_X11_PROP_META_PRESENT 6
+#define EM_X11_PROP_META_SIZE 8
 
-#endif /* EMX11_META_LAYOUT_H */
+#endif /* EM_X11_META_LAYOUT_H */

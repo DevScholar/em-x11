@@ -5,7 +5,7 @@
  * already covers every shape twm/Xt actually use, so we map cursor
  * shape -> CSS keyword instead of rasterising glyphs.
  *
- * Cursor xids arrive from C through `emx11_js_window_set_cursor`.
+ * Cursor xids arrive from C through `em_x11_js_window_set_cursor`.
  * Two encodings:
  *
  *   - 0x70000000 | shape  (Cursor.c::XCreateFontCursor) -- decode

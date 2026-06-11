@@ -79,7 +79,7 @@ export class EventDispatcher {
   }
 
   /** XShapeSelectInput tracking: record which connections want ShapeNotify
-   *  on a window. Called from the emx11_js_shape_select_input bridge. */
+   *  on a window. Called from the em_x11_js_shape_select_input bridge. */
   onShapeSelectInput(connId: number, id: number, mask: number): void {
     if (mask === 0) {
       const subs = this.shapeNotifySubs.get(id);
@@ -191,7 +191,7 @@ export class EventDispatcher {
       module = conn.module;
     }
     module.ccall(
-      'emx11_push_expose_event',
+      'em_x11_push_expose_event',
       null,
       ['number', 'number', 'number', 'number', 'number'],
       [id, 0, 0, geom.width, geom.height],
@@ -232,7 +232,7 @@ export class EventDispatcher {
       }
       /* Always send ONE Expose per window using the bounding box of
        * the entire exposed region. Sending multiple rects triggers the
-       * Expose coalescing in emx11_event_queue_push, which used to
+       * Expose coalescing in em_x11_event_queue_push, which used to
        * increment count on merge — breaking twm's HandleExpose (skips
        * redraw when count != 0) and Xt's dispatch (defers Redisplay
        * until count == 0). A single bounding-box Expose with count==0
@@ -249,7 +249,7 @@ export class EventDispatcher {
       const lw = maxX - minX;
       const lh = maxY - minY;
       module.ccall(
-        'emx11_push_expose_event',
+        'em_x11_push_expose_event',
         null,
         ['number', 'number', 'number', 'number', 'number'],
         [id, lx, ly, lw, lh],
@@ -272,7 +272,7 @@ export class EventDispatcher {
       return;
     }
     mod.ccall(
-      'emx11_push_map_request',
+      'em_x11_push_map_request',
       null,
       ['number', 'number'],
       [parent, window],

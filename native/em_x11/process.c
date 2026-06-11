@@ -25,15 +25,15 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-extern int emx11_current_conn_id(void);
+extern int em_x11_current_conn_id(void);
 
 /* Defined in bridges.c. Hands argv across to the host. */
-extern void emx11_js_exec_self(int conn_id, int argv_ptrs, int argc);
+extern void em_x11_js_exec_self(int conn_id, int argv_ptrs, int argc);
 
 /* vfork state (see fork.c).  When execvp is called from a vfork child,
  * we must clear the vfork-in-progress flag so exit() kills the wasm
  * module instead of longjmp'ing back to the parent. */
-extern void emx11_vfork_clear(void);
+extern void em_x11_vfork_clear(void);
 
 static int do_exec(char* const argv[]) {
   int argc = 0;
@@ -44,8 +44,8 @@ static int do_exec(char* const argv[]) {
    * longjmp back to the vfork parent, the exec-self message would
    * still be pending and the host would respawn a second process
    * on top of the resumed parent. */
-  emx11_vfork_clear();
-  emx11_js_exec_self(emx11_current_conn_id(), (int)(intptr_t)argv, argc);
+  em_x11_vfork_clear();
+  em_x11_js_exec_self(em_x11_current_conn_id(), (int)(intptr_t)argv, argc);
   /* Exit cleanly so the host's exit hook fires; ProcessImpl sees
    * the pending exec request and respawns. We don't return -- on a
    * successful real exec(), control transfers to the new image, so

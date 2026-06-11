@@ -53,11 +53,11 @@ __real_glMaterialfv(GLenum face, GLenum pname, const GLfloat* params);
  * only resumes when the browser is ready to paint. Net effect:
  * glxgears matches display refresh exactly.
  *
- * Lives in the demo (not emx11_static) so emx11 itself stays free
+ * Lives in the demo (not em_x11_static) so em_x11 itself stays free
  * of EM_ASYNC_JS, which would otherwise force JSPI suspends on
  * non-GL clients (e.g. tcldide's sync runTcl). */
 // clang-format off
-EM_ASYNC_JS(void, emx11_glx_yield_until_raf, (void), {
+EM_ASYNC_JS(void, em_x11_glx_yield_until_raf, (void), {
   return new Promise(function(resolve) {
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(function() { resolve(); });

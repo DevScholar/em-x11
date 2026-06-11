@@ -19,7 +19,7 @@
  * `#define <name>_width` line, so we drop anything that doesn't.
  */
 
-import type { EmX11 } from '../api/emx11.js';
+import type { EmX11 } from '../api/em-x11.js';
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
 const xbmFiles = import.meta.glob('../../ignored-area/third-party/xbitmaps/*', {

@@ -10,7 +10,7 @@
  *     implements that side). Generic — any X11 client benefits.
  *
  *   Layer 2 — browser bridge (CLIPBOARD atom only).  A sentinel XID
- *     (EMX11_CLIPBOARD_PROXY_WIN) stands in as the virtual owner of
+ *     (EM_X11_CLIPBOARD_PROXY_WIN) stands in as the virtual owner of
  *     CLIPBOARD whenever no real client has claimed it. When the proxy
  *     "owns" CLIPBOARD:
  *       * XConvertSelection(CLIPBOARD, target, ...) awaits
@@ -21,7 +21,7 @@
  *       * We replace the proxy in the table AND fire a back-channel
  *         XConvertSelection at the new owner with the proxy as requestor;
  *         XSendEvent intercepts the owner's SelectionNotify reply (see
- *         emx11_selection_intercept_send in event.c) and forwards the
+ *         em_x11_selection_intercept_send in event.c) and forwards the
  *         UTF-8 bytes to navigator.clipboard.writeText().
  *
  *   PRIMARY and custom atoms are Layer 1 only (no browser bridge); this
@@ -33,7 +33,7 @@
  *   x11protocol.txt — SendEvent, ChangeProperty, ConvertSelection
  */
 
-#include "emx11_internal.h"
+#include "em_x11_internal.h"
 
 #include <X11/Xatom.h>
 #include <stdlib.h>
@@ -46,13 +46,13 @@
 /* Populate the CLIPBOARD / UTF8_STRING / TARGETS / ... atoms on first
  * use, and allocate + register the virtual CLIPBOARD owner window with
  * the Host. The proxy has to be a real XID the Host has seen via
- * emx11_js_window_create, otherwise XChangeProperty and XGetWindowProperty
+ * em_x11_js_window_create, otherwise XChangeProperty and XGetWindowProperty
  * fail silently (attrsOf check in host.ts:changeProperty/peekProperty).
  *
  * We create the proxy invisibly: root as parent, 1x1 size, never mapped.
  * The Host's compositor keeps an attr record for it so property ops
  * succeed; nothing ever paints because mapped stays false. */
-void emx11_selection_ensure_atoms(Display* dpy) {
+void em_x11_selection_ensure_atoms(Display* dpy) {
   if (!dpy->atom_clipboard) {
     dpy->atom_clipboard = XInternAtom(dpy, "CLIPBOARD", False);
   }
@@ -71,15 +71,15 @@ void emx11_selection_ensure_atoms(Display* dpy) {
   if (!dpy->atom_incr) {
     dpy->atom_incr = XInternAtom(dpy, "INCR", False);
   }
-  if (!dpy->atom_emx11_clipboard_data) {
-    dpy->atom_emx11_clipboard_data =
-      XInternAtom(dpy, "_EMX11_CLIPBOARD_DATA", False);
+  if (!dpy->atom_em_x11_clipboard_data) {
+    dpy->atom_em_x11_clipboard_data =
+      XInternAtom(dpy, "_EM_X11_CLIPBOARD_DATA", False);
   }
   if (!dpy->clipboard_proxy_win) {
     Window root = dpy->screens[dpy->default_screen].root;
     if (root != None) {
-      Window w = emx11_next_xid(dpy);
-      emx11_js_window_create(dpy->conn_id, w, root, 0, 0, 1, 1, 0, 0, 0, 0);
+      Window w = em_x11_next_xid(dpy);
+      em_x11_js_window_create(dpy->conn_id, w, root, 0, 0, 1, 1, 0, 0, 0, 0);
       dpy->clipboard_proxy_win = w;
     }
   }
@@ -115,14 +115,14 @@ static int sel_alloc(Display* dpy) {
 /*                                                                           */
 /*  Selection events are unmaskable in X (see event.c:event_type_to_mask),  */
 /*  so we push them directly onto the target window's queue without mask    */
-/*  filtering. emx11_event_queue_push maintains dpy->qlen for Tk's event    */
+/*  filtering. em_x11_event_queue_push maintains dpy->qlen for Tk's event    */
 /*  pump (TransferXEventsToTcl).                                             */
 /* ------------------------------------------------------------------------- */
 
-void emx11_push_selection_clear(Display* dpy,
-                                Window owner,
-                                Atom selection,
-                                Time time) {
+void em_x11_push_selection_clear(Display* dpy,
+                                 Window owner,
+                                 Atom selection,
+                                 Time time) {
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xselectionclear.type = SelectionClear;
@@ -130,16 +130,16 @@ void emx11_push_selection_clear(Display* dpy,
   ev.xselectionclear.window = owner;
   ev.xselectionclear.selection = selection;
   ev.xselectionclear.time = time;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
-void emx11_push_selection_request(Display* dpy,
-                                  Window owner,
-                                  Window requestor,
-                                  Atom selection,
-                                  Atom target,
-                                  Atom property,
-                                  Time time) {
+void em_x11_push_selection_request(Display* dpy,
+                                   Window owner,
+                                   Window requestor,
+                                   Atom selection,
+                                   Atom target,
+                                   Atom property,
+                                   Time time) {
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xselectionrequest.type = SelectionRequest;
@@ -150,18 +150,18 @@ void emx11_push_selection_request(Display* dpy,
   ev.xselectionrequest.target = target;
   ev.xselectionrequest.property = property;
   ev.xselectionrequest.time = time;
-  /* xany.window is what emx11_event_queue_peek_typed keys on; mirror
+  /* xany.window is what em_x11_event_queue_peek_typed keys on; mirror
    * the owner there so Tk's dispatch (by xany.window) finds it. */
   ev.xany.window = owner;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
-void emx11_push_selection_notify(Display* dpy,
-                                 Window requestor,
-                                 Atom selection,
-                                 Atom target,
-                                 Atom property,
-                                 Time time) {
+void em_x11_push_selection_notify(Display* dpy,
+                                  Window requestor,
+                                  Atom selection,
+                                  Atom target,
+                                  Atom property,
+                                  Time time) {
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xselection.type = SelectionNotify;
@@ -172,13 +172,13 @@ void emx11_push_selection_notify(Display* dpy,
   ev.xselection.property = property;
   ev.xselection.time = time;
   ev.xany.window = requestor;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
-void emx11_push_property_notify(Display* dpy,
-                                Window win,
-                                Atom prop,
-                                int state) {
+void em_x11_push_property_notify(Display* dpy,
+                                 Window win,
+                                 Atom prop,
+                                 int state) {
   XEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.xproperty.type = PropertyNotify;
@@ -187,7 +187,7 @@ void emx11_push_property_notify(Display* dpy,
   ev.xproperty.atom = prop;
   ev.xproperty.state = state;
   ev.xany.window = win;
-  emx11_event_queue_push(dpy, &ev);
+  em_x11_event_queue_push(dpy, &ev);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -198,19 +198,19 @@ void emx11_push_property_notify(Display* dpy,
 /*  chance to process any SelectionRequest yet. So we fire a normal         */
 /*  XConvertSelection targeting our proxy window; the owner will respond    */
 /*  on its next event-loop turn via XChangeProperty + XSendEvent. The       */
-/*  XSendEvent intercept path (emx11_selection_intercept_send) detects      */
+/*  XSendEvent intercept path (em_x11_selection_intercept_send) detects      */
 /*  the proxy requestor and bridges to navigator.clipboard.writeText().     */
 /* ------------------------------------------------------------------------- */
 
 static void fire_proxy_convert(Display* dpy, Window owner, Time time) {
-  emx11_selection_ensure_atoms(dpy);
-  emx11_push_selection_request(dpy,
-                               owner,
-                               dpy->clipboard_proxy_win,
-                               dpy->atom_clipboard,
-                               dpy->atom_utf8_string,
-                               dpy->atom_emx11_clipboard_data,
-                               time);
+  em_x11_selection_ensure_atoms(dpy);
+  em_x11_push_selection_request(dpy,
+                                owner,
+                                dpy->clipboard_proxy_win,
+                                dpy->atom_clipboard,
+                                dpy->atom_utf8_string,
+                                dpy->atom_em_x11_clipboard_data,
+                                time);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -291,7 +291,7 @@ static int utf8_to_latin1(const unsigned char* text,
 /* Answer TARGETS: atom list of formats we can synthesize from the
  * browser clipboard (plus the meta-atoms TARGETS / TIMESTAMP per ICCCM). */
 static void serve_targets(Display* dpy, Window requestor, Atom property) {
-  emx11_selection_ensure_atoms(dpy);
+  em_x11_selection_ensure_atoms(dpy);
   Atom atoms[5];
   atoms[0] = dpy->atom_targets;
   atoms[1] = dpy->atom_timestamp;
@@ -313,7 +313,7 @@ static void serve_targets(Display* dpy, Window requestor, Atom property) {
  * refused (caller will queue SelectionNotify{property=None}). */
 static Bool serve_clipboard_from_browser(
   Display* dpy, Atom target, Window requestor, Atom property, Time time) {
-  emx11_selection_ensure_atoms(dpy);
+  em_x11_selection_ensure_atoms(dpy);
 
   if (target == dpy->atom_targets) {
     serve_targets(dpy, requestor, property);
@@ -336,7 +336,7 @@ static Bool serve_clipboard_from_browser(
    *   _begin returns the byte length (>=0) after awaiting the browser,
    *   _fetch copies those bytes into our malloc'd buffer.
    * JSPI suspends only on _begin; _fetch is synchronous. */
-  int text_len = emx11_js_clipboard_read_begin();
+  int text_len = em_x11_js_clipboard_read_begin();
   if (text_len < 0)
     return False; /* permission denied / error */
 
@@ -345,7 +345,7 @@ static Bool serve_clipboard_from_browser(
     unsigned char* raw = malloc((size_t)text_len);
     if (!raw)
       return False;
-    emx11_js_clipboard_read_fetch(raw, text_len);
+    em_x11_js_clipboard_read_fetch(raw, text_len);
     /* Normalize CRLF → LF: Windows clipboard sources use \r\n, but Tk
      * entry/text widgets expect bare \n. strip_crlf always allocates a
      * fresh buffer so `raw` can be freed unconditionally. */
@@ -407,11 +407,11 @@ static Bool serve_clipboard_from_browser(
 /*  state machine continues on its next event-loop turn.                    */
 /* ------------------------------------------------------------------------- */
 
-Bool emx11_incr_handle_chunk(Display* dpy,
-                             Atom property,
-                             const unsigned char* data,
-                             int nelements,
-                             int format) {
+Bool em_x11_incr_handle_chunk(Display* dpy,
+                              Atom property,
+                              const unsigned char* data,
+                              int nelements,
+                              int format) {
   if (!dpy->incr_active)
     return False;
   if (property != dpy->incr_property)
@@ -421,7 +421,7 @@ Bool emx11_incr_handle_chunk(Display* dpy,
     /* Zero-length chunk: end-of-transfer. Write accumulated UTF-8 to
      * the browser clipboard and clean up state. */
     if (dpy->incr_buf && dpy->incr_len > 0) {
-      emx11_js_clipboard_write_utf8(dpy->incr_buf, dpy->incr_len);
+      em_x11_js_clipboard_write_utf8(dpy->incr_buf, dpy->incr_len);
     }
     free(dpy->incr_buf);
     dpy->incr_buf = NULL;
@@ -439,7 +439,8 @@ Bool emx11_incr_handle_chunk(Display* dpy,
       dpy->selections[slot].owner = None;
       dpy->selections[slot].time = 0;
       if (ex_owner != None && ex_owner != dpy->clipboard_proxy_win) {
-        emx11_push_selection_clear(dpy, ex_owner, dpy->atom_clipboard, ex_time);
+        em_x11_push_selection_clear(
+          dpy, ex_owner, dpy->atom_clipboard, ex_time);
       }
     }
     return True;
@@ -470,7 +471,7 @@ Bool emx11_incr_handle_chunk(Display* dpy,
   }
 
   /* Signal the owner: "property deleted, ready for next chunk". */
-  emx11_push_property_notify(
+  em_x11_push_property_notify(
     dpy, dpy->clipboard_proxy_win, dpy->incr_property, PropertyDelete);
   return True;
 }
@@ -482,7 +483,7 @@ Bool emx11_incr_handle_chunk(Display* dpy,
 int XSetSelectionOwner(Display* dpy, Atom selection, Window owner, Time time) {
   if (!dpy || selection == 0)
     return 0;
-  emx11_selection_ensure_atoms(dpy);
+  em_x11_selection_ensure_atoms(dpy);
 
   int slot = sel_find(dpy, selection);
   Window old_owner = (slot >= 0) ? dpy->selections[slot].owner : None;
@@ -504,7 +505,7 @@ int XSetSelectionOwner(Display* dpy, Atom selection, Window owner, Time time) {
    * window, no real client to notify. */
   if (old_owner != None && old_owner != owner &&
       old_owner != dpy->clipboard_proxy_win) {
-    emx11_push_selection_clear(dpy, old_owner, selection, time);
+    em_x11_push_selection_clear(dpy, old_owner, selection, time);
   }
 
   if (slot < 0)
@@ -528,7 +529,7 @@ int XSetSelectionOwner(Display* dpy, Atom selection, Window owner, Time time) {
 Window XGetSelectionOwner(Display* dpy, Atom selection) {
   if (!dpy || selection == 0)
     return None;
-  emx11_selection_ensure_atoms(dpy);
+  em_x11_selection_ensure_atoms(dpy);
 
   int slot = sel_find(dpy, selection);
   if (slot >= 0)
@@ -551,7 +552,7 @@ int XConvertSelection(Display* dpy,
                       Time time) {
   if (!dpy)
     return 0;
-  emx11_selection_ensure_atoms(dpy);
+  em_x11_selection_ensure_atoms(dpy);
 
   Window owner = XGetSelectionOwner(dpy, selection);
 
@@ -561,7 +562,7 @@ int XConvertSelection(Display* dpy,
     if (!serve_clipboard_from_browser(dpy, target, requestor, property, time)) {
       reply_prop = None; /* ICCCM "refuse" response */
     }
-    emx11_push_selection_notify(
+    em_x11_push_selection_notify(
       dpy, requestor, selection, target, reply_prop, time);
     return 1;
   }
@@ -569,9 +570,9 @@ int XConvertSelection(Display* dpy,
   /* Standard path: no owner → null SelectionNotify; owner present →
    * SelectionRequest to owner. */
   if (owner == None) {
-    emx11_push_selection_notify(dpy, requestor, selection, target, None, time);
+    em_x11_push_selection_notify(dpy, requestor, selection, target, None, time);
   } else {
-    emx11_push_selection_request(
+    em_x11_push_selection_request(
       dpy, owner, requestor, selection, target, property, time);
   }
   return 1;
@@ -587,10 +588,10 @@ int XConvertSelection(Display* dpy,
 /*  them to navigator.clipboard.writeText(), and consume the event.         */
 /* ------------------------------------------------------------------------- */
 
-Bool emx11_selection_intercept_send(Display* dpy, Window w, const XEvent* ev) {
+Bool em_x11_selection_intercept_send(Display* dpy, Window w, const XEvent* ev) {
   if (!dpy || !ev)
     return False;
-  emx11_selection_ensure_atoms(dpy);
+  em_x11_selection_ensure_atoms(dpy);
 
   if (w != dpy->clipboard_proxy_win)
     return False;
@@ -633,13 +634,13 @@ Bool emx11_selection_intercept_send(Display* dpy, Window w, const XEvent* ev) {
     dpy->incr_buf = NULL;
     dpy->incr_len = 0;
     dpy->incr_cap = 0;
-    emx11_push_property_notify(
+    em_x11_push_property_notify(
       dpy, dpy->clipboard_proxy_win, dpy->incr_property, PropertyDelete);
     return True;
   }
 
   if (rc == Success && data && nitems > 0 && actual_fmt == 8) {
-    emx11_js_clipboard_write_utf8(data, (int)nitems);
+    em_x11_js_clipboard_write_utf8(data, (int)nitems);
 
     /* Evict the current CLIPBOARD owner so subsequent Ctrl+C re-enters
      * Tk_ClipboardClear's `!clipboardActive` branch (tkClipboard.c:284)
@@ -662,7 +663,8 @@ Bool emx11_selection_intercept_send(Display* dpy, Window w, const XEvent* ev) {
       dpy->selections[slot].owner = None;
       dpy->selections[slot].time = 0;
       if (ex_owner != None && ex_owner != dpy->clipboard_proxy_win) {
-        emx11_push_selection_clear(dpy, ex_owner, dpy->atom_clipboard, ex_time);
+        em_x11_push_selection_clear(
+          dpy, ex_owner, dpy->atom_clipboard, ex_time);
       }
     }
   }

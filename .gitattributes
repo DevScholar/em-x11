@@ -1,3 +1,3 @@
 # Force LF for shell scripts — CRLF shebangs break on Linux/WSL
-scripts/emx11-pkg-config text eol=lf
+scripts/em-x11-pkg-config text eol=lf
 *.sh text eol=lf

@@ -14,4 +14,4 @@ await xeyes.ready;
 
 await launchXcalc(emX11);
 
-console.log('[emx11:twm-session] booted twm + xeyes + xcalc');
+console.log('[emX11:twm-session] booted twm + xeyes + xcalc');

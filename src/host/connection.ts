@@ -62,7 +62,7 @@ export interface SideModuleStringMarshaller {
  *  marshalled via `marshaller`'s _malloc + stringToUTF8 (and freed
  *  after the call). Without this, the JS string would be coerced to
  *  NaN/0 by the wasm function entry, silently dropping the bytes
- *  (e.g. emx11_set_pending_key_text getting NULL on every keypress). */
+ *  (e.g. em_x11_set_pending_key_text getting NULL on every keypress). */
 export function makeSideModuleSurface(
   exports: Record<string, (...args: unknown[]) => unknown>,
   marshaller?: SideModuleStringMarshaller,
@@ -72,7 +72,7 @@ export function makeSideModuleSurface(
       const fn = exports[name];
       if (typeof fn !== 'function') {
         throw new Error(
-          `em-x11: side-module export '${name}' not found (have ${Object.keys(exports).filter((k) => k.startsWith('emx11')).join(', ')})`,
+          `em-x11: side-module export '${name}' not found (have ${Object.keys(exports).filter((k) => k.startsWith('emX11')).join(', ')})`,
         );
       }
       const allocated: number[] = [];
@@ -160,7 +160,7 @@ export class ConnectionManager {
      * event-loop main(): apps that exit() from inside a callback can
      * land in any of these (or, as observed for xcalc q, none of them
      * -- the wasm just stops without invoking proc_exit at all). See
-     * memory: project_emx11_wasm_exit_gap.md.
+     * memory: project_em_x11_wasm_exit_gap.md.
      *
      * What each catches when it does work:
      *   Module.quit     - throw site of _proc_exit; the main wasm-loop
@@ -197,8 +197,8 @@ export class ConnectionManager {
         quit: factoryQuit,
         onExit: factoryOnExit,
         moduleOverrides: {
-          emx11Host: this.host,
-          emx11NoAutoStart: true,
+          emX11Host: this.host,
+          emX11NoAutoStart: true,
         },
       });
     } catch (err) {
@@ -244,7 +244,7 @@ export class ConnectionManager {
     /* Push the user's keyboard layout into the client's keysym_table
      * before any KeyPress is dispatched (Xt caches the keymap on first
      * key event; missed entries become invisible forever -- see
-     * project_emx11_keysym_table_prepop). Fire-and-forget the Promise;
+     * project_em_x11_keysym_table_prepop). Fire-and-forget the Promise;
      * the layout fetch is already in flight from Host construction so
      * this typically resolves before the next animation frame. */
     void this.host.keyboardLayout.applyToModule(module);
@@ -312,7 +312,7 @@ export class ConnectionManager {
       .catch((err) => {
         this.pendingPosixSpawnConnId = null;
         this.close(connId);
-        console.error('[emx11] posix_spawn failed:', err);
+        console.error('[em-x11] posix_spawn failed:', err);
       });
 
     return connId;
@@ -338,13 +338,13 @@ export class ConnectionManager {
     if (this.pendingLaunch) this.pendingLaunch.connId = connId;
 
     /* Side-module path (Pyodide dlopen): the EM_JS bridges in bridges.c
-     * read Module['emx11Host'] on every call, but `Module` in a side
+     * read Module['emX11Host'] on every call, but `Module` in a side
      * module is the side module's own scope — the global Module that
      * attachToBridge() writes to is a different object. XOpenDisplay
      * passes us the side module's Module as `rawModule`; set the Host
      * on it so every subsequent bridge call from this connection finds
      * the Host without reaching for the global scope. */
-    (rawModule as Record<string, unknown>)['emx11Host'] = this.host;
+    (rawModule as Record<string, unknown>)['emX11Host'] = this.host;
 
     /* Push the browser-resolved keyboard layout into the client's
      * keysym_table before its first KeyPress. Mirrors what launchClient
@@ -382,7 +382,7 @@ export class ConnectionManager {
       const parentConn = this.connections.get(parentConnId);
       if (!parentConn?.module) continue;
       parentConn.module.ccall(
-        'emx11_push_destroy_notify',
+        'em_x11_push_destroy_notify',
         null,
         ['number', 'number'],
         [winId, parent],
@@ -481,7 +481,7 @@ export class ConnectionManager {
   /** Pyodide / dlopen path: bind an already-loaded EmscriptenModule to
    *  a connection. Unlike launchClient, the Host did not load this wasm;
    *  Pyodide did, and we just hand its Module over. Caller is expected
-   *  to invoke this AFTER libemx11.so is dlopen'd but BEFORE any code
+   *  to invoke this AFTER libem_x11.so is dlopen'd but BEFORE any code
    *  that calls XOpenDisplay (e.g. _tkinter.create with wantTk=1).
    *
    *  If `connId` is omitted we bind the most-recently-opened connection
@@ -508,7 +508,7 @@ export class ConnectionManager {
     /* Mirror the launchClient path: push the layout-resolved keymap
      * into the just-bound module so XkbGetMap reports the user's
      * keyboard, not US QWERTY. Safe under Pyodide's side-module
-     * loader too -- emx11_install_keysym is a normal exported wasm
+     * loader too -- em_x11_install_keysym is a normal exported wasm
      * function. */
     void this.host.keyboardLayout.applyToModule(module);
     const deferred = this.pendingExposes.get(id);

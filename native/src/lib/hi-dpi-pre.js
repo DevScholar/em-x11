@@ -1,1 +1,1 @@
-Module['emx11HiDpi'] = false;
+Module['emX11HiDpi'] = false;
