@@ -19,7 +19,7 @@
  * -- source-over compositing can't undo partial-alpha pixels, so widget
  * edges that repaint in alternating colours (Athena Toggle's Set/Unset
  * cycle on XCalc's LCD) may accumulate an L-shaped ghost at rectangle
- * corners. Set `disableHidpi: true` (or `Module['emx11DisableHidpi']`)
+ * corners. Set `hiDpi: false` (or `Module['emx11HiDpi'] = false`)
  * to revert to the 1:1 backing store when this is visible.
  *
  * Three construction modes:
@@ -46,11 +46,12 @@ export interface RootCanvasOptions {
    *  Width/height MUST be provided (OffscreenCanvas has no clientWidth).
    *  Caller is responsible for relaying input via host.devices.push*. */
   surface?: OffscreenCanvas;
-  /** Revert to the 1:1 backing store (no devicePixelRatio scaling).
-   *  Use when non-integer DPR (Windows 125%/150%) produces antialiasing
-   *  artifacts or layout misalignment at window edges. Ignored in
-   *  headless/OffscreenCanvas mode (no DPR is available). */
-  disableHidpi?: boolean;
+  /** Set to false to revert to the 1:1 backing store (no
+   *  devicePixelRatio scaling). Use when non-integer DPR (Windows
+   *  125%/150%) produces antialiasing artifacts or layout misalignment
+   *  at window edges. Defaults to true (HiDPI enabled). Ignored in
+   *  headless/OffscreenCanvas mode. */
+  hiDpi?: boolean;
 }
 
 export type RootCanvasSurface = HTMLCanvasElement | OffscreenCanvas;
@@ -64,7 +65,7 @@ export class RootCanvas {
   readonly cssWidth: number;
   readonly cssHeight: number;
   /** Device-pixel ratio. 1 in headless/OffscreenCanvas mode or when
-   *  disableHidpi is set; otherwise window.devicePixelRatio. The root
+   *  hiDpi is false; otherwise window.devicePixelRatio. The root
    *  canvas context is pre-scaled by this factor so all drawing APIs
    *  operate in logical (CSS) coordinates. */
   readonly dpr: number;
@@ -74,7 +75,7 @@ export class RootCanvas {
   readonly headless: boolean;
 
   constructor(options: RootCanvasOptions = {}) {
-    const disableHidpi = options.disableHidpi === true;
+    const hiDpi = options.hiDpi !== false;
     let dpr = 1;
 
     if (options.surface) {
@@ -89,7 +90,7 @@ export class RootCanvas {
       this.cssWidth = options.width ?? (options.element.width || 1024);
       this.cssHeight = options.height ?? (options.element.height || 768);
       this.headless = false;
-      if (!disableHidpi && typeof window !== 'undefined') {
+      if (!hiDpi && typeof window !== 'undefined') {
         dpr = window.devicePixelRatio || 1;
       }
       options.element.width = (this.cssWidth * dpr) | 0;
@@ -100,7 +101,7 @@ export class RootCanvas {
       const parent = options.parent ?? document.body;
       this.cssWidth = options.width ?? 1024;
       this.cssHeight = options.height ?? 768;
-      if (!disableHidpi && typeof window !== 'undefined') {
+      if (!hiDpi && typeof window !== 'undefined') {
         dpr = window.devicePixelRatio || 1;
       }
       const canvas = document.createElement('canvas');

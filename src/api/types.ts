@@ -36,11 +36,12 @@ export interface CreateEmX11Options {
   width?: number;
   /** Logical (CSS) height of the X screen. Default 768. */
   height?: number;
-  /** Revert to the 1:1 backing store (no devicePixelRatio scaling).
-   *  Use when non-integer DPR (Windows 125%/150%) produces antialiasing
-   *  artifacts or layout misalignment at window edges. Ignored in
+  /** Set to false to revert to the 1:1 backing store (no
+   *  devicePixelRatio scaling). Use when non-integer DPR (Windows
+   *  125%/150%) produces antialiasing artifacts or layout misalignment
+   *  at window edges. Defaults to true (HiDPI enabled). Ignored in
    *  headless/OffscreenCanvas mode. */
-  disableHidpi?: boolean;
+  hiDpi?: boolean;
   /** Optional dynamic-loader adapter. Required for `em.dlopen()`;
    *  pyodide-tk supplies a wrapper around `loadDynlib` here. tcldide's
    *  static-archive build leaves it unset. */

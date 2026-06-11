@@ -53,7 +53,7 @@ set(EMX11_RUNTIME_HOOKS
 # linking, Emscripten flags, and output location.
 function(emx11_finalize_demo target)
     set(options "")
-    set(one_value EXPORT_NAME OUTPUT_DIR)
+    set(one_value EXPORT_NAME OUTPUT_DIR HI_DPI)
     set(multi_value LIBS EXTRA_FUNCTIONS EXTRA_RUNTIME_METHODS PRELOAD_FILES)
     cmake_parse_arguments(EMX11_FD "${options}" "${one_value}" "${multi_value}" ${ARGN})
 
@@ -78,6 +78,21 @@ function(emx11_finalize_demo target)
     set(_js_lib "${CMAKE_SOURCE_DIR}/native/src/lib/library_emx11.js")
     if(EXISTS "${_js_lib}")
         target_link_options(${target} PRIVATE "SHELL:--js-library=${_js_lib}")
+    endif()
+
+    # HI_DPI compile option: controls devicePixelRatio scaling on the root
+    # canvas.  Defaults to ON (HiDPI enabled).  Set HI_DPI OFF to revert to
+    # the 1:1 backing store — useful when non-integer DPR (Windows
+    # 125%/150%) causes antialiasing artifacts at window edges.
+    # The cmake function injects a pre-js that sets
+    # Module['emx11HiDpi']=false before the default Host IIFE runs, and
+    # passes -DEMX11_HI_DPI=0 so C code can check the value.
+    if(EMX11_FD_HI_DPI STREQUAL "OFF")
+        target_compile_definitions(${target} PRIVATE EMX11_HI_DPI=0)
+        set(_hi_dpi_pre "${CMAKE_SOURCE_DIR}/native/src/lib/hi-dpi-pre.js")
+        if(EXISTS "${_hi_dpi_pre}")
+            target_link_options(${target} PRIVATE "SHELL:--pre-js=${_hi_dpi_pre}")
+        endif()
     endif()
 
     # Inject the default Host IIFE so Layer 1 (zero-JS) mode auto-creates

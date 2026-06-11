@@ -34,10 +34,10 @@ function createDefaultHost(Module: Record<string, unknown>): unknown {
   if (w) opts.width = w;
   if (h) opts.height = h;
 
-  // HiDPI disable: set Module['emx11DisableHidpi'] = true to revert to
-  // 1:1 backing store when non-integer DPR causes antialiasing artifacts
+  // HiDPI opt-out: set Module['emx11HiDpi'] = false to revert to 1:1
+  // backing store when non-integer DPR causes antialiasing artifacts
   // or layout misalignment (e.g. xcalc's Athena Toggle LCD ghosting).
-  if (Module['emx11DisableHidpi']) opts.disableHidpi = true;
+  if (Module['emx11HiDpi'] === false) opts.hiDpi = false;
 
   const host = new Host(opts);
   host.attachToBridge();
