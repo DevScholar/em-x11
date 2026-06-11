@@ -33,7 +33,7 @@ pnpm install
 em-x11/
 ├── AGENTS.md                  — this file
 ├── CMakeLists.txt             — root build: native/ + third-party/ + examples/
-├── package.json               — scripts: postinstall, build:native, build:web, dev
+├── package.json               — scripts: postinstall, build, build:examples, dev
 ├── patches/                   — patches applied on top of upstream third-party sources
 │   └── libXt/                 —   one subdirectory per patched library
 ├── scripts/
@@ -73,9 +73,8 @@ Key distinction: `cmake/third-party/` holds CMakeLists.txt for third-party libra
 ## Build
 
 ```
-pnpm build:native    # emcmake cmake + cmake --build (WSL)
-pnpm build:web       # vite build (WSL is fine for build, just not dev server)
-pnpm build           # both
+pnpm build               # library only (cmake -DBUILD_EXAMPLES=OFF + host IIFE)
+pnpm build:examples      # library + all demos + demo site (cmake -DBUILD_EXAMPLES=ON + vite build)
 ```
 
 ## Adding a new third-party dependency

@@ -280,14 +280,18 @@ canvas creation and event routing automatically.
 From the repo root:
 
 ```bash
-pnpm build      # cmake configure + build + host IIFE + vite bundle
-pnpm dev        # vite dev server (http://localhost:5173)
-pnpm preview    # serve the production build from dist/
+pnpm build:examples  # library + all demos + demo site
+pnpm dev             # vite dev server (http://localhost:5173)
+pnpm preview         # serve the production build from dist/
 ```
 
-`pnpm build` runs three steps: `build:native` (cmake configure + build
-all wasm artifacts), `build:host` (vite bundles the default Host IIFE
-for Layer 1 mode), and `build:web` (vite bundles the demo pages).
+`pnpm build:examples` runs two steps:
+`build:examples:native` (cmake configure + build all wasm artifacts
+including examples) and `build:examples:web` (vite bundles the demo pages
+into `dist/`).
+
+For library-only builds (CI, packaging): `pnpm build` compiles only
+the native libraries and host IIFE, skipping examples entirely.
 
 Open `http://localhost:5173/examples/xcalc/` and you should see xcalc.
 
@@ -304,7 +308,7 @@ event queue → Xt's `WaitForSomething` → xcalc's action procs).
   artifact. The em-x11 host and the libem_x11 inside the demo
   communicate via signature-tied EM_JS bridges; if you change a
   bridge in `native/em_x11/bridges.c` you must rebuild every demo.
-  `pnpm build` rebuilds everything; partial builds are the usual cause.
+  `pnpm build:examples` rebuilds everything; partial builds are the usual cause.
 - **Browser tab freezes on first redraw** — you forgot
   `JSPI=1`. Without it, the moment xcalc calls `XNextEvent` and
   there is no event ready, the wasm thread spins instead of

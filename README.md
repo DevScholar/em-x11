@@ -18,10 +18,16 @@ A WebAssembly implementation of the X11/Xlib C API that renders X windows to a b
 pnpm install
 ```
 
-# Build
+# Build (library only)
 
 ```bash
 pnpm build
+```
+
+# Build with examples
+
+```bash
+pnpm build:examples
 ```
 
 # Run

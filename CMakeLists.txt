@@ -21,6 +21,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts")
 # Default warning flags for our own code. Third-party code opts out.
 set(EM_X11_WARN_FLAGS -Wall -Wextra -Wno-unused-parameter)
 
+option(BUILD_EXAMPLES "Build example applications" ON)
+
 # Demo helper (em_x11_finalize_demo, EM_X11_LIB_DIR, EM_X11_INCLUDE_DIR).
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(em_x11_demo)
@@ -39,10 +41,12 @@ add_subdirectory(ignored-area/third-party/libXt)
 add_subdirectory(ignored-area/third-party/libXmu)
 add_subdirectory(ignored-area/third-party/libXpm)
 add_subdirectory(ignored-area/third-party/libXaw)
-add_subdirectory(examples/hello)
-add_subdirectory(examples/xt-hello)
-add_subdirectory(examples/xcalc)
-add_subdirectory(examples/xeyes)
-add_subdirectory(examples/glxgears)
-# twm wasm artifact needed by twm-session demo (no index.html — not a standalone demo).
-add_subdirectory(examples/twm)
+if(BUILD_EXAMPLES)
+  add_subdirectory(examples/hello)
+  add_subdirectory(examples/xt-hello)
+  add_subdirectory(examples/xcalc)
+  add_subdirectory(examples/xeyes)
+  add_subdirectory(examples/glxgears)
+  # twm wasm artifact needed by twm-session demo (no index.html — not a standalone demo).
+  add_subdirectory(examples/twm)
+endif()
