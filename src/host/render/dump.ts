@@ -135,12 +135,14 @@ export function cropRootCanvasToWindow(
   win: ManagedWindow,
 ): OffscreenCanvas | null {
   const { ax, ay } = absOrigin(r, win);
+  const dpr = r.canvas.dpr;
   const crop = new OffscreenCanvas(Math.max(1, win.width), Math.max(1, win.height));
   const cctx = crop.getContext('2d')!;
   cctx.imageSmoothingEnabled = false;
   cctx.drawImage(
     r.canvas.surface as unknown as CanvasImageSource,
-    ax, ay, win.width, win.height,
+    (ax * dpr) | 0, (ay * dpr) | 0,
+    (win.width * dpr) | 0, (win.height * dpr) | 0,
     0, 0, win.width, win.height,
   );
   return crop;

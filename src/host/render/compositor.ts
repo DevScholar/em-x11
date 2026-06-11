@@ -76,8 +76,8 @@ export function composeNow(r: RendererState, cs: CompositorState): void {
 
 function compose(r: RendererState): void {
   const ctx = r.canvas.ctx;
-  const w = r.canvas.surface.width;
-  const h = r.canvas.surface.height;
+  const w = r.canvas.cssWidth;
+  const h = r.canvas.cssHeight;
   ctx.save();
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, w, h);

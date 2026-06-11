@@ -358,11 +358,12 @@ export interface DomTextInputBridgeOptions {
    *  translate root-relative caret pixels back into viewport CSS
    *  pixels for textarea positioning. */
   canvas: HTMLCanvasElement;
-  /** Logical (CSS) X-screen width passed to createEmX11. Used to
-   *  derive the canvas-element-to-X-pixel scale. Defaults to
-   *  canvas.width (1:1 backing). */
+  /** Logical (CSS) X-screen width passed to createEmX11. Defaults to the
+   *  canvas CSS width from getBoundingClientRect (NOT canvas.width, which
+   *  may be scaled by devicePixelRatio). */
   rootWidth?: number;
-  /** Logical (CSS) X-screen height. Defaults to canvas.height. */
+  /** Logical (CSS) X-screen height. Defaults to the canvas CSS height
+   *  from getBoundingClientRect. */
   rootHeight?: number;
   /** Receive composed / pasted text. The caller routes this into the
    *  worker, which calls emX11.display.inject.textKey. */
@@ -416,8 +417,8 @@ export function createDomTextInputBridge(
   const reposition = (): void => {
     if (!focused || !lastAbs || !ta) return;
     const rect = opts.canvas.getBoundingClientRect();
-    const rootW = opts.rootWidth ?? opts.canvas.width;
-    const rootH = opts.rootHeight ?? opts.canvas.height;
+    const rootW = opts.rootWidth ?? (rect.width || opts.canvas.width);
+    const rootH = opts.rootHeight ?? (rect.height || opts.canvas.height);
     const dprX = rect.width / rootW;
     const dprY = rect.height / rootH;
     ta.style.left = (rect.left + lastAbs.x * dprX) + 'px';
