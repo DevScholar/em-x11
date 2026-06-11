@@ -259,7 +259,7 @@ build_xlfd(char* out, size_t outlen, const char* css_font, int pixel_size) {
   /* Classic 14-field XLFD with iso10646-1 at registry-encoding. */
   snprintf(out,
            outlen,
-           "-em-x11-%s-%s-%c-normal--%d-*-*-*-*-*-iso10646-1",
+           "-em_x11-%s-%s-%c-normal--%d-*-*-*-*-*-iso10646-1",
            family,
            weight,
            slant,
