@@ -64,9 +64,13 @@ function layer1DemoHtml(name: string): string {
     <title>${name} - EmX11</title>
   </head>
   <body>
+    <script src="/artifacts/em-x11-default-host.js"></script>
     <script type="module">
       const factory = (await import('/artifacts/${name}/${name}.js')).default;
-      await factory();
+      await factory({
+        thisProgram: '${name}',
+        locateFile: (path) => '/artifacts/${name}/' + path,
+      });
     </script>
   </body>
 </html>
