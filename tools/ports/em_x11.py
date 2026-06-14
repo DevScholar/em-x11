@@ -40,6 +40,7 @@ _PORT_LIBS = [
     'libGLX.a',
     'libXext.a',
     'libX11.a',
+    'libem_x11_event_queue.a',
 ]
 
 

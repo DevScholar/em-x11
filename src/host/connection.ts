@@ -273,7 +273,7 @@ export class ConnectionManager {
    *
    *  Returns -1 if a launch is already in progress (pendingLaunch is
    *  set — launches are serialized). */
-  posixSpawn(glueUrl: string, args: string[], env: string[]): number {
+  posixSpawn(glueUrl: string, args: string[], _env: string[]): number {
     if (this.pendingLaunch || this.pendingPosixSpawnConnId !== null) {
       return -1;
     }
@@ -291,15 +291,17 @@ export class ConnectionManager {
 
     // Build LoadOptions from posix_spawn args.  args[0] is the program
     // name by POSIX convention; remaining entries are argv.
-    const thisProgram = args.length > 0 ? args[0] : undefined;
-    const argv = args.length > 1 ? args.slice(1) : undefined;
+    const thisProgram = args.length > 0 ? args[0]! : '';
+    const argv = args.length > 1 ? args.slice(1) : [];
+    const wasmUrl = glueUrl.replace(/\.js$/, '.wasm');
 
     // Fire-and-forget: the async function captures connId for cleanup
     // on failure.  On success, launchClient binds the Module to the
     // pre-allocated Connection and drains deferred Exposes.
     const launchPromise = this.launchClient({
       glueUrl,
-      argv,
+      wasmUrl,
+      arguments: argv,
       thisProgram,
     });
     launchPromise
@@ -344,7 +346,7 @@ export class ConnectionManager {
      * passes us the side module's Module as `rawModule`; set the Host
      * on it so every subsequent bridge call from this connection finds
      * the Host without reaching for the global scope. */
-    (rawModule as Record<string, unknown>)['emX11Host'] = this.host;
+    (rawModule as unknown as Record<string, unknown>)['emX11Host'] = this.host;
 
     /* Push the browser-resolved keyboard layout into the client's
      * keysym_table before its first KeyPress. Mirrors what launchClient

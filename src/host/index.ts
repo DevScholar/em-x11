@@ -679,10 +679,10 @@ export class Host implements EmX11Host {
         out[i + 2] = bgR;
         out[i + 3] = 0xff;
       } else {
-        out[i]     = src[i + 2];
-        out[i + 1] = src[i + 1];
-        out[i + 2] = src[i];
-        out[i + 3] = src[i + 3];
+        out[i]     = src[i + 2]!;
+        out[i + 1] = src[i + 1]!;
+        out[i + 2] = src[i]!;
+        out[i + 3] = src[i + 3]!;
       }
     }
     return out;
