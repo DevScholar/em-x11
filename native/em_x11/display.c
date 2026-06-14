@@ -58,7 +58,7 @@ EmxWindow* em_x11_window_find(Display* dpy, Window id) {
  * Real Xlib syncs with the server; we just hand out monotonically. */
 static XID em_x11_resource_alloc(Display* dpy) { return em_x11_next_xid(dpy); }
 
-static void em_x11_init_screen(Display* dpy) {
+static void em_x11_init_screen(Display* dpy, int width, int height) {
   /* One 24-bit TrueColor visual, one depth, one pixmap format. */
   dpy->visual0.ext_data = NULL;
   dpy->visual0.visualid = 1;
@@ -82,8 +82,8 @@ static void em_x11_init_screen(Display* dpy) {
   s->ext_data = NULL;
   s->display = dpy;
   s->root = 0; /* fixed up below */
-  s->width = EM_X11_SCREEN_WIDTH;
-  s->height = EM_X11_SCREEN_HEIGHT;
+  s->width = width;
+  s->height = height;
   s->mwidth = 270; /* 96 dpi, ~10 inches wide  */
   s->mheight = 203;
   s->ndepths = 1;
@@ -101,6 +101,14 @@ static void em_x11_init_screen(Display* dpy) {
   s->root_input_mask = 0;
 }
 
+static int env_override(const char* name, int default_val) {
+  const char* val = getenv(name);
+  if (!val)
+    return default_val;
+  int n = atoi(val);
+  return n > 0 ? n : default_val;
+}
+
 Display* XOpenDisplay(const char* display_name) {
   /* Force the bridges.c TU into the link so its EM_JS bodies survive
    * archive-pull semantics. See bridges.c for the rationale. */
@@ -110,6 +118,9 @@ Display* XOpenDisplay(const char* display_name) {
   if (g_display_open) {
     return &g_display;
   }
+
+  int screen_w = env_override("EM_X11_SCREEN_WIDTH", EM_X11_SCREEN_WIDTH);
+  int screen_h = env_override("EM_X11_SCREEN_HEIGHT", EM_X11_SCREEN_HEIGHT);
 
   memset(&g_display, 0, sizeof(g_display));
 
@@ -184,7 +195,7 @@ Display* XOpenDisplay(const char* display_name) {
    * subset of keys (see project_em_x11_keysym_table_prepop). */
   em_x11_keysym_table_install_us_qwerty(&g_display);
 
-  em_x11_init_screen(&g_display);
+  em_x11_init_screen(&g_display, screen_w, screen_h);
   g_display.screens = &g_display.screen0;
 
   /* Root window is Host-owned since Step 3a. Every client's XOpenDisplay
@@ -200,13 +211,13 @@ Display* XOpenDisplay(const char* display_name) {
   root->parent = None;
   root->x = 0;
   root->y = 0;
-  root->width = EM_X11_SCREEN_WIDTH;
-  root->height = EM_X11_SCREEN_HEIGHT;
+  root->width = screen_w;
+  root->height = screen_h;
   root->background_pixel = 0x00FFFFFFUL;
   root->mapped = true;
   g_display.screen0.root = root_xid;
 
-  em_x11_js_init(EM_X11_SCREEN_WIDTH, EM_X11_SCREEN_HEIGHT);
+  em_x11_js_init(screen_w, screen_h);
 
   g_display_open = true;
 
