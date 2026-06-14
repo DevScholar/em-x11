@@ -1,26 +1,15 @@
 /**
  * Fixed-size root canvas.
  *
- * Plan B architecture: all X windows paint onto a single <canvas>. For the
- * skeleton we keep the canvas at a fixed logical size (default 1024x768)
- * and center it in the viewport. Browser window resize does NOT reflow
- * the canvas -- the X screen is a virtual display of constant dimensions.
+ * All X windows paint onto a single <canvas>. The canvas stays at a fixed
+ * logical size (default 1024x768) and centers in the viewport. Browser
+ * window resize does NOT reflow the canvas -- the X screen is a virtual
+ * display of constant dimensions.
  *
- * HiDPI (devicePixelRatio) support is on by default. The per-window
- * backing surfaces stay at logical (X) resolution so every widget draw
- * snaps to integer X coordinates -- the text/fillRect antialiasing
- * artifacts described below are avoided at the window-backing level.
- * The root canvas compositor then scales each window backing up to
- * device resolution via ctx.scale(dpr, dpr) + drawImage. On integer-DPR
- * displays (2x retina, 3x phones) every logical pixel maps to an exact
- * integer device-pixel boundary, so there is no sub-pixel ghosting. On
- * non-integer DPR (Windows 125%/150%) window edges CAN land on
- * fractional device pixels and the browser will antialias the boundary
- * -- source-over compositing can't undo partial-alpha pixels, so widget
- * edges that repaint in alternating colours (Athena Toggle's Set/Unset
- * cycle on XCalc's LCD) may accumulate an L-shaped ghost at rectangle
- * corners. Set `hiDpi: false` (or `Module['emX11HiDpi'] = false`)
- * to revert to the 1:1 backing store when this is visible.
+ * Physical pixels always equal CSS pixels (1:1). There is no
+ * devicePixelRatio scaling, so on high-DPI screens the browser will
+ * upscale the canvas, which may look softer than native but avoids
+ * sub-pixel antialiasing artifacts at widget edges.
  *
  * Three construction modes:
  *
@@ -46,12 +35,6 @@ export interface RootCanvasOptions {
    *  Width/height MUST be provided (OffscreenCanvas has no clientWidth).
    *  Caller is responsible for relaying input via host.devices.push*. */
   surface?: OffscreenCanvas;
-  /** Set to false to revert to the 1:1 backing store (no
-   *  devicePixelRatio scaling). Use when non-integer DPR (Windows
-   *  125%/150%) produces antialiasing artifacts or layout misalignment
-   *  at window edges. Defaults to true (HiDPI enabled). Ignored in
-   *  headless/OffscreenCanvas mode. */
-  hiDpi?: boolean;
 }
 
 export type RootCanvasSurface = HTMLCanvasElement | OffscreenCanvas;
@@ -64,20 +47,12 @@ export class RootCanvas {
   readonly ctx: RootCanvasContext;
   readonly cssWidth: number;
   readonly cssHeight: number;
-  /** Device-pixel ratio. 1 in headless/OffscreenCanvas mode or when
-   *  hiDpi is false; otherwise window.devicePixelRatio. The root
-   *  canvas context is pre-scaled by this factor so all drawing APIs
-   *  operate in logical (CSS) coordinates. */
-  readonly dpr: number;
-  /** True when running against an OffscreenCanvas. DOM access is then
-   *  unavailable (we may be in a Worker). InputBridge consults this to
-   *  skip its addEventListener path. */
+  /** Always 1 — no devicePixelRatio scaling. */
+  readonly dpr: number = 1;
+  /** True when running against an OffscreenCanvas. */
   readonly headless: boolean;
 
   constructor(options: RootCanvasOptions = {}) {
-    const hiDpi = options.hiDpi !== false;
-    let dpr = 1;
-
     if (options.surface) {
       this.surface = options.surface;
       this.cssWidth = options.width ?? options.surface.width ?? 1024;
@@ -90,23 +65,17 @@ export class RootCanvas {
       this.cssWidth = options.width ?? (options.element.width || 1024);
       this.cssHeight = options.height ?? (options.element.height || 768);
       this.headless = false;
-      if (!hiDpi && typeof window !== 'undefined') {
-        dpr = window.devicePixelRatio || 1;
-      }
-      options.element.width = (this.cssWidth * dpr) | 0;
-      options.element.height = (this.cssHeight * dpr) | 0;
+      options.element.width = this.cssWidth;
+      options.element.height = this.cssHeight;
       options.element.style.width = `${this.cssWidth}px`;
       options.element.style.height = `${this.cssHeight}px`;
     } else {
       const parent = options.parent ?? document.body;
       this.cssWidth = options.width ?? 1024;
       this.cssHeight = options.height ?? 768;
-      if (!hiDpi && typeof window !== 'undefined') {
-        dpr = window.devicePixelRatio || 1;
-      }
       const canvas = document.createElement('canvas');
-      canvas.width = (this.cssWidth * dpr) | 0;
-      canvas.height = (this.cssHeight * dpr) | 0;
+      canvas.width = this.cssWidth;
+      canvas.height = this.cssHeight;
       canvas.style.width = `${this.cssWidth}px`;
       canvas.style.height = `${this.cssHeight}px`;
       canvas.style.display = 'block';
@@ -119,21 +88,14 @@ export class RootCanvas {
       this.headless = false;
     }
 
-    this.dpr = dpr;
-
     const ctx = this.surface.getContext('2d', { alpha: false });
     if (!ctx) {
       throw new Error('em-x11: 2D canvas context unavailable');
     }
     this.ctx = ctx as RootCanvasContext;
-    if (dpr !== 1) {
-      this.ctx.scale(dpr, dpr);
-    }
   }
 
-  /** Back-compat accessor. Existing demos read `host.canvas.element` to
-   *  attach DOM listeners themselves; throws in headless/worker mode so
-   *  callers get a clear error rather than a silent undefined. */
+  /** Back-compat accessor. Throws in headless/worker mode. */
   get element(): HTMLCanvasElement {
     if (this.headless) {
       throw new Error(
