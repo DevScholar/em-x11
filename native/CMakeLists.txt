@@ -99,25 +99,6 @@ set(EM_X11_ALL_SOURCES
     ${EM_X11_GLX_SOURCES}
 )
 
-# Regenerate keysym_table.c from keysymdef.h whenever the header changes.
-# Keeps XStringToKeysym / XKeysymToString in sync with the full X11 set
-# without having to hand-edit ~2000 entries. The awk script is committed;
-# running it is a no-op on a clean checkout.
-set(EM_X11_KEYSYM_DEF "${EM_X11_PUBLIC_HEADERS_DIR}/X11/keysymdef.h")
-set(EM_X11_KEYSYM_OUT "${CMAKE_CURRENT_SOURCE_DIR}/em_x11/keysym_table.c")
-set(EM_X11_KEYSYM_AWK "${CMAKE_CURRENT_SOURCE_DIR}/em_x11/gen_keysyms.awk")
-find_program(AWK_EXECUTABLE NAMES awk gawk)
-if(AWK_EXECUTABLE)
-    add_custom_command(
-        OUTPUT  "${EM_X11_KEYSYM_OUT}"
-        COMMAND "${AWK_EXECUTABLE}" -f "${EM_X11_KEYSYM_AWK}" "${EM_X11_KEYSYM_DEF}"
-                > "${EM_X11_KEYSYM_OUT}"
-        DEPENDS "${EM_X11_KEYSYM_DEF}" "${EM_X11_KEYSYM_AWK}"
-        COMMENT "Regenerating keysym_table.c from keysymdef.h"
-        VERBATIM
-    )
-endif()
-
 # --- Static archives ----------------------------------------------------------
 
 # em_x11_add_static_lib(<target> <output_name> <sources...>)

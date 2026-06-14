@@ -1,5 +1,5 @@
-/* Auto-generated from X11/keysymdef.h by gen_keysyms.awk.
- * Do not edit by hand. */
+/* X11 keysym table — manually maintained.
+ * Originally generated from X11/keysymdef.h; osf keysyms added for Motif. */
 
 #include "keysym_table.h"
 
