@@ -394,8 +394,9 @@ int XFindContext(Display* dpy,
       return 0;
     }
   }
-  if (data_return)
-    *data_return = NULL;
+  /* Standard Xlib: do NOT write to *data_return when not found.
+   * Callers (e.g. Motif DisplayInitialize) rely on the original
+   * variable being preserved across a failed lookup. */
   return XCNOENT;
 }
 
