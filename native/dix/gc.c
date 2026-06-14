@@ -23,6 +23,14 @@ static void apply_values(GC gc, unsigned long valuemask, XGCValues* values) {
     gc->fill_style = values->fill_style;
   if (valuemask & GCFont)
     gc->font = values->font;
+  if (valuemask & GCTile)
+    gc->tile = values->tile;
+  if (valuemask & GCStipple)
+    gc->stipple = values->stipple;
+  if (valuemask & GCTileStipXOrigin)
+    gc->ts_x_origin = values->ts_x_origin;
+  if (valuemask & GCTileStipYOrigin)
+    gc->ts_y_origin = values->ts_y_origin;
 }
 
 GC XCreateGC(Display* display,
@@ -43,6 +51,10 @@ GC XCreateGC(Display* display,
   gc->fill_style = FillSolid;
   gc->function = GXcopy;
   gc->font = None;
+  gc->tile = None;
+  gc->stipple = None;
+  gc->ts_x_origin = 0;
+  gc->ts_y_origin = 0;
 
   apply_values(gc, valuemask, values);
   return gc;
@@ -62,6 +74,7 @@ int XCopyGC(Display* display, GC src, unsigned long valuemask, GC dst) {
   if (!src || !dst)
     return 0;
   XGCValues v;
+  memset(&v, 0, sizeof(v));
   v.foreground = src->foreground;
   v.background = src->background;
   v.line_width = src->line_width;
@@ -69,6 +82,10 @@ int XCopyGC(Display* display, GC src, unsigned long valuemask, GC dst) {
   v.fill_style = src->fill_style;
   v.function = src->function;
   v.font = src->font;
+  v.tile = src->tile;
+  v.stipple = src->stipple;
+  v.ts_x_origin = src->ts_x_origin;
+  v.ts_y_origin = src->ts_y_origin;
   apply_values(dst, valuemask, &v);
   return 1;
 }
@@ -94,6 +111,14 @@ int XGetGCValues(Display* display,
     values_return->function = gc->function;
   if (valuemask & GCFont)
     values_return->font = gc->font;
+  if (valuemask & GCTile)
+    values_return->tile = gc->tile;
+  if (valuemask & GCStipple)
+    values_return->stipple = gc->stipple;
+  if (valuemask & GCTileStipXOrigin)
+    values_return->ts_x_origin = gc->ts_x_origin;
+  if (valuemask & GCTileStipYOrigin)
+    values_return->ts_y_origin = gc->ts_y_origin;
   return 1;
 }
 
@@ -149,19 +174,38 @@ int XSetFunction(Display* display, GC gc, int function) {
   (void)display;
   if (!gc)
     return 0;
-  /* Canvas 2D has no logical-op concept beyond GXcopy. We track the
-   * value so drawing primitives can short-circuit non-copy modes
-   * (XOR rubber-band etc.) rather than overdraw destructively. See
-   * drawing.c::gc_draw_disabled. */
   gc->function = function;
   return 1;
 }
 
-/* --- Clipping stubs ---
- *
- * Clip regions aren't yet wired into the compositor. Accepting the calls
- * and remembering nothing lets Xt/Xaw progress; widget clipping just
- * degenerates to the window bounds until we plumb this through. */
+/* --- Tile / Stipple --- */
+
+int XSetTile(Display* dpy, GC gc, Pixmap tile) {
+  (void)dpy;
+  if (!gc)
+    return 0;
+  gc->tile = tile;
+  return 1;
+}
+
+int XSetStipple(Display* dpy, GC gc, Pixmap stipple) {
+  (void)dpy;
+  if (!gc)
+    return 0;
+  gc->stipple = stipple;
+  return 1;
+}
+
+int XSetTSOrigin(Display* dpy, GC gc, int ts_x_origin, int ts_y_origin) {
+  (void)dpy;
+  if (!gc)
+    return 0;
+  gc->ts_x_origin = ts_x_origin;
+  gc->ts_y_origin = ts_y_origin;
+  return 1;
+}
+
+/* --- Clipping stubs --- */
 
 int XSetClipMask(Display* display, GC gc, Pixmap pixmap) {
   (void)display;
@@ -233,29 +277,10 @@ int XSetPlaneMask(Display* dpy, GC gc, unsigned long plane_mask) {
   (void)plane_mask;
   return 1;
 }
-int XSetStipple(Display* dpy, GC gc, Pixmap stipple) {
-  (void)dpy;
-  (void)gc;
-  (void)stipple;
-  return 1;
-}
 int XSetSubwindowMode(Display* dpy, GC gc, int subwindow_mode) {
   (void)dpy;
   (void)gc;
   (void)subwindow_mode;
-  return 1;
-}
-int XSetTSOrigin(Display* dpy, GC gc, int ts_x_origin, int ts_y_origin) {
-  (void)dpy;
-  (void)gc;
-  (void)ts_x_origin;
-  (void)ts_y_origin;
-  return 1;
-}
-int XSetTile(Display* dpy, GC gc, Pixmap tile) {
-  (void)dpy;
-  (void)gc;
-  (void)tile;
   return 1;
 }
 int XSetRegion(Display* dpy, GC gc, Region r) {
