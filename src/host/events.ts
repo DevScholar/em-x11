@@ -212,7 +212,9 @@ export class EventDispatcher {
     exposedByWindow: Map<number, Region>,
     forceModule: ModuleCcallSurface | null = null,
   ): void {
-    if (exposedByWindow.size === 0) return;
+    if (exposedByWindow.size === 0) {
+      return;
+    }
     for (const [id, region] of exposedByWindow) {
       if (region.length === 0) continue;
       const origin = this.host.getWindowAbsOrigin(id);

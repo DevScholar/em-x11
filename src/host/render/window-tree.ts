@@ -150,40 +150,29 @@ function computeClipsRecursive(
   win: ManagedWindow,
   universe: Region,
 ): void {
-  /* xorg miComputeClips:
-   *   pWin->borderClip = universe
-   *   universe ∩= winSize          (winSize = content rect, shaped)
-   *   for each viewable child top-to-bottom:
-   *     childUniverse = universe ∩ child->borderSize  (shaped)
-   *     recurse(child, childUniverse)
-   *     universe -= child->borderSize                  (shaped)
-   *   pWin->clipList = universe
-   *
-   * SHAPE integration: when a window has a bounding shape (XShape
-   * SHAPE_BOUNDING), `borderSize` is the bounding rect intersected
-   * with the shape, and `winSize` is the content rect intersected
-   * with the shape. Both are used to occlude lower siblings -- so
-   * xcalc sitting under a shaped xeyes shell now sees only the
-   * SHAPE silhouette as the occluder, not the full bounding rect.
-   * That's how the see-through area between the eyes lets lower-z
-   * pixels (and incoming Expose) propagate to xcalc, mirroring
-   * xserver/Xext/shape.c. */
   win.borderClip = universe;
 
   const ws = winSize(r, win);
   let innerUniverse = regionIntersect(universe, ws);
 
-  /* Top-to-bottom traversal: descending stackOrder so each iteration
-   * sees only what wasn't covered by higher-z siblings. */
-  const children = sortedMappedChildrenDescending(r, win.id);
+  /* Iterate ALL children (not just mapped). Motif containers like
+   * XmRowColumn may have mappedWhenManaged=False — their children are
+   * mapped but the container itself stays unmapped. Unmapped children
+   * don't occlude siblings (their borderSize is not subtracted), but
+   * we still recurse into them so mapped grandchildren get clipLists. */
+  const children = sortedChildrenDescending(r, win.id);
   for (const child of children) {
     const childBSize = borderSize(r, child);
     const childUniverse = regionIntersect(innerUniverse, childBSize);
     computeClipsRecursive(r, child, childUniverse);
-    innerUniverse = regionSubtract(innerUniverse, childBSize);
+    if (child.mapped) {
+      innerUniverse = regionSubtract(innerUniverse, childBSize);
+    }
   }
 
-  win.clipList = innerUniverse;
+  if (win.mapped) {
+    win.clipList = innerUniverse;
+  }
 }
 
 /** Window's `borderSize` (xorg term): bounding rect, possibly clipped
@@ -221,13 +210,13 @@ function winSize(r: RendererState, win: ManagedWindow): Region {
   return regionIntersect(shapeAbs, [cr]);
 }
 
-function sortedMappedChildrenDescending(
+function sortedChildrenDescending(
   r: RendererState,
   parentId: number,
 ): ManagedWindow[] {
   const out: ManagedWindow[] = [];
   for (const w of r.windows.values()) {
-    if (w.parent === parentId && w.mapped) out.push(w);
+    if (w.parent === parentId) out.push(w);
   }
   out.sort((a, b) => b.stackOrder - a.stackOrder);
   return out;
@@ -358,7 +347,9 @@ export function configureWindow(
   if (!win) return new Map();
   const sameGeom =
     win.x === x && win.y === y && win.width === w && win.height === h;
-  if (sameGeom) return new Map();
+  if (sameGeom) {
+    return new Map();
+  }
   if (getDebugFlags()?.tracePaint) {
     console.log('[paint] configureWindow', id, '(', x, y, w, h, ')');
   }
@@ -452,7 +443,8 @@ export function configureWindow(
    * "newly visible AND unpainted" and emits Expose + bg paint for the
    * grown area without any special-case branch here. */
   r.autoSnapshot?.scheduleCapture(r, 'configure', id);
-  return paintExposedRegions(r, oldClips);
+  const result = paintExposedRegions(r, oldClips);
+  return result;
 }
 
 /** XReparentWindow: change a window's parent link and local origin.

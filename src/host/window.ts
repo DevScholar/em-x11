@@ -192,14 +192,6 @@ export class WindowManager {
   }
 
   onMap(connId: number, id: number): void {
-    /* SubstructureRedirect decision (x11protocol.txt §1592):
-     *   Redirect applies iff the window's PARENT has a connection
-     *   that selected SubstructureRedirectMask on it, AND the caller
-     *   is a different connection, AND override_redirect is False.
-     * Otherwise proceed with the actual map. The redirect path is
-     * dormant in current demos -- no client subscribes to it -- but
-     * the plumbing stays so a future WM (Host-embedded or another
-     * X-client WM port) can light it up without touching Host. */
     const parent = this.host.renderer.parentOf(id);
     const holderConnId = parent !== 0 ? this.host.events.redirectHolderFor(parent) : null;
     const overrideRedirect = this.overrideRedirect.get(id) ?? false;
@@ -211,17 +203,6 @@ export class WindowManager {
       this.host.events.dispatchMapRequest(holderConnId, parent, id);
       return;
     }
-    /* Region-driven Expose: mapping a window expands its clipList from
-     * empty to its new visible area; previously-higher-z siblings'
-     * clipLists shrink (no expose for them, correctly). Already-mapped
-     * descendants of a freshly-mapped ancestor (Xt maps children before
-     * shell; mapping shell makes the whole subtree viewable for the
-     * first time) get a non-empty diff via the recompute pass.
-     *
-     * Routing: pushExposesForRegions resolves each window's owner via
-     * connOf(id). When the owner has no Module yet (initial bootstrap),
-     * the call defers via deferExpose and ConnectionManager.launchClient
-     * drains it once the Module binds. */
     const exposed = this.host.renderer.mapWindow(id);
     this.host.events.pushExposesForRegions(exposed, null);
   }
