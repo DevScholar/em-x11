@@ -45,7 +45,7 @@ typedef struct EmxFont {
   int pixel_size;
   char css[128];
   XFontStruct fs;
-  XFontProp props[1]; /* XA_FONT -> atom of XLFD name */
+  XFontProp props[2]; /* XA_FONT + CHARSET_REGISTRY → iso10646-1 */
   XCharStruct per_char[EM_X11_PER_CHAR_COUNT]; /* retained for XTextWidth
                                                 * fast paths that key on
                                                 * the ASCII band */
@@ -59,7 +59,18 @@ static EmxFont g_fonts[EM_X11_MAX_FONTS];
  * truncated if too long). Returns true if the field exists. Field
  * numbering is 1-indexed starting after the leading '-'. */
 static bool xlfd_field(const char* name, int field, char* buf, size_t buflen) {
-  if (!name || name[0] != '-' || buflen == 0)
+  if (!name || buflen == 0)
+    return false;
+  /* Accept the common wildcard pattern "*-(foundry substitution)*" where
+   * the leading "-" of a classic XLFD is omitted.  Prepend a synthetic
+   * "-" so field counting works identically. */
+  if (name[0] == '*') {
+    /* Allocate on the stack: worst-case XLFD is ~200 chars + 1 dash. */
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "-%s", name);
+    return xlfd_field(tmp, field, buf, buflen);
+  }
+  if (name[0] != '-')
     return false;
   int f = 0;
   const char* p = name + 1;
@@ -328,8 +339,10 @@ static void fill_font_struct(Display* dpy, EmxFont* f) {
   build_xlfd(xlfd, sizeof(xlfd), f->css, f->pixel_size);
   f->props[0].name = XA_FONT;
   f->props[0].card32 = (unsigned long)XInternAtom(dpy, xlfd, False);
+  f->props[1].name = XInternAtom(dpy, "CHARSET_REGISTRY", False);
+  f->props[1].card32 = (unsigned long)XInternAtom(dpy, "ISO10646", False);
   fs->properties = f->props;
-  fs->n_properties = 1;
+  fs->n_properties = 2;
 }
 
 /* -- Public API ------------------------------------------------------------ */
