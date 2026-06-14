@@ -573,3 +573,32 @@ ssize_t __wrap_read(int fd, void* buf, size_t count) {
 }
 
 #endif
+
+/* ---- __wrap_select / __wrap_poll — --wrap linker overrides ---------------
+ *
+ * Pyodide's main module (pyodide.asm.wasm) has its own strong _select /
+ * _poll symbols from Emscripten's libc, which side modules cannot
+ * override via {global: true}.  Libraries that call select()/poll()
+ * thus reach Emscripten's non-blocking stubs instead of our JSPI
+ * implementation.
+ *
+ * The workaround: link the *caller* (e.g. libtcl8.6.so) with
+ * -Wl,--wrap=select -Wl,--wrap=poll.  wasm-ld rewrites every call to
+ * `select` → `__wrap_select`, making it an import satisfied by the
+ * functions below.  Our __wrap_* are thin trampolines that delegate to
+ * the real JSPI-capable implementations in this file.
+ *
+ * Without the --wrap flag on the caller, these functions are dead code
+ * and the original Pyodide-builtin select/poll are used instead. */
+
+int __wrap_select(int nfds,
+                  fd_set* readfds,
+                  fd_set* writefds,
+                  fd_set* exceptfds,
+                  struct timeval* timeout) {
+  return select(nfds, readfds, writefds, exceptfds, timeout);
+}
+
+int __wrap_poll(struct pollfd* fds, nfds_t nfds, int timeout) {
+  return poll(fds, nfds, timeout);
+}
