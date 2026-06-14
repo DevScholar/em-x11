@@ -85,6 +85,15 @@ export interface TextInputRemoteHandle {
    *  The remote uses this to position its textarea so the OS IME
    *  candidate window anchors near the X widget caret. */
   positionHint(absX: number, absY: number): void;
+  /** compositionstart: inline preedit begins on the focused window. */
+  preeditStart(window: number): void;
+  /** compositionupdate: composing text changed. caret/chgFirst/chgLength
+   *  in characters. */
+  preeditDraw(window: number, text: string, caret: number,
+              chgFirst: number, chgLength: number): void;
+  /** compositionend: inline preedit ends. Final text arrives separately
+   *  via the existing textKey path. */
+  preeditDone(window: number): void;
 }
 
 /* -- fs ------------------------------------------------------------------ */

@@ -1,14 +1,11 @@
 /*
- * XIM / XIC -- input-method plumbing.
+ * XIM / XIC -- input-method plumbing with inline preedit support.
  *
- * Tier A: enough plumbing that Tk's tkUnixKey.c takes the XIM branch and
- * we can carry typed UTF-8 across the JS->C boundary into Xutf8LookupString.
- * No preedit callbacks yet (composing strings reach Tk only after the OS
- * IME finalises them, via a single KeyPress carrying the composed bytes).
- *
- * Browser binding: XSetICFocus / XSetICValues(XNSpotLocation) cross over
- * to the host so the hidden <textarea> overlay (the OS IME's anchor in
- * canvas-land) follows the focused X widget. See src/host/text-input.ts.
+ * Host bridges: XSetICFocus / XSetICValues(XNSpotLocation) cross over
+ * to the host so the hidden <textarea> overlay anchors the OS IME. The
+ * host feeds composition* events back through em_x11_xim_preedit_start /
+ * _draw / _done, which invoke Tk's preedit callbacks so Tk renders
+ * composing text inline (underlined) at the caret position.
  *
  * Side-channel for typed text: em_x11_set_pending_key_text stuffs UTF-8
  * bytes into a per-display slot; em_x11_push_key_event snapshots them into
@@ -25,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* -- Opaque XIM / XIC structs (Xlib only forward-decls _XIM/_XIC). ------- */
+/* -- Opaque XIM / XIC structs --------------------------------------------- */
 
 struct _XIM {
   Display* dpy;
@@ -37,13 +34,36 @@ struct _XIC {
   Window focus_window;
   XIMStyle input_style;
   /* Spot location (XNSpotLocation): caret position in window-local
-   * pixels, set by Tk every time the entry's caret moves. We forward
-   * (focus_window, x, y) to the host so the hidden textarea overlay
-   * tracks the caret -- OS IME candidate windows then anchor there. */
+   * pixels, set by Tk every time the entry's caret moves. */
   int spot_x;
   int spot_y;
   int have_spot;
+
+  /* Linked list (anchor in dpy->xic_list). */
+  struct _XIC* next;
+
+  /* Preedit callbacks registered by the client (Tk). Stored as
+   * XICCallback = { XPointer client_data; XICProc callback; }.
+   * Signature: Bool callback(XIC, XPointer client_data, XPointer data).
+   * data is NULL for start/done; &XIMPreeditDrawCallbackStruct for draw;
+   * &XIMPreeditCaretCallbackStruct for caret. */
+  XICCallback preedit_start_cb;
+  XICCallback preedit_done_cb;
+  XICCallback preedit_draw_cb;
+  XICCallback preedit_caret_cb;
+  int have_preedit_start;
+  int have_preedit_done;
+  int have_preedit_draw;
+  int have_preedit_caret;
+
+  /* True while an OS IME composition session is active. Composition
+   * updates between start and done fire the draw callback; KeyPress
+   * events on this window are filtered so Tk doesn't double-process. */
+  int preedit_active;
 };
+
+/* Forward: used by XFilterEvent in event_queue.c. */
+static XIC find_xic_for_window(Display* dpy, Window w);
 
 /* -- Bridges to host (text-input.ts) ------------------------------------- */
 
@@ -53,19 +73,37 @@ extern void em_x11_js_xim_set_spot(Window window, int x, int y);
 
 /* Decode a captured nested list from XvaCreateNestedList.
  * Returns 1 + fills count/names/values when the pointer is one of ours,
- * 0 otherwise (Tk wraps preedit attrs in XVaCreateNestedList, so any
- * pointer we see at XCreateIC / XSetICValues for XNPreeditAttributes
- * IS one of ours). */
+ * 0 otherwise. */
 int em_x11_nested_list_decode(void* list,
                               int* count_out,
                               const char*** names_out,
                               void*** values_out);
 
-/* Apply XNSpotLocation / XNFontSet / etc. found inside a preedit /
+/* Count UTF-8 characters (not bytes) in a buffer of `byte_len` bytes. */
+static unsigned short utf8_char_count(const char* s, int byte_len) {
+  unsigned short count = 0;
+  int i = 0;
+  while (i < byte_len) {
+    unsigned char c = (unsigned char)s[i];
+    if (c < 0x80)
+      i += 1;
+    else if ((c & 0xE0) == 0xC0)
+      i += 2;
+    else if ((c & 0xF0) == 0xE0)
+      i += 3;
+    else if ((c & 0xF8) == 0xF0)
+      i += 4;
+    else
+      i += 1; /* invalid byte, skip */
+    count++;
+  }
+  return count;
+}
+
+/* Apply XNSpotLocation + preedit callback fields found inside a preedit /
  * status nested list to ic. Tk's XCreateIC always seeds a (0,0) spot
- * so we'd otherwise overwrite a valid spot from a previous Tk_SetCaretPos
- * with zeros -- gate the host bridge on `notify` (only fire from
- * XSetICValues, not from XCreateIC's seed). */
+ * so gate the host bridge on `notify` (only fire from XSetICValues, not
+ * from XCreateIC's seed). */
 static void apply_preedit_attrs(XIC ic, void* list, int notify) {
   int n = 0;
   const char** names = NULL;
@@ -86,12 +124,35 @@ static void apply_preedit_attrs(XIC ic, void* list, int notify) {
           em_x11_js_xim_set_spot(ic->focus_window, pt->x, pt->y);
         }
       }
+    } else if (strcmp(k, XNPreeditStartCallback) == 0) {
+      XICCallback* cb = (XICCallback*)values[i];
+      if (cb) {
+        ic->preedit_start_cb = *cb;
+        ic->have_preedit_start = 1;
+      }
+    } else if (strcmp(k, XNPreeditDoneCallback) == 0) {
+      XICCallback* cb = (XICCallback*)values[i];
+      if (cb) {
+        ic->preedit_done_cb = *cb;
+        ic->have_preedit_done = 1;
+      }
+    } else if (strcmp(k, XNPreeditDrawCallback) == 0) {
+      XICCallback* cb = (XICCallback*)values[i];
+      if (cb) {
+        ic->preedit_draw_cb = *cb;
+        ic->have_preedit_draw = 1;
+      }
+    } else if (strcmp(k, XNPreeditCaretCallback) == 0) {
+      XICCallback* cb = (XICCallback*)values[i];
+      if (cb) {
+        ic->preedit_caret_cb = *cb;
+        ic->have_preedit_caret = 1;
+      }
     }
     /* XNFontSet, XNArea, XNAreaNeeded, XNColormap, XNStdColormap,
      * XNForeground, XNBackground, XNBackgroundPixmap, XNLineSpace,
-     * XNCursor: we don't draw preedit so the host doesn't need
-     * font metrics from Tk's XCreateFontSet. The OS IME provides
-     * its own candidate-window styling. */
+     * XNCursor: inline preedit is rendered by Tk itself using its
+     * own GC/font, so we don't need these. */
   }
 }
 
@@ -141,6 +202,30 @@ static void ic_apply_va(XIC ic, va_list ap) {
                strcmp(name, XNStatusAttributes) == 0) {
       void* list = va_arg(ap, void*);
       apply_preedit_attrs(ic, list, /*notify=*/0);
+    } else if (strcmp(name, XNPreeditStartCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_start_cb = *cb;
+        ic->have_preedit_start = 1;
+      }
+    } else if (strcmp(name, XNPreeditDoneCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_done_cb = *cb;
+        ic->have_preedit_done = 1;
+      }
+    } else if (strcmp(name, XNPreeditDrawCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_draw_cb = *cb;
+        ic->have_preedit_draw = 1;
+      }
+    } else if (strcmp(name, XNPreeditCaretCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_caret_cb = *cb;
+        ic->have_preedit_caret = 1;
+      }
     } else {
       /* Unknown attr; consume one value to keep va_list aligned. */
       (void)va_arg(ap, void*);
@@ -159,12 +244,28 @@ XIC XCreateIC(XIM im, ...) {
   va_start(ap, im);
   ic_apply_va(ic, ap);
   va_end(ap);
+  /* Insert at head of dpy->xic_list so find_xic_for_window can locate
+   * this XIC when the host delivers preedit events. */
+  ic->next = im->dpy->xic_list;
+  im->dpy->xic_list = ic;
   return ic;
 }
 
 void XDestroyIC(XIC ic) {
   if (!ic)
     return;
+  /* Unlink from dpy->xic_list. */
+  Display* dpy = ic->im ? ic->im->dpy : NULL;
+  if (dpy) {
+    XIC* p = &dpy->xic_list;
+    while (*p) {
+      if (*p == ic) {
+        *p = ic->next;
+        break;
+      }
+      p = &(*p)->next;
+    }
+  }
   free(ic);
 }
 
@@ -218,6 +319,30 @@ char* XSetICValues(XIC ic, ...) {
        * &spot, NULL). Decode and forward. */
       void* list = va_arg(ap, void*);
       apply_preedit_attrs(ic, list, /*notify=*/1);
+    } else if (strcmp(name, XNPreeditStartCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_start_cb = *cb;
+        ic->have_preedit_start = 1;
+      }
+    } else if (strcmp(name, XNPreeditDoneCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_done_cb = *cb;
+        ic->have_preedit_done = 1;
+      }
+    } else if (strcmp(name, XNPreeditDrawCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_draw_cb = *cb;
+        ic->have_preedit_draw = 1;
+      }
+    } else if (strcmp(name, XNPreeditCaretCallback) == 0) {
+      XICCallback* cb = va_arg(ap, XICCallback*);
+      if (cb) {
+        ic->preedit_caret_cb = *cb;
+        ic->have_preedit_caret = 1;
+      }
     } else {
       (void)va_arg(ap, void*);
     }
@@ -253,11 +378,11 @@ char* XGetICValues(XIC ic, ...) {
 
 char* XGetIMValues(XIM im, ...) {
   (void)im;
-  /* Tk asks for XNQueryInputStyle. We advertise XIMPreeditPosition so
-   * Tk's tkUnixKey.c::Tk_SetCaretPos does fire XSetICValues with the
-   * caret position -- without this Tk skips the spot update entirely
-   * and our hidden-textarea overlay sits at (0,0) of the focus window.
-   * XIMStatusNothing keeps Tk from asking us for a status area widget. */
+  /* Advertise styles in Tk's preference order so it picks the best
+   * one it supports:
+   *   XIMPreeditCallbacks — inline preedit via draw callbacks
+   *   XIMPreeditNothing   — no IME, pure-ASCII fallback
+   * XIMStatusNothing keeps Tk from asking for a status area widget. */
   va_list ap;
   va_start(ap, im);
   for (;;) {
@@ -269,12 +394,9 @@ char* XGetIMValues(XIM im, ...) {
       continue;
     if (strcmp(name, XNQueryInputStyle) == 0) {
       static XIMStyle style_buf[] = {
-        XIMPreeditPosition | XIMStatusNothing,
+        XIMPreeditCallbacks | XIMStatusNothing,
         XIMPreeditNothing | XIMStatusNothing,
       };
-      /* Tk frees this with XFree; allocate a block whose
-       * supported_styles slot points into the same block so a
-       * single free() releases everything. */
       XIMStyles* blob =
         (XIMStyles*)malloc(sizeof(XIMStyles) + sizeof(style_buf));
       if (!blob)
@@ -474,10 +596,152 @@ int XwcLookupString(XIC ic,
   return written;
 }
 
-/* XFilterEvent stays False for Tier A: we don't intercept keys for
- * preedit redraw. Tk delivers the KeyPress straight to its handler
- * which calls Xutf8LookupString and inserts the bytes. The stub in
- * Cursor.c remains authoritative. */
+/* -- Preedit: inline composition-text rendering -------------------------- */
+
+/* Find the XIC whose focus_window matches `w`. Returns NULL when no
+ * XIC is attached to that window (not a text-input widget). */
+static XIC find_xic_for_window(Display* dpy, Window w) {
+  if (!dpy || !w)
+    return NULL;
+  XIC ic = dpy->xic_list;
+  while (ic) {
+    if (ic->focus_window == w)
+      return ic;
+    ic = ic->next;
+  }
+  return NULL;
+}
+
+/* Public accessor for event_queue.c::XFilterEvent. */
+XIC em_x11_find_xic_for_window(Display* dpy, Window w) {
+  return find_xic_for_window(dpy, w);
+}
+
+/* Build a single-block XIMText containing `text` (UTF-8, length `text_len`
+ * bytes) with XIMUnderline feedback on every character. The block layout:
+ *   [XIMText] [XIMFeedback * char_count] [char * (text_len + 1)]
+ * Caller frees with a single free(text). */
+static XIMText* make_preedit_text(const char* text, int text_len) {
+  unsigned short char_count = utf8_char_count(text, text_len);
+  size_t fb_off = sizeof(XIMText);
+  size_t str_off = fb_off + char_count * sizeof(XIMFeedback);
+  size_t total = str_off + text_len + 1;
+
+  XIMText* t = (XIMText*)malloc(total);
+  if (!t)
+    return NULL;
+  memset(t, 0, total);
+
+  t->length = char_count;
+  t->encoding_is_wchar = False;
+  t->feedback = (XIMFeedback*)((char*)t + fb_off);
+  t->string.multi_byte = (char*)t + str_off;
+
+  /* Every character gets XIMUnderline so Tk renders it as composing. */
+  for (unsigned short i = 0; i < char_count; i++)
+    t->feedback[i] = XIMUnderline;
+
+  memcpy(t->string.multi_byte, text, text_len);
+  t->string.multi_byte[text_len] = '\0';
+  return t;
+}
+
+/* Host calls this on compositionstart (user begins an IME composition).
+ * Fires the preedit_start callback so Tk prepares for inline rendering. */
+EMSCRIPTEN_KEEPALIVE
+void em_x11_xim_preedit_start(Window window) {
+  Display* dpy = em_x11_get_display();
+  if (!dpy)
+    return;
+  XIC ic = find_xic_for_window(dpy, window);
+  if (!ic)
+    return;
+  ic->preedit_active = 1;
+  if (ic->have_preedit_start && ic->preedit_start_cb.callback) {
+    ic->preedit_start_cb.callback(
+      (XIC)ic, ic->preedit_start_cb.client_data, (XPointer)NULL);
+  }
+}
+
+/* Host calls this on compositionupdate. Builds an XIMPreeditDrawCallbackStruct
+ * and fires the draw callback. Tk renders the composing text inline at the
+ * caret position. Uses XIMUnderline feedback so Tk styles it as composing. */
+EMSCRIPTEN_KEEPALIVE
+void em_x11_xim_preedit_draw(
+  Window window, const char* text, int caret, int chg_first, int chg_length) {
+  Display* dpy = em_x11_get_display();
+  if (!dpy)
+    return;
+  XIC ic = find_xic_for_window(dpy, window);
+  if (!ic)
+    return;
+  if (!ic->have_preedit_draw || !ic->preedit_draw_cb.callback)
+    return;
+
+  XIMPreeditDrawCallbackStruct cbs;
+  memset(&cbs, 0, sizeof(cbs));
+  cbs.caret = caret;
+  cbs.chg_first = chg_first;
+  cbs.chg_length = chg_length;
+
+  if (text && text[0]) {
+    int len = (int)strlen(text);
+    cbs.text = make_preedit_text(text, len);
+  } else {
+    cbs.text = NULL; /* empty/clear preedit */
+  }
+
+  ic->preedit_draw_cb.callback(
+    (XIC)ic, ic->preedit_draw_cb.client_data, (XPointer)&cbs);
+
+  /* XIMText was a single malloc block. */
+  if (cbs.text)
+    free(cbs.text);
+}
+
+/* Host calls this on compositionend. Clears residual preedit text (draw
+ * callback with text=NULL), fires the done callback, and marks preedit
+ * inactive so XFilterEvent resumes passing keys through. */
+EMSCRIPTEN_KEEPALIVE
+void em_x11_xim_preedit_done(Window window) {
+  Display* dpy = em_x11_get_display();
+  if (!dpy)
+    return;
+  XIC ic = find_xic_for_window(dpy, window);
+  if (!ic)
+    return;
+  if (!ic->preedit_active)
+    return;
+
+  /* Clear any remaining preedit text before marking done. */
+  if (ic->have_preedit_draw && ic->preedit_draw_cb.callback) {
+    XIMPreeditDrawCallbackStruct cbs;
+    memset(&cbs, 0, sizeof(cbs));
+    cbs.text = NULL;
+    ic->preedit_draw_cb.callback(
+      (XIC)ic, ic->preedit_draw_cb.client_data, (XPointer)&cbs);
+  }
+
+  ic->preedit_active = 0;
+
+  if (ic->have_preedit_done && ic->preedit_done_cb.callback) {
+    ic->preedit_done_cb.callback(
+      (XIC)ic, ic->preedit_done_cb.client_data, (XPointer)NULL);
+  }
+}
+
+/* XFilterEvent: returns True for KeyPress during active preedit on the
+ * focused window, telling Tk to skip normal key processing (preedit
+ * callbacks handle the composing text separately). The stub body in
+ * event_queue.c delegates here. */
+Bool em_x11_xim_filter_event(XEvent* event, Window w) {
+  if (!event || !event->xany.display)
+    return False;
+  XIC ic = find_xic_for_window(event->xany.display, w);
+  if (ic && ic->preedit_active && event->type == KeyPress)
+    return True;
+  return False;
+}
 
 /* -- XIM registration callbacks. Tk uses them to register a "tell me when
  * an XIM appears" watcher; XOpenIM already succeeds on the first call so

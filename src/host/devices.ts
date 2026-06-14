@@ -346,6 +346,34 @@ export class InputBridge {
     );
   }
 
+  /* -- Inline preedit bridges (xim.c) ------------------------------------ */
+
+  /** compositionstart: begin inline preedit on the focused widget. */
+  pushPreeditStart(window: number): void {
+    const module = this.moduleForWindow(window);
+    if (!module) return;
+    module.ccall('em_x11_xim_preedit_start', null, ['number'], [window]);
+  }
+
+  /** compositionupdate: deliver composing text to Tk's preedit draw callback.
+   *  caret is the cursor position within the preedit string (character offset).
+   *  chgFirst/chgLength indicate the changed range (0/full-length = redraw all). */
+  pushPreeditDraw(window: number, text: string, caret: number,
+                  chgFirst: number, chgLength: number): void {
+    const module = this.moduleForWindow(window);
+    if (!module) return;
+    module.ccall('em_x11_xim_preedit_draw', null,
+                 ['number', 'string', 'number', 'number', 'number'],
+                 [window, text, caret, chgFirst, chgLength]);
+  }
+
+  /** compositionend: clear inline preedit and fire done callback. */
+  pushPreeditDone(window: number): void {
+    const module = this.moduleForWindow(window);
+    if (!module) return;
+    module.ccall('em_x11_xim_preedit_done', null, ['number'], [window]);
+  }
+
   /** Bridged from XSetInputFocus on any module. None (0) / PointerRoot (1)
    *  clear the explicit override and let press-driven focus take over. */
   setExplicitFocus(window: number): void {

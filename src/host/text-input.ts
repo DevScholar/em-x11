@@ -44,16 +44,27 @@ import type { Host } from './index.js';
 /** Pluggable transport for hosts that don't own a DOM (worker-mode
  *  pyodide-tk). The host calls these as if it owned a textarea; a
  *  DOM-side counterpart applies the commands to a real textarea and
- *  posts text back via emX11.display.inject.textKey. */
+ *  posts text back via emX11.display.inject.textKey.
+ *
+ *  Preedit methods (main → worker direction): composition events fire on
+ *  the main-thread textarea; the worker receives them through these calls
+ *  and invokes the C-side preedit callbacks on Tk. */
 export interface TextInputRemote {
   setFocus(window: number): void;
   clearFocus(): void;
   setSpot(window: number, x: number, y: number): void;
   /** Translate window-local caret pixels (X11 px) into root-relative
-   *  pixels using the host's window tree. The host computes this via
-   *  Host.getWindowAbsOrigin(window) but exposes the absolute origin to
-   *  the remote so the main side doesn't need a window-tree shadow. */
+   *  pixels using the host's window tree. */
   positionHint(absX: number, absY: number): void;
+  /** compositionstart: inline preedit begins on the focused window. */
+  preeditStart(window: number): void;
+  /** compositionupdate: composing text changed. caret/chgFirst/chgLength
+   *  in characters (UTF-16 code units from textarea.selectionStart). */
+  preeditDraw(window: number, text: string, caret: number,
+              chgFirst: number, chgLength: number): void;
+  /** compositionend: inline preedit ends. Final text arrives via the
+   *  existing onText / pushTextKey path separately. */
+  preeditDone(window: number): void;
 }
 
 export class TextInputOverlay {
@@ -219,9 +230,34 @@ export class TextInputOverlay {
     if (this.el) return;
     this.el = createHiddenTextarea();
     document.body.appendChild(this.el);
-    attachCompositionListeners(this.el, (text) => {
-      if (this.focusedWindow !== null) this.host.devices.pushTextKey(text);
-    });
+    const self = this;
+    attachCompositionListeners(this.el,
+      /* emit (final committed text via pushTextKey) */
+      (text) => {
+        if (self.focusedWindow !== null) self.host.devices.pushTextKey(text);
+      },
+      /* preedit callbacks (inline composition rendering) */
+      {
+        onStart() {
+          if (self.focusedWindow !== null) {
+            if (self.remote) self.remote.preeditStart(self.focusedWindow);
+            else self.host.devices.pushPreeditStart(self.focusedWindow);
+          }
+        },
+        onDraw(text, caret, chgFirst, chgLength) {
+          if (self.focusedWindow !== null) {
+            if (self.remote) self.remote.preeditDraw(self.focusedWindow, text, caret, chgFirst, chgLength);
+            else self.host.devices.pushPreeditDraw(self.focusedWindow, text, caret, chgFirst, chgLength);
+          }
+        },
+        onDone() {
+          if (self.focusedWindow !== null) {
+            if (self.remote) self.remote.preeditDone(self.focusedWindow);
+            else self.host.devices.pushPreeditDone(self.focusedWindow);
+          }
+        },
+      },
+    );
   }
 
   /** Blur and remove the textarea from the DOM so no hidden element
@@ -276,6 +312,11 @@ function createHiddenTextarea(): HTMLTextAreaElement {
 function attachCompositionListeners(
   ta: HTMLTextAreaElement,
   emit: (text: string) => void,
+  preedit?: {
+    onStart: () => void;
+    onDraw: (text: string, caret: number, chgFirst: number, chgLength: number) => void;
+    onDone: () => void;
+  },
 ): void {
   /* Composition strategy borrowed from xterm.js's CompositionHelper:
    *
@@ -296,9 +337,22 @@ function attachCompositionListeners(
 
   ta.addEventListener('compositionstart', () => {
     composing = true;
+    preedit?.onStart();
   });
+
+  ta.addEventListener('compositionupdate', () => {
+    if (!composing) return;
+    const text = ta.value;
+    if (!text) return;
+    const caret = ta.selectionStart;
+    /* Simple full-redraw: chgFirst=0, chgLength=text.length in UTF-16
+     * code units (good approximation for BMP composing text). */
+    preedit?.onDraw(text, caret ?? 0, 0, text.length);
+  });
+
   ta.addEventListener('compositionend', (e: CompositionEvent) => {
     composing = false;
+    preedit?.onDone();
     const evData = e.data ?? '';
     /* Always defer: even when evData is non-empty, we still want to
      * wipe ta.value AFTER the browser finishes its compositionend
@@ -354,20 +408,22 @@ function attachCompositionListeners(
 /* -- Public surface: main-thread DOM bridge for worker-hosted em-x11 ---- */
 
 export interface DomTextInputBridgeOptions {
-  /** The same canvas the worker's em-x11 is painting into. Used to
-   *  translate root-relative caret pixels back into viewport CSS
-   *  pixels for textarea positioning. */
+  /** The same canvas the worker's em-x11 is painting into. */
   canvas: HTMLCanvasElement;
-  /** Logical (CSS) X-screen width passed to createEmX11. Defaults to the
-   *  canvas CSS width from getBoundingClientRect (NOT canvas.width, which
-   *  may be scaled by devicePixelRatio). */
+  /** Logical (CSS) X-screen width. Defaults to canvas CSS width. */
   rootWidth?: number;
-  /** Logical (CSS) X-screen height. Defaults to the canvas CSS height
-   *  from getBoundingClientRect. */
+  /** Logical (CSS) X-screen height. Defaults to canvas CSS height. */
   rootHeight?: number;
   /** Receive composed / pasted text. The caller routes this into the
    *  worker, which calls emX11.display.inject.textKey. */
   onText: (text: string) => void;
+  /** compositionstart fires on the main-thread textarea. */
+  onPreeditStart?: () => void;
+  /** compositionupdate: composing text changed. caret/chgFirst/chgLength
+   *  in UTF-16 code units from textarea.selectionStart. */
+  onPreeditDraw?: (text: string, caret: number, chgFirst: number, chgLength: number) => void;
+  /** compositionend: inline preedit ends. */
+  onPreeditDone?: () => void;
 }
 
 /** Main-thread companion to a worker-hosted TextInputOverlay. Owns a
@@ -403,7 +459,13 @@ export function createDomTextInputBridge(
     if (ta) return ta;
     ta = createHiddenTextarea();
     document.body.appendChild(ta);
-    attachCompositionListeners(ta, opts.onText);
+    attachCompositionListeners(ta, opts.onText,
+      opts.onPreeditStart || opts.onPreeditDraw || opts.onPreeditDone ? {
+        onStart: opts.onPreeditStart ?? (() => {}),
+        onDraw: opts.onPreeditDraw ?? (() => {}),
+        onDone: opts.onPreeditDone ?? (() => {}),
+      } : undefined,
+    );
     return ta;
   };
 

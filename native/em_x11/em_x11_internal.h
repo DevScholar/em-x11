@@ -283,6 +283,11 @@ struct _XDisplay {
   int key_text_len_queue[EM_X11_EVENT_QUEUE_CAPACITY];
   char current_key_text[EM_X11_KEY_TEXT_SLOT];
   int current_key_text_len;
+
+  /* XIC linked list anchor. Each XCreateIC inserts at head;
+   * XDestroyIC unlinks. The host calls preedit bridges with a
+   * focus_window; we walk this list to find the owning XIC. */
+  XIC xic_list;
 };
 
 /* ------------------------------------------------------------------------- */
@@ -780,12 +785,28 @@ extern void em_x11_js_xim_set_focus(Window window);
 extern void em_x11_js_xim_clear_focus(void);
 extern void em_x11_js_xim_set_spot(Window window, int x, int y);
 
+/* Preedit bridges: host calls these from compositionstart/update/end on
+ * the hidden textarea. See text-input.ts + xim.c */
+extern void em_x11_xim_preedit_start(Window window);
+extern void em_x11_xim_preedit_draw(
+  Window window, const char* text, int caret, int chg_first, int chg_length);
+extern void em_x11_xim_preedit_done(Window window);
+
 /* xim.c side-channel hooks. event.c calls _capture_key_text after each
  * KeyPress/KeyRelease push so the parallel queue stays in lockstep with
  * event_queue; event_queue.c calls _capture_pop_text right before
  * advancing event_head so Xutf8LookupString sees the right slot. */
 void em_x11_xim_capture_key_text(Display* dpy, unsigned int slot);
 void em_x11_xim_capture_pop_text(Display* dpy, unsigned int slot);
+
+/* Look up the XIC whose focus_window matches `w`. Returns NULL when no
+ * XIC is attached to that window (not a text-input widget). */
+XIC em_x11_find_xic_for_window(Display* dpy, Window w);
+
+/* Called from event_queue.c::XFilterEvent. Returns True for KeyPress on
+ * the focused window during active preedit so Tk skips normal key
+ * processing (preedit callbacks handle composing text separately). */
+Bool em_x11_xim_filter_event(XEvent* event, Window w);
 
 /* Browser clipboard bridge (see selection.c). The read path is split in
  * two to keep the C side synchronous: first call awaits

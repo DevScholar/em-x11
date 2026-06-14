@@ -272,9 +272,7 @@ int XNextEvent(Display* display, XEvent* event_return) {
 /* -- Event helpers -- */
 
 Bool XFilterEvent(XEvent* event, Window w) {
-  (void)event;
-  (void)w;
-  return False;
+  return em_x11_xim_filter_event(event, w);
 }
 
 Bool XCheckIfEvent(Display* dpy,
