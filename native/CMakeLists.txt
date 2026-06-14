@@ -76,7 +76,6 @@ set(EM_X11_X11_SOURCES
     xkb/xkb.c
     em_x11/keysym_table.c
     em_x11/bridges.c
-    em_x11/notifier.c
     em_x11/poll.c
     em_x11/threading.c
     em_x11/signal.c
