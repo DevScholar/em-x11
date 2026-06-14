@@ -70,7 +70,10 @@ def find_em_x11_root():
         logger.warning('EM_X11_SRC is set but not a directory: %s', root)
 
     # Script is at <root>/tools/ports/em_x11.py
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Use realpath so that symlinks (e.g. motif-wasm/tools/ports/em_x11.py
+    # → em-x11/tools/ports/em_x11.py) resolve to the real project root
+    # instead of incorrectly identifying the consumer as em-x11.
+    script_dir = os.path.dirname(os.path.realpath(__file__))
     root = os.path.normpath(os.path.join(script_dir, '..', '..'))
     if os.path.isdir(os.path.join(root, 'native')):
         return root
