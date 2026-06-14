@@ -732,6 +732,10 @@ extern char* em_x11_js_get_atom_name(Atom atom);
 /* Internal pixmap accessors (implemented in pixmap.c). */
 Bool em_x11_pixmap_exists(Pixmap id);
 unsigned int em_x11_pixmap_depth(Pixmap id);
+Bool em_x11_pixmap_get_geometry(Pixmap id,
+                                unsigned int* width_return,
+                                unsigned int* height_return,
+                                unsigned int* depth_return);
 /* Refcount hooks for window background_pixmap ownership. acquire = +1
  * on the pixmap; release = decrement-or-destroy (mirrors XFreePixmap).
  * window.c calls these whenever a window starts/stops referencing a

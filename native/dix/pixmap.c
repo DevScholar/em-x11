@@ -142,6 +142,22 @@ unsigned int em_x11_pixmap_depth(Pixmap id) {
   return p ? p->depth : 0;
 }
 
+Bool em_x11_pixmap_get_geometry(Pixmap id,
+                                unsigned int* width_return,
+                                unsigned int* height_return,
+                                unsigned int* depth_return) {
+  EmxPixmap* p = pixmap_find(id);
+  if (!p)
+    return False;
+  if (width_return)
+    *width_return = p->width;
+  if (height_return)
+    *height_return = p->height;
+  if (depth_return)
+    *depth_return = p->depth;
+  return True;
+}
+
 /* -- Pixmap-from-bitmap-data -- */
 
 Pixmap XCreatePixmapFromBitmapData(Display* dpy,

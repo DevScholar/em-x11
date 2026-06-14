@@ -758,6 +758,32 @@ Status XGetGeometry(Display* display,
     return 1;
   }
 
+  /* Pixmap fallback: Motif's _XmCachePixmap calls XGetGeometry on
+   * freshly-created pixmaps to learn their depth. Without this, the
+   * Motif pixmap cache stores garbage depth values, and DrawPixmapBinding
+   * mis-configures its GC (FillStippled vs FillTiled), rendering the
+   * notebook spiral binding as solid black. */
+  {
+    unsigned int pw, ph, pd;
+    if (em_x11_pixmap_get_geometry((Pixmap)d, &pw, &ph, &pd)) {
+      if (root_return)
+        *root_return = display->screens[0].root;
+      if (x_return)
+        *x_return = 0;
+      if (y_return)
+        *y_return = 0;
+      if (width_return)
+        *width_return = pw;
+      if (height_return)
+        *height_return = ph;
+      if (border_width_return)
+        *border_width_return = 0;
+      if (depth_return)
+        *depth_return = pd;
+      return 1;
+    }
+  }
+
   /* Cross-connection fallback: same story as XGetWindowAttributes --
    * twm.c:845 queries a managed client's shell geometry. */
   int a[EM_X11_WIN_ATTRS_SIZE];
