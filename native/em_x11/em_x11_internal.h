@@ -477,6 +477,17 @@ extern void
 em_x11_js_clear_area(Window id, int x, int y, unsigned int w, unsigned int h);
 extern void em_x11_js_fill_rect(
   Window id, int x, int y, unsigned int w, unsigned int h, unsigned long color);
+extern void em_x11_js_fill_stippled_rect(unsigned int dst_id,
+                                         int x,
+                                         int y,
+                                         unsigned int w,
+                                         unsigned int h,
+                                         unsigned long fg,
+                                         unsigned long bg,
+                                         unsigned int stipple_id,
+                                         int ts_x_origin,
+                                         int ts_y_origin,
+                                         int opaque);
 extern void em_x11_js_draw_line(Window id,
                                 int x1,
                                 int y1,

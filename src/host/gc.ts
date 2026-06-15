@@ -78,6 +78,66 @@ export class GcManager {
     this.host.renderer.fillRect(id, x, y, w, h, color);
   }
 
+  /** FillStippled / FillOpaqueStippled: the stipple pixmap (always depth-1)
+   *  is a monochrome mask. bit=1 paints fg; bit=0 is transparent (stippled)
+   *  or paints bg (opaque-stippled). Built via a staging canvas:
+   *  1. Fill stage with fg
+   *  2. destination-in mask with the tiled stipple pattern to clip fg to
+   *     the 1-bit shape
+   *  3. For opaque, pre-fill with bg so 0-bit areas show bg instead of
+   *     remaining transparent
+   *  The result is then blitted to the destination drawable. */
+  onFillStippledRect(
+    dstId: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    fg: number,
+    bg: number,
+    stippleId: number,
+    tsX: number,
+    tsY: number,
+    opaque: boolean,
+  ): void {
+    const stipplePm = this.pixmaps.get(stippleId);
+    if (!stipplePm) return;
+
+    const stage = new OffscreenCanvas(w, h);
+    const sctx = stage.getContext('2d');
+    if (!sctx) return;
+
+    if (opaque) {
+      sctx.fillStyle = pixelToCssColor(bg);
+      sctx.fillRect(0, 0, w, h);
+    }
+
+    const mask = new OffscreenCanvas(w, h);
+    const mctx = mask.getContext('2d');
+    if (!mctx) return;
+    mctx.fillStyle = pixelToCssColor(fg);
+    mctx.fillRect(0, 0, w, h);
+
+    const pattern = mctx.createPattern(stipplePm.canvas, 'repeat');
+    if (!pattern) return;
+    const matrix = new DOMMatrix();
+    matrix.translateSelf(tsX - x, tsY - y);
+    pattern.setTransform(matrix);
+
+    mctx.globalCompositeOperation = 'destination-in';
+    mctx.fillStyle = pattern;
+    mctx.fillRect(0, 0, w, h);
+
+    sctx.drawImage(mask, 0, 0);
+
+    const dstPm = this.pixmaps.get(dstId);
+    if (dstPm) {
+      dstPm.ctx.drawImage(stage, 0, 0, w, h, x, y, w, h);
+      return;
+    }
+    this.host.renderer.blitImageToWindow(dstId, x, y, stage, 0, 0, w, h);
+  }
+
   onDrawLine(
     id: number,
     x1: number,

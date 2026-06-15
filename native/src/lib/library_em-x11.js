@@ -391,6 +391,12 @@ var LibraryEmX11 = {
     if (h) h.onFillRect(id, x, y, w, h, color);
   },
 
+  em_x11_js_fill_stippled_rect__sig: 'viiiiiiiiiii',
+  em_x11_js_fill_stippled_rect: function(dstId, x, y, w, h, fg, bg, stippleId, tsX, tsY, opaque) {
+    var h = EmX11Host.get();
+    if (h) h.onFillStippledRect(dstId, x, y, w, h, fg, bg, stippleId, tsX, tsY, opaque);
+  },
+
   em_x11_js_draw_line__sig: 'viiiiiii',
   em_x11_js_draw_line: function(id, x1, y1, x2, y2, color, lineWidth) {
     var h = EmX11Host.get();

@@ -519,6 +519,35 @@ EM_JS(void,
       });
 
 EM_JS(void,
+      em_x11_js_fill_stippled_rect,
+      (unsigned int dst_id,
+       int x,
+       int y,
+       unsigned int w,
+       unsigned int h,
+       unsigned int fg,
+       unsigned int bg,
+       unsigned int stipple_id,
+       int ts_x_origin,
+       int ts_y_origin,
+       int opaque),
+      {
+        var host = Module['emX11Host'];
+        if (host)
+          host.onFillStippledRect(dst_id,
+                                  x,
+                                  y,
+                                  w,
+                                  h,
+                                  fg,
+                                  bg,
+                                  stipple_id,
+                                  ts_x_origin,
+                                  ts_y_origin,
+                                  opaque);
+      });
+
+EM_JS(void,
       em_x11_js_draw_line,
       (unsigned int id,
        int x1,

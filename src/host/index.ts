@@ -360,6 +360,13 @@ export class Host implements EmX11Host {
   onFillRect(id: number, x: number, y: number, w: number, h: number, color: number): void {
     this.gc.onFillRect(id, x, y, w, h, color);
   }
+  onFillStippledRect(
+    dstId: number, x: number, y: number, w: number, h: number,
+    fg: number, bg: number, stippleId: number,
+    tsX: number, tsY: number, opaque: boolean,
+  ): void {
+    this.gc.onFillStippledRect(dstId, x, y, w, h, fg, bg, stippleId, tsX, tsY, opaque);
+  }
   onDrawLine(
     id: number, x1: number, y1: number, x2: number, y2: number,
     color: number, lineWidth: number,

@@ -81,6 +81,28 @@ int XFillRectangle(Display* display,
     return 1;
   }
 
+  /* FillStippled / FillOpaqueStippled: use the stipple pixmap as a
+   * monochrome mask. Where stipple bit=1, the foreground is drawn; where
+   * bit=0, the destination is left unchanged (FillStippled) or painted
+   * with the background colour (FillOpaqueStippled). Motif's text-widget
+   * I-beam caret relies on this. */
+  if ((gc->fill_style == FillStippled ||
+       gc->fill_style == FillOpaqueStippled) &&
+      gc->stipple != None) {
+    em_x11_js_fill_stippled_rect((unsigned int)d,
+                                 x,
+                                 y,
+                                 width,
+                                 height,
+                                 gc->foreground,
+                                 gc->background,
+                                 (unsigned int)gc->stipple,
+                                 gc->ts_x_origin,
+                                 gc->ts_y_origin,
+                                 (int)(gc->fill_style == FillOpaqueStippled));
+    return 1;
+  }
+
 solid:
   em_x11_js_fill_rect((Window)d, x, y, width, height, gc->foreground);
   return 1;

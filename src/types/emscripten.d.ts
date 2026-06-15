@@ -276,6 +276,24 @@ export interface EmX11Host {
     h: number,
     color: number,
   ): void;
+  /** XFillRectangle with FillStippled or FillOpaqueStippled. The stipple
+   *  pixmap (always depth-1) acts as a monochrome mask: bit=1 paints fg,
+   *  bit=0 either leaves the destination unchanged (opaque=false) or
+   *  paints bg (opaque=true). ts_x_origin / ts_y_origin are the GC's
+   *  tile/stipple origin offsets relative to the drawable origin. */
+  onFillStippledRect(
+    dstId: number,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    fg: number,
+    bg: number,
+    stippleId: number,
+    tsX: number,
+    tsY: number,
+    opaque: boolean,
+  ): void;
   onDrawLine(
     id: number,
     x1: number,
