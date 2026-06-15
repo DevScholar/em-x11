@@ -251,11 +251,35 @@ win_is_inferior_of(Display* dpy, Window descendant, Window ancestor) {
   if (descendant == None || ancestor == None || descendant == ancestor)
     return 0;
   EmxWindow* cur = em_x11_window_find(dpy, descendant);
+  EM_ASM(
+    {
+      var d = Module['emX11Debug'];
+      if (d && d.traceCBtn)
+        console.log('[c-inferior] desc=' + ($0 >>> 0) + ' anc=' + ($1 >>> 0) +
+                    ' start=' + ($2 >>> 0));
+    },
+    descendant,
+    ancestor,
+    cur ? cur->id : 0);
   while (cur && cur->parent != None && cur->parent != cur->id) {
+    EM_ASM(
+      {
+        var d = Module['emX11Debug'];
+        if (d && d.traceCBtn)
+          console.log('[c-inferior]   step id=' + ($0 >>> 0) + ' parent=' +
+                      ($1 >>> 0));
+      },
+      cur->id,
+      cur->parent);
     if (cur->parent == ancestor)
       return 1;
     cur = em_x11_window_find(dpy, cur->parent);
   }
+  EM_ASM({
+    var d = Module['emX11Debug'];
+    if (d && d.traceCBtn)
+      console.log('[c-inferior]   result=false');
+  });
   return 0;
 }
 
@@ -445,28 +469,11 @@ void em_x11_push_button_event(int type,
     if (grab_button_count == 0)
       grab_window = None;
   } else {
-    /* Start from the JS host's z-order-correct window (like xorg's
-     * XYToWindow), then walk up the C-side parent chain for the
-     * first window whose event_mask has the needed bit (like xorg's
-     * DeliverDeviceEvents). This hybrid handles:
-     * - tcldide: host hint widget → has mask → delivered directly
-     * - twm: host hint is a cross-conn shadow (mask=0) → walk up
-     *   to frame/root with the mask → correct subscriber chosen
-     * - Foreign host hint: not in this Display → fallback to hit_test */
     long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
     target = em_x11_window_find(dpy, window);
     if (target) {
-      /* Window is in this Display -> same client. Walk up for
-       * mask matching, mirroring xorg's DeliverDeviceEvents
-       * with ownerEvents. */
       target = walk_up_for_mask(dpy, target, x_root, y_root, mask, &lx, &ly);
     } else if (active_grab) {
-      /* Foreign window (different connection / client). xorg's
-       * DeliverGrabbedEvent with ownerEvents: DeliverOneEvent
-       * skips windows whose client != grab client. After the
-       * walk exhausts, DeliverOneGrabbedEvent delivers to
-       * grab->window. Route directly to the grab window so
-       * popup menus receive outside clicks (dismiss). */
       target = em_x11_window_find(dpy, active_grab_window);
       if (target) {
         int ax = 0, ay = 0, depth;
@@ -479,10 +486,6 @@ void em_x11_push_button_event(int type,
     }
 
     if (target && type == ButtonPress) {
-      /* Ensure Tk has seen an Enter on this widget before its
-       * <ButtonPress-1> binding runs. Covers the case where a click
-       * is the first pointer interaction and no mousemove has yet
-       * advanced last_pointer_window to this widget. */
       update_pointer_window(dpy, target->id, x_root, y_root, state);
       if (grab_button_count == 0)
         grab_window = target->id;
@@ -490,49 +493,87 @@ void em_x11_push_button_event(int type,
     }
   }
 
-  /* Diagnostic trace: dump the C-side resolution so we can see what
-   * each wasm process receives. Toggled via
-   * `Module['emX11Debug'].traceCBtn` (set from DevTools). Gated
-   * inside EM_ASM so it's effectively free when disabled. */
-  EM_ASM(
-    {
-      var d = Module['emX11Debug'];
-      if (d && d.traceCBtn) {
-        console.log('[c-btn] conn=' + $0 + ' type=' + $1 + ' hint=' +
-                    ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 + ' button=' + $5 +
-                    ' state=0x' + ($6 >>> 0).toString(16) + ' -> target=' +
-                    ($7 >>> 0) + ' lx=' + $8 + ' ly=' + $9);
-      }
-    },
-    dpy->conn_id,
-    type,
-    window,
-    x_root,
-    y_root,
-    button,
-    state,
-    target ? target->id : 0,
-    lx,
-    ly);
-
   if (!target)
     return;
 
-  XEvent ev;
-  memset(&ev, 0, sizeof(ev));
-  ev.xbutton.type = type;
-  ev.xbutton.display = dpy;
-  ev.xbutton.window = target->id;
-  ev.xbutton.x = lx;
-  ev.xbutton.y = ly;
-  ev.xbutton.x_root = x_root;
-  ev.xbutton.y_root = y_root;
-  ev.xbutton.root = dpy->screens[0].root;
-  ev.xbutton.button = button;
-  ev.xbutton.state = state;
-  ev.xbutton.same_screen = True;
-  ev.xbutton.time = event_now();
-  em_x11_event_queue_push(dpy, &ev);
+  {
+    Time now = event_now();
+    XEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.xbutton.type = type;
+    ev.xbutton.display = dpy;
+    ev.xbutton.window = target->id;
+    ev.xbutton.x = lx;
+    ev.xbutton.y = ly;
+    ev.xbutton.x_root = x_root;
+    ev.xbutton.y_root = y_root;
+    ev.xbutton.root = dpy->screens[0].root;
+    ev.xbutton.button = button;
+    ev.xbutton.state = state;
+    ev.xbutton.same_screen = True;
+    ev.xbutton.time = now;
+    EM_ASM(
+      {
+        var d = Module['emX11Debug'];
+        if (d && d.traceCBtn)
+          console.log('[c-btn] conn=' + $0 + ' type=' + $1 + ' hint=' +
+                      ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 + ' -> target=' +
+                      ($5 >>> 0) + ' lx=' + $6 + ' ly=' + $7);
+      },
+      dpy->conn_id,
+      type,
+      window,
+      x_root,
+      y_root,
+      target->id,
+      lx,
+      ly);
+    em_x11_event_queue_push(dpy, &ev);
+
+    /* xorg DeliverGrabbedEvent: after normal delivery (above),
+     * DeliverOneGrabbedEvent sends a copy to the grab window so it
+     * can dismiss the popup. Push a second event to the grab window
+     * when the normal target is outside the grab hierarchy. Both
+     * events share the same time stamp so Motif's _XmIsEventUnique
+     * can deduplicate. */
+    if (type == ButtonPress && active_grab &&
+        target->id != active_grab_window &&
+        !win_is_inferior_of(dpy, target->id, active_grab_window)) {
+      EmxWindow* grab_win = em_x11_window_find(dpy, active_grab_window);
+      if (grab_win && grab_win->event_mask & ButtonPressMask) {
+        int gax = 0, gay = 0, gdepth;
+        window_abs_origin(dpy, grab_win, &gax, &gay, &gdepth);
+        XEvent gev;
+        memset(&gev, 0, sizeof(gev));
+        gev.xbutton.type = type;
+        gev.xbutton.display = dpy;
+        gev.xbutton.window = grab_win->id;
+        gev.xbutton.x = x_root - gax;
+        gev.xbutton.y = y_root - gay;
+        gev.xbutton.x_root = x_root;
+        gev.xbutton.y_root = y_root;
+        gev.xbutton.root = dpy->screens[0].root;
+        gev.xbutton.button = button;
+        gev.xbutton.state = state;
+        gev.xbutton.same_screen = True;
+        gev.xbutton.time = now;
+        EM_ASM(
+          {
+            var d = Module['emX11Debug'];
+            if (d && d.traceCBtn)
+              console.log('[c-btn] conn=' + $0 + ' type=' + $1 +
+                          ' grab-delivery -> target=' + ($2 >>> 0) + ' lx=' +
+                          $3 + ' ly=' + $4);
+          },
+          dpy->conn_id,
+          type,
+          grab_win->id,
+          gev.xbutton.x,
+          gev.xbutton.y);
+        em_x11_event_queue_push(dpy, &gev);
+      }
+    }
+  }
 }
 
 EMSCRIPTEN_KEEPALIVE
