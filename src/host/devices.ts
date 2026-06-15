@@ -161,6 +161,9 @@ export class InputBridge {
   }
 
   clearActivePointerGrab(): void {
+    if (this.activePointerGrab) {
+      this.dragModule = null;
+    }
     this.activePointerGrab = null;
   }
 
@@ -177,6 +180,7 @@ export class InputBridge {
     if (this.activePointerGrab && this.activePointerGrab.module === module) {
       this.activePointerGrab = null;
       this.grabCursor = null;
+      this.dragModule = null;
     }
     if (this.dragModule === module) this.dragModule = null;
     /* focusedWindow / explicitFocus may point at a window the dead conn

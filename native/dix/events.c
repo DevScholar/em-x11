@@ -205,6 +205,7 @@ static unsigned int grab_button_count = 0;
  * popup entries where Tk posts a transient menu and calls XGrabPointer. */
 static bool active_grab = false;
 static Window active_grab_window = None;
+static unsigned int active_grab_event_mask = 0;
 
 /* Monotonic millisecond timestamp for xbutton/xmotion/xkey/xcrossing `time`
  * fields. Some WMs (twm's ConstrainedMove in particular: menus.c:1500) compare
@@ -300,7 +301,14 @@ static void emit_crossing(Display* dpy,
   if (!win)
     return;
   long mask = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
-  if (!(win->event_mask & mask))
+  /* xorg's CoreEnterLeaveEvent with grab+ownerEvents: for the grab
+   * window itself, mask = grab->eventMask | EventMaskForClient.
+   * The grab mask can supply event selection the window didn't
+   * explicitly select for (e.g. Motif popup menus). */
+  unsigned int effective_mask = win->event_mask;
+  if (active_grab && w == active_grab_window)
+    effective_mask |= active_grab_event_mask;
+  if (!(effective_mask & mask))
     return;
 
   /* crossing_detail wants (from, to) as the pointer's actual travel
@@ -448,15 +456,17 @@ void em_x11_push_button_event(int type,
     long mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
     target = em_x11_window_find(dpy, window);
     if (target) {
+      /* Window is in this Display -> same client. Walk up for
+       * mask matching, mirroring xorg's DeliverDeviceEvents
+       * with ownerEvents. */
       target = walk_up_for_mask(dpy, target, x_root, y_root, mask, &lx, &ly);
-    } else {
-      target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
-    }
-    /* Active grab cross-connection fallback: when neither the
-     * host hint nor hit_test found a window (both may reference
-     * windows owned by another connection), route to the active
-     * grab window. */
-    if (!target && active_grab) {
+    } else if (active_grab) {
+      /* Foreign window (different connection / client). xorg's
+       * DeliverGrabbedEvent with ownerEvents: DeliverOneEvent
+       * skips windows whose client != grab client. After the
+       * walk exhausts, DeliverOneGrabbedEvent delivers to
+       * grab->window. Route directly to the grab window so
+       * popup menus receive outside clicks (dismiss). */
       target = em_x11_window_find(dpy, active_grab_window);
       if (target) {
         int ax = 0, ay = 0, depth;
@@ -464,6 +474,8 @@ void em_x11_push_button_event(int type,
         lx = x_root - ax;
         ly = y_root - ay;
       }
+    } else {
+      target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
     }
 
     if (target && type == ButtonPress) {
@@ -547,9 +559,18 @@ void em_x11_push_motion_event(
   {
     Window cur_pw = window;
     if (cur_pw == None || !em_x11_window_find(dpy, cur_pw)) {
-      int lx_fb = 0, ly_fb = 0;
-      EmxWindow* pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
-      cur_pw = pt ? pt->id : None;
+      if (active_grab) {
+        /* Foreign window during active grab: keep the sprite on
+         * the grab window instead of falling through to hit_test
+         * (which would find root). Prevents spurious LeaveNotify
+         * on the grab window and EnterNotify on root when the
+         * pointer moves over a foreign client's windows. */
+        cur_pw = active_grab_window;
+      } else {
+        int lx_fb = 0, ly_fb = 0;
+        EmxWindow* pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
+        cur_pw = pt ? pt->id : None;
+      }
     }
     update_pointer_window(dpy, cur_pw, x_root, y_root, state);
   }
@@ -581,6 +602,9 @@ void em_x11_push_motion_event(
                                        &unused_lx,
                                        &unused_ly);
       path_label = "hint+walk";
+    } else if (active_grab) {
+      motion_target = em_x11_window_find(dpy, active_grab_window);
+      path_label = motion_target ? "active_grab_fb" : "none";
     } else {
       int lx_fb = 0, ly_fb = 0;
       motion_target = hit_test(dpy,
@@ -590,10 +614,6 @@ void em_x11_push_motion_event(
                                &lx_fb,
                                &ly_fb);
       path_label = motion_target ? "hit_test" : "none";
-    }
-    if (!motion_target && active_grab) {
-      motion_target = em_x11_window_find(dpy, active_grab_window);
-      path_label = motion_target ? "active_grab_fb" : "none";
     }
     if (!motion_target)
       return;
@@ -998,8 +1018,10 @@ int XUngrabKeyboard(Display* dpy, Time t) {
 int XUngrabPointer(Display* dpy, Time t) {
   (void)t;
   dpy->request++;
+  em_x11_reset_implicit_grab();
   active_grab = false;
   active_grab_window = None;
+  active_grab_event_mask = 0;
   em_x11_js_set_grab_cursor(0);
   em_x11_js_ungrab_pointer();
   return 1;
@@ -1014,11 +1036,11 @@ int XGrabPointer(Display* dpy,
                  Window confine_to,
                  Cursor cursor,
                  Time t) {
-  (void)event_mask;
   (void)pointer_mode;
   (void)keyboard_mode;
   (void)confine_to;
   (void)t;
+  active_grab_event_mask = event_mask;
   EM_ASM(
     {
       var d = Module['emX11Debug'];

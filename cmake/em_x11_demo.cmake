@@ -61,6 +61,13 @@ function(em_x11_finalize_demo target)
         message(FATAL_ERROR "em_x11_finalize_demo(${target}): EXPORT_NAME is required")
     endif()
 
+    # When EM_X11_SRC is not set (em-x11 building its own examples),
+    # default to CMAKE_SOURCE_DIR. External consumers (motif-wasm, etc.)
+    # set EM_X11_SRC to point at the em-x11 tree from their own root.
+    if(NOT DEFINED EM_X11_SRC)
+        set(EM_X11_SRC "${CMAKE_SOURCE_DIR}")
+    endif()
+
     target_include_directories(${target} PRIVATE ${EM_X11_INCLUDE_DIR})
 
     # Port-based linking. emcc loads the port script which returns the
@@ -68,14 +75,14 @@ function(em_x11_finalize_demo target)
     # Only pass --use-port at link time — at compile time the port's
     # process_args() may return linker-only flags (--js-library,
     # --pre-js) that clang doesn't understand.
-    set(_port_script "${CMAKE_SOURCE_DIR}/tools/ports/em_x11.py")
+    set(_port_script "${EM_X11_SRC}/tools/ports/em_x11.py")
     target_link_options(${target} PRIVATE
         "SHELL:--use-port=${_port_script}"
     )
 
     # Inject the JS bridge library so C EM_JS calls resolve at link time.
     # In the static-link path this overrides the EM_JS bodies in bridges.c.
-    set(_js_lib "${CMAKE_SOURCE_DIR}/native/src/lib/library_em-x11.js")
+    set(_js_lib "${EM_X11_SRC}/native/src/lib/library_em-x11.js")
     if(EXISTS "${_js_lib}")
         target_link_options(${target} PRIVATE "SHELL:--js-library=${_js_lib}")
     endif()
@@ -89,7 +96,7 @@ function(em_x11_finalize_demo target)
     # passes -DEM_X11_HI_DPI=0 so C code can check the value.
     if(EM_X11_FD_HI_DPI STREQUAL "OFF")
         target_compile_definitions(${target} PRIVATE EM_X11_HI_DPI=0)
-        set(_hi_dpi_pre "${CMAKE_SOURCE_DIR}/native/src/lib/hi-dpi-pre.js")
+        set(_hi_dpi_pre "${EM_X11_SRC}/native/src/lib/hi-dpi-pre.js")
         if(EXISTS "${_hi_dpi_pre}")
             target_link_options(${target} PRIVATE "SHELL:--pre-js=${_hi_dpi_pre}")
         endif()
@@ -98,7 +105,7 @@ function(em_x11_finalize_demo target)
     # Inject the default Host IIFE so Layer 1 (zero-JS) mode auto-creates
     # a Host on Module.canvas without user JS.  Set Module['emX11NoAutoStart']
     # to true if you want to provide your own Host via createEmX11.
-    set(_host_bundle "${CMAKE_BINARY_DIR}/artifacts/em-x11-default-host.js")
+    set(_host_bundle "${EM_X11_SRC}/build/artifacts/em-x11-default-host.js")
     if(EXISTS "${_host_bundle}")
         target_link_options(${target} PRIVATE "SHELL:--pre-js=${_host_bundle}")
     endif()
