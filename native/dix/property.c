@@ -6,16 +6,15 @@
  * X.Org uses (dix/property.c hangs PropertyRec off the server's
  * WindowPtr, not off any client). This file is now a thin bridge.
  *
- * Scope simplifications:
- *   - No PropertyNotify event generated on change/delete.
- *   - PropModeReplace / PropModeAppend / PropModePrepend all work; no
- *     per-mode atomicity concerns in a single-threaded wasm process.
+ * PropModeReplace / PropModeAppend / PropModePrepend all work; no
+ * per-mode atomicity concerns in a single-threaded wasm process.
  */
 
 #include "em_x11_internal.h"
 #include "em_x11_meta_layout.h"
 
 #include <X11/Xutil.h>
+#include <emscripten.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +57,9 @@ int XChangeProperty(Display* display,
   /* -1 = BadWindow, 0 = BadMatch, 1 = Success. Xlib's XChangeProperty
    * returns an int that clients rarely check; we map both errors to 0
    * so the signature is consistent with the previous implementation. */
+  if (rc == 1 && display) {
+    em_x11_push_property_notify(display, w, property, PropertyNewValue);
+  }
   return rc == 1 ? 1 : 0;
 }
 
@@ -130,8 +132,10 @@ int XGetWindowProperty(Display* display,
 }
 
 int XDeleteProperty(Display* display, Window w, Atom property) {
-  (void)display;
   em_x11_js_delete_property(w, property);
+  if (display) {
+    em_x11_push_property_notify(display, w, property, PropertyDelete);
+  }
   return 1;
 }
 

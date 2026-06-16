@@ -219,6 +219,19 @@ static Time event_now(void) {
   return (Time)(unsigned long)emscripten_get_now();
 }
 
+/* Browser autorepeat-suppression for modifier keys. Real X servers never
+ * autorepeat modifier keys (Shift/Control/Alt/Meta/Super/Hyper), but browsers
+ * fire keydown repeatedly for every key. Each repeated Control_L KeyPress would
+ * otherwise flow through the Xt translation pipeline and match catch-all <Key>
+ * translations (self-insert), flooding the event loop. Track pressed keycodes
+ * and suppress KeyPress for modifier-range keysyms when the keycode is already
+ * down. */
+static unsigned char down_keycodes[32]; /* 256 bits for keycodes 0-255 */
+
+static int is_modifier_keysym(KeySym ks) {
+  return (ks >= 0xFFE1 && ks <= 0xFFEE);
+}
+
 /* Window the pointer is currently over, as of the last motion or press we
  * observed. Real X servers synthesize EnterNotify / LeaveNotify whenever the
  * pointer crosses a window boundary (x11protocol §Window crossing), grab or
@@ -744,6 +757,23 @@ void em_x11_push_key_event_kc(int type,
   ev.xkey.y_root = y;
   ev.xkey.state = state;
   ev.xkey.keycode = (KeyCode)keycode;
+  /* Suppress browser key repeat for modifier keys. Browsers fire
+   * keydown repeatedly for all keys including Control/Shift/Alt/etc.,
+   * but real X servers never autorepeat modifiers. Without this gate,
+   * repeated Control_L KeyPress events match catch-all <Key> translations
+   * (self-insert) and flood the event loop. */
+  if (type == KeyPress && keycode < 256 && is_modifier_keysym(keysym)) {
+    int byte = keycode / 8;
+    int bit = keycode % 8;
+    if (down_keycodes[byte] & (1 << bit))
+      return;
+    down_keycodes[byte] |= (unsigned char)(1 << bit);
+  }
+  if (type == KeyRelease && keycode < 256) {
+    int byte = keycode / 8;
+    int bit = keycode % 8;
+    down_keycodes[byte] &= (unsigned char)~(1 << bit);
+  }
   ev.xkey.root = dpy->screens[0].root;
   ev.xkey.same_screen = True;
   ev.xkey.time = event_now();

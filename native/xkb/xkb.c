@@ -132,7 +132,13 @@ Bool XkbLookupKeySym(Display* dpy,
   int level = (modifiers & ShiftMask) ? 1 : 0;
   *keysym_return = XkbKeycodeToKeysym(dpy, (unsigned int)keycode, 0, level);
   if (modifiers_return)
-    *modifiers_return = modifiers;
+    /* Always non-zero so Xt's _XmMatchUsingStandardMods cache
+     * (which checks `if (!modifiers_return)` as "not cached yet")
+     * can store and reuse this value. Returning 0 for modifier-only
+     * keys (Control_L with ControlMask but no Shift/Lock) causes
+     * XtTranslateKeycode to be re-called for every translation
+     * table entry, saturating the event loop. */
+    *modifiers_return = (ShiftMask | LockMask);
   return True;
 }
 

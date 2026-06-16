@@ -36,6 +36,7 @@
 #include "em_x11_internal.h"
 
 #include <X11/Xatom.h>
+#include <emscripten.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -186,6 +187,7 @@ void em_x11_push_property_notify(Display* dpy,
   ev.xproperty.window = win;
   ev.xproperty.atom = prop;
   ev.xproperty.state = state;
+  ev.xproperty.time = (Time)(unsigned long)emscripten_get_now();
   ev.xany.window = win;
   em_x11_event_queue_push(dpy, &ev);
 }
@@ -429,20 +431,8 @@ Bool em_x11_incr_handle_chunk(Display* dpy,
     dpy->incr_cap = 0;
     dpy->incr_active = 0;
 
-    /* Evict the CLIPBOARD owner so subsequent Ctrl+C re-enters the
-     * back-channel (same logic as the inline path in intercept_send). */
-    int slot = sel_find(dpy, dpy->atom_clipboard);
-    if (slot >= 0) {
-      Window ex_owner = dpy->selections[slot].owner;
-      Time ex_time = dpy->selections[slot].time;
-      dpy->selections[slot].sel = 0;
-      dpy->selections[slot].owner = None;
-      dpy->selections[slot].time = 0;
-      if (ex_owner != None && ex_owner != dpy->clipboard_proxy_win) {
-        em_x11_push_selection_clear(
-          dpy, ex_owner, dpy->atom_clipboard, ex_time);
-      }
-    }
+    /* Data written to browser clipboard; owner retains ownership.
+     * Evicting here triggers the same infinite loop as intercept_send. */
     return True;
   }
 
@@ -641,32 +631,10 @@ Bool em_x11_selection_intercept_send(Display* dpy, Window w, const XEvent* ev) {
 
   if (rc == Success && data && nitems > 0 && actual_fmt == 8) {
     em_x11_js_clipboard_write_utf8(data, (int)nitems);
-
-    /* Evict the current CLIPBOARD owner so subsequent Ctrl+C re-enters
-     * Tk_ClipboardClear's `!clipboardActive` branch (tkClipboard.c:284)
-     * and re-fires the back-channel. Without this, Tk thinks it owns
-     * CLIPBOARD forever (a real X server would have delivered
-     * SelectionClear when another client took ownership; the browser
-     * clipboard gives us no such signal). Side benefit: handles the
-     * "user copied something in another tab externally" case -- the
-     * next XConvertSelection falls to the browser proxy path and
-     * reads fresh text.
-     *
-     * We use the recorded time of the current owner so Tk's
-     * SelectionClear handler accepts it (x11protocol §SelectionClear:
-     * time >= last owner-set time). */
-    int slot = sel_find(dpy, dpy->atom_clipboard);
-    if (slot >= 0) {
-      Window ex_owner = dpy->selections[slot].owner;
-      Time ex_time = dpy->selections[slot].time;
-      dpy->selections[slot].sel = 0;
-      dpy->selections[slot].owner = None;
-      dpy->selections[slot].time = 0;
-      if (ex_owner != None && ex_owner != dpy->clipboard_proxy_win) {
-        em_x11_push_selection_clear(
-          dpy, ex_owner, dpy->atom_clipboard, ex_time);
-      }
-    }
+    /* Data written to browser clipboard; owner retains ownership.
+     * Evicting here would trigger SelectionClear->re-assert->proxy-
+     * convert->evict->infinite loop. Subsequent Ctrl+C fires
+     * XSetSelectionOwner again, re-triggering proxy convert. */
   }
   if (data)
     free(data);
