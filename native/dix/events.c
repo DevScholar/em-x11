@@ -473,16 +473,27 @@ void em_x11_push_button_event(int type,
     target = em_x11_window_find(dpy, window);
     if (target) {
       target = walk_up_for_mask(dpy, target, x_root, y_root, mask, &lx, &ly);
-    } else if (active_grab) {
-      target = em_x11_window_find(dpy, active_grab_window);
-      if (target) {
-        int ax = 0, ay = 0, depth;
-        window_abs_origin(dpy, target, &ax, &ay, &depth);
-        lx = x_root - ax;
-        ly = y_root - ay;
-      }
     } else {
+      /* Use hit_test to find the actual window under the pointer.
+       * When active_grab is set, falling back to active_grab_window
+       * (the old behaviour) short-circuits Xt's NULL-widget →
+       * LookupSpringLoaded path — the grab window always has a
+       * widget (e.g. RowColumn), so _XtDefaultDispatcher never
+       * reaches the spring-loaded redispatch that dismisses popups
+       * on outside clicks. hit_test may return the root window or a
+       * cross-conn window with no widget, which triggers the correct
+       * path. */
       target = hit_test(dpy, x_root, y_root, mask, &lx, &ly);
+      if (!target && active_grab) {
+        /* hit_test failed (unlikely), last-resort fallback. */
+        target = em_x11_window_find(dpy, active_grab_window);
+        if (target) {
+          int ax = 0, ay = 0, depth;
+          window_abs_origin(dpy, target, &ax, &ay, &depth);
+          lx = x_root - ax;
+          ly = y_root - ay;
+        }
+      }
     }
 
     if (target && type == ButtonPress) {
@@ -501,6 +512,7 @@ void em_x11_push_button_event(int type,
     XEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.xbutton.type = type;
+    ev.xany.serial = ++dpy->request;
     ev.xbutton.display = dpy;
     ev.xbutton.window = target->id;
     ev.xbutton.x = lx;
@@ -512,30 +524,14 @@ void em_x11_push_button_event(int type,
     ev.xbutton.state = state;
     ev.xbutton.same_screen = True;
     ev.xbutton.time = now;
-    EM_ASM(
-      {
-        var d = Module['emX11Debug'];
-        if (d && d.traceCBtn)
-          console.log('[c-btn] conn=' + $0 + ' type=' + $1 + ' hint=' +
-                      ($2 >>> 0) + ' rx=' + $3 + ' ry=' + $4 + ' -> target=' +
-                      ($5 >>> 0) + ' lx=' + $6 + ' ly=' + $7);
-      },
-      dpy->conn_id,
-      type,
-      window,
-      x_root,
-      y_root,
-      target->id,
-      lx,
-      ly);
     em_x11_event_queue_push(dpy, &ev);
 
     /* xorg DeliverGrabbedEvent: after normal delivery (above),
      * DeliverOneGrabbedEvent sends a copy to the grab window so it
      * can dismiss the popup. Push a second event to the grab window
-     * when the normal target is outside the grab hierarchy. Both
-     * events share the same time stamp so Motif's _XmIsEventUnique
-     * can deduplicate. */
+     * when the normal target is outside the grab hierarchy. Distinct
+     * serial numbers prevent Motif's _XmIsEventUnique from treating
+     * the grab-delivery as a duplicate. */
     if (type == ButtonPress && active_grab &&
         target->id != active_grab_window &&
         !win_is_inferior_of(dpy, target->id, active_grab_window)) {
@@ -546,6 +542,7 @@ void em_x11_push_button_event(int type,
         XEvent gev;
         memset(&gev, 0, sizeof(gev));
         gev.xbutton.type = type;
+        gev.xany.serial = ++dpy->request;
         gev.xbutton.display = dpy;
         gev.xbutton.window = grab_win->id;
         gev.xbutton.x = x_root - gax;
@@ -557,19 +554,6 @@ void em_x11_push_button_event(int type,
         gev.xbutton.state = state;
         gev.xbutton.same_screen = True;
         gev.xbutton.time = now;
-        EM_ASM(
-          {
-            var d = Module['emX11Debug'];
-            if (d && d.traceCBtn)
-              console.log('[c-btn] conn=' + $0 + ' type=' + $1 +
-                          ' grab-delivery -> target=' + ($2 >>> 0) + ' lx=' +
-                          $3 + ' ly=' + $4);
-          },
-          dpy->conn_id,
-          type,
-          grab_win->id,
-          gev.xbutton.x,
-          gev.xbutton.y);
         em_x11_event_queue_push(dpy, &gev);
       }
     }

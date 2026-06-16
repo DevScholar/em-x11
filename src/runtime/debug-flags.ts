@@ -27,6 +27,8 @@ export interface EmX11DebugFlags {
   traceCMot: boolean;
   traceMove: boolean;
   traceQp: boolean;
+  traceNext: boolean;
+  traceDispatch: boolean;
 }
 
 const DEFAULTS: EmX11DebugFlags = {
@@ -39,6 +41,8 @@ const DEFAULTS: EmX11DebugFlags = {
   traceCMot: false,
   traceMove: false,
   traceQp: false,
+  traceNext: false,
+  traceDispatch: false,
 };
 
 let _flags: EmX11DebugFlags | undefined;
