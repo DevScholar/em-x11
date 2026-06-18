@@ -9,6 +9,7 @@
 
 #include <emscripten.h>
 #include <errno.h>
+#include <stdio.h>
 #include <unistd.h>
 
 /* Signal delivery at cooperative yield points (signal.c). */

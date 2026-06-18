@@ -12,6 +12,7 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/extensions/shape.h>
 #include <emscripten.h>
+#include <stdio.h>
 #include <string.h>
 
 /* -- Window hit testing -------------------------------------------------- */
@@ -465,7 +466,6 @@ void em_x11_push_button_event(int type,
   Display* dpy = em_x11_get_display();
   int lx = 0, ly = 0;
   EmxWindow* target;
-
   if (type == ButtonRelease && grab_window != None) {
     /* Implicit grab: deliver ButtonRelease to the grab window even if
      * the pointer has moved elsewhere. Compute local coords from the

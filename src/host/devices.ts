@@ -232,6 +232,7 @@ export class InputBridge {
   }
 
   pushMouseDown(e: MouseEventData): void {
+    console.warn('[DIAG-INPUT] pushMouseDown', e.x, e.y, 'button', e.button);
     this.deliverButton(X_ButtonPress, e);
   }
   pushMouseUp(e: MouseEventData): void {
@@ -396,6 +397,7 @@ export class InputBridge {
   private deliverButton(xType: number, e: MouseEventData): void {
     this.setPointer(e.x, e.y);
     const target = this.host.renderer.findWindowAt(e.x, e.y);
+    console.warn('[DIAG-INPUT] deliverButton target window:', target, 'at', e.x, e.y);
     /* X11 button-event state must be the modifier mask BEFORE this
      * event (xserver/dix/events.c::DeliverDeviceEvents). e.modifiers
      * comes from `MouseEvent.buttons`, which is the state AFTER the
@@ -578,6 +580,7 @@ export class InputBridge {
       this.focusedWindow = keySub?.winId ?? deliveryWin;
       this.dragModule = module;
     }
+    console.warn('[DIAG-INPUT] ccall em_x11_push_button_event', { xType, deliveryWin, lx, ly, absX: e.x, absY: e.y, button: e.button, x11State });
     module.ccall(
       'em_x11_push_button_event',
       null,

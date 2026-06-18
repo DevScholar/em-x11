@@ -72,6 +72,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -150,8 +151,10 @@ static int fd_is_readable(int fd) {
    * A Display fd never reaches EOF through the ring-buffer path
    * (the pipe is local and both ends are owned by the Display). */
   Display* dpy = poll_display_for_fd(fd);
-  if (dpy)
-    return (dpy->event_head != dpy->event_tail) ? 1 : 0;
+  if (dpy) {
+    int has_events = (dpy->event_head != dpy->event_tail);
+    return has_events ? 1 : 0;
+  }
 
   /* Validate the fd.  EBADF → POLLNVAL. */
   int flags = fcntl(fd, F_GETFL, 0);
