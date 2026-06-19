@@ -17,6 +17,7 @@
  * registry (hash table keyed by display_name). */
 static Display g_display;
 static bool g_display_open = false;
+static int g_open_count = 0;
 
 Display* em_x11_get_display(void) { return &g_display; }
 
@@ -116,6 +117,7 @@ Display* XOpenDisplay(const char* display_name) {
   em_x11_bridges_link_anchor();
   (void)display_name;
   if (g_display_open) {
+    g_open_count++;
     return &g_display;
   }
 
@@ -220,6 +222,7 @@ Display* XOpenDisplay(const char* display_name) {
   em_x11_js_init(screen_w, screen_h);
 
   g_display_open = true;
+  g_open_count = 1;
 
   return &g_display;
 }
@@ -233,9 +236,12 @@ int em_x11_current_conn_id(void) {
 
 int XCloseDisplay(Display* display) {
   (void)display;
-  if (g_display_open) {
-    em_x11_js_close_display(g_display.conn_id);
-  }
+  if (!g_display_open)
+    return 0;
+  g_open_count--;
+  if (g_open_count > 0)
+    return 0;
+  em_x11_js_close_display(g_display.conn_id);
   g_display_open = false;
   return 0;
 }
