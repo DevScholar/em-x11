@@ -69,6 +69,7 @@ export class RootCanvas {
       options.element.height = this.cssHeight;
       options.element.style.width = `${this.cssWidth}px`;
       options.element.style.height = `${this.cssHeight}px`;
+      options.element.tabIndex = 0;
     } else {
       const parent = options.parent ?? document.body;
       this.cssWidth = options.width ?? 1024;

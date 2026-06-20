@@ -74,6 +74,7 @@ function resolveCanvas(Module: Record<string, unknown>): HTMLCanvasElement | Off
   c.width = (Module['emX11Width'] as number) ?? 1024;
   c.height = (Module['emX11Height'] as number) ?? 768;
   c.style.display = 'block';
+  c.tabIndex = 0;
   document.body.appendChild(c);
   Module['canvas'] = c;
   Module['emX11Canvas'] = c;

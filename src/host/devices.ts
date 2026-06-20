@@ -294,9 +294,14 @@ export class InputBridge {
   }
 
   pushKey(xType: number, e: KeyEventData): void {
-    const focus = this.explicitFocus !== null
-      ? this.explicitFocus
-      : this.focusedWindow;
+    /* focusedWindow (set on every ButtonPress to the nearest KeyPressMask
+     * ancestor) takes priority over explicitFocus (set by XSetInputFocus
+     * bridge, e.g. auto-focus-on-map). Without this order, the first-mapped
+     * toplevel (which may not be an Xt-recognised widget window) permanently
+     * steals key events away from widgets the user actually clicked on. */
+    const focus = this.focusedWindow !== null
+      ? this.focusedWindow
+      : this.explicitFocus;
     if (focus === null) return;
     const module = this.moduleForWindow(focus);
     if (!module) return;
@@ -327,9 +332,9 @@ export class InputBridge {
    *  them paired for symmetry. */
   pushTextKey(text: string): void {
     if (!text) return;
-    const focus = this.explicitFocus !== null
-      ? this.explicitFocus
-      : this.focusedWindow;
+    const focus = this.focusedWindow !== null
+      ? this.focusedWindow
+      : this.explicitFocus;
     if (focus === null) return;
     const module = this.moduleForWindow(focus);
     if (!module) return;
@@ -576,6 +581,10 @@ export class InputBridge {
        * must not steal focus or create a drag. */
       const keySub = this.host.events.findSubscriberFor(target, X_KeyPressMask);
       this.focusedWindow = keySub?.winId ?? deliveryWin;
+      /* ButtonPress-driven focus supersedes the auto-focus-on-map explicit
+       * override (which may point at a non-Xt toplevel the Xt dispatch
+       * can't resolve). Clear it so pushKey prioritises focusedWindow. */
+      this.explicitFocus = null;
       this.dragModule = module;
     }
     module.ccall(
@@ -705,6 +714,19 @@ export class InputBridge {
         }
       } else {
         el.focus();
+        /* Defensive re-focus: the synchronous wasm ButtonPress processing
+         * in the earlier mousedown handler may schedule microtasks that
+         * move DOM focus (e.g. a Motif XmProcessTraversal that creates a
+         * hidden IME textarea).  Re-assert canvas focus after the current
+         * event drains. */
+        setTimeout(() => {
+          if (this.host.canvas.headless) return;
+          const cur = document.activeElement;
+          const tio = this.host.textInput.element;
+          if (cur !== el && (tio === null || cur !== tio)) {
+            el.focus();
+          }
+        }, 0);
       }
     });
 
@@ -735,10 +757,6 @@ export class InputBridge {
 
     on(window, 'keydown', (ev) => {
       const e = ev as KeyboardEvent;
-      /* Focus is "ours" when the canvas OR the hidden textarea overlay
-       * holds DOM focus. The overlay is a 1px transparent textarea that
-       * the OS IME anchors candidate windows to (text-input.ts); from
-       * X's point of view we're still typing into the canvas. */
       const active = document.activeElement;
       const ov = this.host.textInput.element;
       const hasFocus = active === el || (ov !== null &&
