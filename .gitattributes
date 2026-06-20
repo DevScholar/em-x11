@@ -1,3 +1,24 @@
-# Force LF for shell scripts — CRLF shebangs break on Linux/WSL
-scripts/em-x11-pkg-config text eol=lf
-*.sh text eol=lf
+# All text files: LF in the repo, platform-native on checkout.
+# C/H files must stay LF — CRLF terminators produce spurious diffs
+# and break emscripten's JS optimizer (acorn) when CR sneaks into
+# EM_JS JavaScript strings.
+* text=auto
+
+# Force LF for these — CRLF will break them on Linux/WSL
+*.c   text eol=lf
+*.h   text eol=lf
+*.sh  text eol=lf
+*.py  text eol=lf
+*.cmake text eol=lf
+*.js  text eol=lf
+*.ts  text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md  text eol=lf
+*.ad  text eol=lf
+*.uid binary
+*.wasm binary
+*.a binary
+*.o binary

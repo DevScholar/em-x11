@@ -47,6 +47,8 @@ void em_x11_bridges_link_anchor(void) {}
 
 /* --- core ---------------------------------------------------------------- */
 
+/* clang-format off */
+
 EM_JS(void, em_x11_js_init, (int screenWidth, int screenHeight), {
   var host = Module['emX11Host'];
   if (host)
@@ -497,7 +499,7 @@ EM_JS(void, em_x11_js_clipboard_write_utf8, (int dataPtr, int len), {
    * its byte count, otherwise the NUL turns into a visible glyph (R or
    * space) when pasted back into the same app. */
   var end = copy.length;
-  while (end > 0 && copy[end - 1] == = 0)
+  while (end > 0 && copy[end - 1] === 0)
     end--;
   var text = new TextDecoder('utf-8').decode(copy.subarray(0, end));
   navigator.clipboard.writeText(text).catch(
@@ -1405,3 +1407,5 @@ EM_JS(void, em_x11_js_glx_resize, (int id, int width, int height), {
     return;
   host.glx.resize(id | 0, width | 0, height | 0);
 });
+
+/* clang-format on */

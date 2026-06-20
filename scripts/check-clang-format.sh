@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Check that clang-format is available. Called from postinstall so the
-# developer gets an early warning rather than a late pre-commit failure.
+# Check that clang-format is available.  Called from postinstall as an
+# early heads-up — without it you can't auto-format C/H files locally.
 set -euo pipefail
 
 if [ "$(uname -s)" != "Linux" ]; then
@@ -14,6 +14,5 @@ else
   echo ""
   echo "WARNING: clang-format not found."
   echo "  Install it via:  sudo apt install clang-format"
-  echo "  Without it, 'git commit' on C/H files will be rejected."
   echo ""
 fi
