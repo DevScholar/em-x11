@@ -208,6 +208,31 @@ static bool active_grab = false;
 static Window active_grab_window = None;
 static unsigned int active_grab_event_mask = 0;
 
+/* Popup menu windows registered for dual-delivery. Motif posts menu
+ * shells as OverrideRedirect top-levels — siblings, not children, of
+ * the grab window. During outside-click dual-delivery we must also
+ * send a copy to each registered popup so MenuShell's
+ * <BtnUp>:MenuShellPopdownDone() translation can dismiss. */
+static Window popup_windows[8];
+static int popup_window_count = 0;
+
+void em_x11_register_popup(Window w) {
+  for (int i = 0; i < popup_window_count; i++)
+    if (popup_windows[i] == w)
+      return;
+  if (popup_window_count < 8)
+    popup_windows[popup_window_count++] = w;
+}
+
+void em_x11_unregister_popup(Window w) {
+  for (int i = 0; i < popup_window_count; i++) {
+    if (popup_windows[i] == w) {
+      popup_windows[i] = popup_windows[--popup_window_count];
+      return;
+    }
+  }
+}
+
 /* Monotonic millisecond timestamp for xbutton/xmotion/xkey/xcrossing `time`
  * fields. Some WMs (twm's ConstrainedMove in particular: menus.c:1500) compare
  * `event.time - last_click_time` against a timeout to detect rapid successive
@@ -339,12 +364,13 @@ static void emit_crossing(Display* dpy,
   if (!win)
     return;
   long mask = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
-  /* xorg's CoreEnterLeaveEvent with grab+ownerEvents: for the grab
-   * window itself, mask = grab->eventMask | EventMaskForClient.
-   * The grab mask can supply event selection the window didn't
-   * explicitly select for (e.g. Motif popup menus). */
+  /* xorg CoreEnterLeaveEvent: when a grab is active, mask =
+   * grab->eventMask | EventMaskForClient for EVERY window, not
+   * just the grab window. The grab mask supplies event selection
+   * that submenu windows didn't explicitly select (LeaveWindowMask
+   * for spring-loaded dismissal). */
   unsigned int effective_mask = win->event_mask;
-  if (active_grab && w == active_grab_window)
+  if (active_grab)
     effective_mask |= active_grab_event_mask;
   if (!(effective_mask & mask))
     return;
@@ -486,6 +512,21 @@ void em_x11_push_button_event(int type,
     target = em_x11_window_find(dpy, window);
     if (target) {
       target = walk_up_for_mask(dpy, target, x_root, y_root, mask, &lx, &ly);
+      if (!target && active_grab) {
+        /* walk_up_for_mask found no subscriber in the ancestor chain.
+         * xorg's DeliverGrabbedEvent falls back to DeliverOneGrabbedEvent
+         * → grab->window when normal delivery finds no taker. Without
+         * this, clicks on windows that don't select ButtonPressMask
+         * (e.g. static labels) are silently dropped and popups never
+         * dismiss. */
+        target = em_x11_window_find(dpy, active_grab_window);
+        if (target) {
+          int ax = 0, ay = 0, depth;
+          window_abs_origin(dpy, target, &ax, &ay, &depth);
+          lx = x_root - ax;
+          ly = y_root - ay;
+        }
+      }
     } else {
       /* Use hit_test to find the actual window under the pointer.
        * When active_grab is set, falling back to active_grab_window
@@ -544,20 +585,40 @@ void em_x11_push_button_event(int type,
      * can dismiss the popup. Push a second event to the grab window
      * when the normal target is outside the grab hierarchy. Distinct
      * serial numbers prevent Motif's _XmIsEventUnique from treating
-     * the grab-delivery as a duplicate. */
-    if (type == ButtonPress && active_grab &&
+     * the grab-delivery as a duplicate.
+     *
+     * ButtonPress alone is not enough — Motif's MenuShell translation
+     * table triggers PopdownDone on <BtnUp> (ButtonRelease), so we
+     * must dual-deliver both press and release for the menu to
+     * dismiss on outside clicks. */
+    if ((type == ButtonPress || type == ButtonRelease) && active_grab &&
         target->id != active_grab_window &&
         !win_is_inferior_of(dpy, target->id, active_grab_window)) {
+      unsigned long need_mask =
+        (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
       EmxWindow* grab_win = em_x11_window_find(dpy, active_grab_window);
-      if (grab_win && grab_win->event_mask & ButtonPressMask) {
+      /* The grab window may not have the mask via XSelectInput, but the
+       * active grab's own event_mask (from XGrabPointer) authorises
+       * delivery. Motif's EVENTS includes both press and release. */
+      if (grab_win &&
+          ((grab_win->event_mask | active_grab_event_mask) & need_mask)) {
+        /* Deliver to the grab window's parent (MenuShell) when the grab
+         * window is a child (RowColumn). The MenuShell has the
+         * <BtnUp>:MenuShellPopdownDone() translation that dismisses. */
+        EmxWindow* deliver_win = grab_win;
+        if (grab_win->parent != 0) {
+          EmxWindow* pw = em_x11_window_find(dpy, grab_win->parent);
+          if (pw)
+            deliver_win = pw;
+        }
         int gax = 0, gay = 0, gdepth;
-        window_abs_origin(dpy, grab_win, &gax, &gay, &gdepth);
+        window_abs_origin(dpy, deliver_win, &gax, &gay, &gdepth);
         XEvent gev;
         memset(&gev, 0, sizeof(gev));
         gev.xbutton.type = type;
         gev.xany.serial = ++dpy->request;
         gev.xbutton.display = dpy;
-        gev.xbutton.window = grab_win->id;
+        gev.xbutton.window = deliver_win->id;
         gev.xbutton.x = x_root - gax;
         gev.xbutton.y = y_root - gay;
         gev.xbutton.x_root = x_root;
@@ -568,6 +629,35 @@ void em_x11_push_button_event(int type,
         gev.xbutton.same_screen = True;
         gev.xbutton.time = now;
         em_x11_event_queue_push(dpy, &gev);
+      }
+
+      /* Also deliver to registered popup windows (MenuShell OverrideRedirect
+       * popups) so their <BtnUp>:MenuShellPopdownDone() translations fire.
+       * These popups are siblings, not children, of the grab window — the
+       * parent-chain delivery above misses them. */
+      for (int pi = 0; pi < popup_window_count; pi++) {
+        Window pw_id = popup_windows[pi];
+        EmxWindow* pw = em_x11_window_find(dpy, pw_id);
+        if (!pw)
+          continue;
+        int pax = 0, pay = 0, pdepth;
+        window_abs_origin(dpy, pw, &pax, &pay, &pdepth);
+        XEvent pev;
+        memset(&pev, 0, sizeof(pev));
+        pev.xbutton.type = type;
+        pev.xany.serial = ++dpy->request;
+        pev.xbutton.display = dpy;
+        pev.xbutton.window = pw_id;
+        pev.xbutton.x = x_root - pax;
+        pev.xbutton.y = y_root - pay;
+        pev.xbutton.x_root = x_root;
+        pev.xbutton.y_root = y_root;
+        pev.xbutton.root = dpy->screens[0].root;
+        pev.xbutton.button = button;
+        pev.xbutton.state = state;
+        pev.xbutton.same_screen = True;
+        pev.xbutton.time = now;
+        em_x11_event_queue_push(dpy, &pev);
       }
     }
   }
@@ -597,18 +687,15 @@ void em_x11_push_motion_event(
   {
     Window cur_pw = window;
     if (cur_pw == None || !em_x11_window_find(dpy, cur_pw)) {
-      if (active_grab) {
-        /* Foreign window during active grab: keep the sprite on
-         * the grab window instead of falling through to hit_test
-         * (which would find root). Prevents spurious LeaveNotify
-         * on the grab window and EnterNotify on root when the
-         * pointer moves over a foreign client's windows. */
-        cur_pw = active_grab_window;
-      } else {
-        int lx_fb = 0, ly_fb = 0;
-        EmxWindow* pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
-        cur_pw = pt ? pt->id : None;
-      }
+      /* xorg's CheckMotion always updates the sprite window and fires
+       * DoEnterLeaveEvents regardless of grab state. The grab only
+       * affects which client receives the events, not whether they
+       * are generated. Always use hit_test so that LeaveNotify fires
+       * when the pointer leaves the grab window — Motif's spring-
+       * loaded menu dismissal depends on this signal. */
+      int lx_fb = 0, ly_fb = 0;
+      EmxWindow* pt = hit_test(dpy, x_root, y_root, 0, &lx_fb, &ly_fb);
+      cur_pw = pt ? pt->id : None;
     }
     update_pointer_window(dpy, cur_pw, x_root, y_root, state);
   }
