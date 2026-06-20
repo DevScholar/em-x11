@@ -360,37 +360,26 @@ static Bool serve_clipboard_from_browser(
     return True;
   }
 
-  /* Everything below needs the actual clipboard text. Split read:
-   *   _begin returns the byte length (>=0) after awaiting the browser,
-   *   _fetch copies those bytes into our malloc'd buffer.
-   * JSPI suspends only on _begin; _fetch is synchronous. */
-  int text_len = em_x11_js_clipboard_read_begin();
-  if (text_len < 0)
-    return False; /* permission denied / error */
+  /* JSPI suspends the wasm stack until readText() resolves. */
+  char* raw = em_x11_js_clipboard_read_async();
+  if (!raw)
+    return False; /* permission denied or error */
 
+  int text_len = (int)strlen(raw);
   unsigned char* utf8 = NULL;
   if (text_len > 0) {
-    unsigned char* raw = malloc((size_t)text_len);
-    if (!raw)
-      return False;
-    em_x11_js_clipboard_read_fetch(raw, text_len);
-    /* Normalize CRLF → LF: Windows clipboard sources use \r\n, but Tk
-     * entry/text widgets expect bare \n. strip_crlf always allocates a
-     * fresh buffer so `raw` can be freed unconditionally. */
-    text_len = strip_crlf(raw, text_len, &utf8);
+    /* Normalize CRLF → LF: Windows clipboard uses \r\n, Tk expects \n. */
+    text_len = strip_crlf((unsigned char*)raw, text_len, &utf8);
     free(raw);
     if (!utf8)
       return False;
-    /* Strip trailing NUL bytes from browser clipboard data. Motif's
-     * internal storage includes a NUL terminator in its byte count;
-     * when pasted back, the NUL renders as a visible glyph (R or space)
-     * inside Motif widgets. */
+    /* Strip trailing NUL bytes from browser clipboard data. */
     while (text_len > 0 && utf8[text_len - 1] == 0)
       text_len--;
   } else {
-    /* Empty clipboard: still write a zero-byte property per ICCCM
-     * (nitems=0 is a valid response). Avoids leaking malloc(0). */
+    /* Empty clipboard: write a zero-byte property per ICCCM. */
     utf8 = (unsigned char*)"";
+    free(raw);
   }
 
   Bool ok = False;
@@ -422,9 +411,6 @@ static Bool serve_clipboard_from_browser(
       free(latin1);
     }
   }
-  /* Other targets (COMPOUND_TEXT, MULTIPLE, ...) deliberately unhandled:
-   * the ICCCM "refuse" response (property=None) is correct, and Tk will
-   * retry with UTF8_STRING on its own. */
 
   if (text_len > 0)
     free(utf8);
@@ -577,22 +563,7 @@ int XConvertSelection(Display* dpy,
 
   Window owner = XGetSelectionOwner(dpy, selection);
 
-  /* Safety net: evict real owner if browser clipboard has newer content. */
-  if (selection == dpy->atom_clipboard && owner != None &&
-      owner != dpy->clipboard_proxy_win) {
-    int staged_len = em_x11_js_clipboard_read_begin();
-    if (staged_len >= 0) {
-      int slot = sel_find(dpy, selection);
-      if (slot >= 0) {
-        dpy->selections[slot].sel = 0;
-        dpy->selections[slot].owner = None;
-        dpy->selections[slot].time = 0;
-      }
-      owner = dpy->clipboard_proxy_win;
-    }
-  }
-
-  /* Proxy owns CLIPBOARD → serve from browser clipboard. */
+  /* Proxy owns CLIPBOARD → JSPI read from browser clipboard. */
   if (selection == dpy->atom_clipboard && owner == dpy->clipboard_proxy_win) {
     Atom reply_prop = property;
     if (!serve_clipboard_from_browser(dpy, target, requestor, property, time)) {

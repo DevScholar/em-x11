@@ -730,29 +730,10 @@ export class InputBridge {
       }
     });
 
-    /* Browser → Tk clipboard staging. The C-side bridge
-     * (em_x11_js_clipboard_read_begin / _fetch in native/em_x11/bridges.c) has
-     * to answer synchronously because runTcl is sync (no JSPI unwinding
-     * on the clipboard path), so we
-     * pre-fill `globalThis.__emX11ClipboardBytes` ahead of every paste-
-     * equivalent gesture:
-     *
-     *   1. document `paste` events — ClipboardEvent.clipboardData is
-     *      synchronous, so any genuine paste (incl. middle-click on Linux,
-     *      menu Edit→Paste) lands here without permission prompts.
-     *   2. Ctrl+V / Shift+Insert / Cmd+V keydown — paste events don't fire
-     *      reliably on focused canvas elements, so we await
-     *      navigator.clipboard.readText() first and only push the keydown
-     *      to Tk after the cache is filled. Adds ~1ms latency in exchange
-     *      for working browser→Tk paste on bare canvases. */
-    on(document, 'paste', (ev) => {
-      const e = ev as ClipboardEvent;
-      const text = e.clipboardData?.getData('text/plain');
-      if (typeof text === 'string') {
-        globalThis.__emX11ClipboardBytes = new TextEncoder().encode(text);
-      }
-    });
-
+    /* Browser → Tk clipboard: the C-side XConvertSelection now does a
+     * JSPI await navigator.clipboard.readText() directly — no pre-stage
+     * needed. Just push the key; the wasm event pump suspends until the
+     * permission prompt (if any) is answered and the text arrives. */
     on(window, 'keydown', (ev) => {
       const e = ev as KeyboardEvent;
       const active = document.activeElement;
@@ -782,21 +763,6 @@ export class InputBridge {
         hasFocus,
         text,
       };
-      if (hasFocus && isPasteCombo(e) && navigator.clipboard?.readText) {
-        /* Defer the keydown until clipboard text is staged. Tk processes
-         * the Ctrl+V on its next event-pump tick, by which point
-         * __emX11ClipboardBytes is set. We dispatch the keydown
-         * unconditionally on resolve OR reject so a denied permission
-         * doesn't swallow the keystroke. */
-        navigator.clipboard.readText().then((text) => {
-          globalThis.__emX11ClipboardBytes = new TextEncoder().encode(text);
-        }).catch((err) => {
-          /* permission denied / not focused — leave cache as-is */
-        }).finally(() => {
-          this.pushKeyDown(data);
-        });
-        return;
-      }
       this.pushKeyDown(data);
     });
     on(window, 'keyup', (ev) => {
@@ -838,13 +804,3 @@ export class InputBridge {
  *  a clipboard prefetch. KeyboardEvent.code is layout-independent for
  *  the V key; modifier check uses ctrlKey OR metaKey to cover Linux/
  *  Windows (Ctrl) and macOS (Cmd) without false positives. */
-function isPasteCombo(e: KeyboardEvent): boolean {
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') return true;
-  if (e.shiftKey && !e.ctrlKey && !e.altKey && e.code === 'Insert') return true;
-  return false;
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var __emX11ClipboardBytes: Uint8Array | null | undefined;
-}

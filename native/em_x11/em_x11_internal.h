@@ -827,13 +827,17 @@ XIC em_x11_find_xic_for_window(Display* dpy, Window w);
  * processing (preedit callbacks handle composing text separately). */
 Bool em_x11_xim_filter_event(XEvent* event, Window w);
 
-/* Browser clipboard bridge (see selection.c). The read path is split in
- * two to keep the C side synchronous: first call awaits
- * navigator.clipboard.readText() (via the host) and stashes the UTF-8
- * bytes on the JS side, returning the byte length (or -1 on error);
- * second call copies up to `capacity` bytes into `dst` and clears the
- * stash. The write path is fire-and-forget (writeText Promise failures
- * logged to console, never propagated to C). */
+/* Browser clipboard bridge (see selection.c).
+ *
+ * em_x11_js_clipboard_read_async is the canonical JSPI read — called from
+ * serve_clipboard_from_browser when the proxy owns CLIPBOARD. It awaits
+ * navigator.clipboard.readText(), mallocs a UTF-8 copy, and returns the
+ * pointer (or NULL on error). The caller must free() it.
+ *
+ * em_x11_js_clipboard_read_begin / _fetch are the legacy synchronous path
+ * for pre-staged data (Module['emX11ClipboardBytes']); kept for non-JSPI
+ * consumers and the XConvertSelection safety net. */
+extern char* em_x11_js_clipboard_read_async(void);
 extern int em_x11_js_clipboard_read_begin(void);
 extern int em_x11_js_clipboard_read_fetch(unsigned char* dst, int capacity);
 extern void em_x11_js_clipboard_write_utf8(const unsigned char* data, int len);

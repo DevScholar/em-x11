@@ -446,24 +446,32 @@ EM_JS(int, em_x11_js_get_atom_name, (unsigned int atom), {
 
 /* --- clipboard ----------------------------------------------------------- */
 
-/* Browser → Tk clipboard read.
+/* Browser → Tk clipboard: async JSPI read.
  *
- * navigator.clipboard.readText() is async and we keep the C path
- * synchronous (see project_em_x11_no_em_async_js). The host side (devices.ts)
- * pre-stages clipboard bytes on every paste-equivalent gesture — Ctrl+V /
- * Shift+Insert keydown awaits readText() before the keydown is dispatched
- * to Tk; document `paste` events also fill the cache synchronously via
- * ClipboardEvent.clipboardData. Cache lives at
+ * Called from serve_clipboard_from_browser when the proxy owns CLIPBOARD.
+ * JSPI suspends the wasm call stack until navigator.clipboard.readText()
+ * resolves. The caller C-side receives a malloc'd UTF-8 string and must
+ * free() it. Returns NULL on permission denial or error. */
+EM_ASYNC_JS(char*, em_x11_js_clipboard_read_async, (void), {
+  try {
+    var text = await navigator.clipboard.readText();
+    if (!text) return 0;
+    var len = lengthBytesUTF8(text) + 1;
+    var ptr = _malloc(len);
+    stringToUTF8(text, ptr, len);
+    return ptr;
+  } catch(e) {
+    console.warn('[em-x11] clipboard read failed:', e);
+    return 0;
+  }
+});
+
+/* Browser → Tk clipboard: synchronous pre-stage read (legacy).
  *
- *   Module['emX11ClipboardBytes'] : Uint8Array | null
- *
- * For MODULARIZE builds where the global `Module` is not accessible from
- * the host side, the host writes to `globalThis.__emX11ClipboardBytes`
- * instead. Both halves check Module first, then fall back to globalThis.
- *
- * Both halves read it synchronously. _fetch clears the cache so a stale
- * value can't bleed into the next paste.
- */
+ * The async path above is the canonical way. These sync helpers read from
+ * a pre-staged cache (Module['emX11ClipboardBytes'] or globalThis fallback)
+ * and remain available for non-JSPI consumers and the XConvertSelection
+ * eviction safety-net. */
 EM_JS(int, em_x11_js_clipboard_read_begin, (void), {
   var bytes = Module['emX11ClipboardBytes'] || globalThis.__emX11ClipboardBytes;
   if (!bytes)
