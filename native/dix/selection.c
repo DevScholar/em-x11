@@ -355,6 +355,12 @@ static Bool serve_clipboard_from_browser(
     free(raw);
     if (!utf8)
       return False;
+    /* Strip trailing NUL bytes from browser clipboard data. Motif's
+     * internal storage includes a NUL terminator in its byte count;
+     * when pasted back, the NUL renders as a visible glyph (R or space)
+     * inside Motif widgets. */
+    while (text_len > 0 && utf8[text_len - 1] == 0)
+      text_len--;
   } else {
     /* Empty clipboard: still write a zero-byte property per ICCCM
      * (nitems=0 is a valid response). Avoids leaking malloc(0). */

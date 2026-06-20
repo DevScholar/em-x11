@@ -111,7 +111,12 @@ var LibraryEmX11 = {
       warnOnce('[em-x11] clipboard write: API unavailable');
       return;
     }
-    var text = new TextDecoder('utf-8').decode(copy);
+    /* Strip trailing NUL bytes that Motif's clipboard system includes in
+     * its byte count, otherwise the NUL turns into a visible glyph (R or
+     * space) when pasted back into the same app. */
+    var end = copy.length;
+    while (end > 0 && copy[end - 1] === 0) end--;
+    var text = new TextDecoder('utf-8').decode(copy.subarray(0, end));
     navigator.clipboard.writeText(text).catch(function(e) {
       warnOnce('[em-x11] clipboard write failed: ' + e);
     });

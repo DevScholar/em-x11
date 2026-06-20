@@ -267,7 +267,8 @@ Status XStringListToTextProperty(char** list,
   text_prop_return->value = buf;
   text_prop_return->encoding = XA_STRING;
   text_prop_return->format = 8;
-  text_prop_return->nitems = (unsigned long)total;
+  /* Exclude trailing NUL per Xlib convention (StrToText.c:59). */
+  text_prop_return->nitems = total ? (unsigned long)(total - 1) : 0;
   return 1;
 }
 
@@ -493,7 +494,15 @@ int XmbTextPropertyToTextList(Display* dpy,
   char** list = calloc(2, sizeof(char*));
   if (!list)
     return XNoMemory;
-  list[0] = tp->value ? strdup((const char*)tp->value) : strdup("");
+  if (tp->value && tp->nitems > 0) {
+    list[0] = malloc((size_t)tp->nitems + 1);
+    if (list[0]) {
+      memcpy(list[0], tp->value, (size_t)tp->nitems);
+      list[0][tp->nitems] = '\0';
+    }
+  } else {
+    list[0] = strdup("");
+  }
   list[1] = NULL;
   *list_return = list;
   *count_return = 1;

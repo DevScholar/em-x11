@@ -176,11 +176,26 @@ void em_x11_install_keysym(unsigned int keycode, unsigned int keysym) {
 KeyCode em_x11_keysym_to_keycode(Display* dpy, KeySym keysym) {
   if (keysym == NoSymbol)
     return 0;
+  /* Case-fold for ASCII letters so XKeysymToKeycode('C') finds the
+   * physical key whose keysym_table slot is lowercase 'c'. Real X11
+   * keymaps have multiple shift levels per keycode, so both 'c' and
+   * 'C' naturally resolve to keycode 54. Our single-level table needs
+   * the same tolerance, otherwise Motif translations that spell a
+   * modifier binding with an uppercase letter (Ctrl<Key>C) compile a
+   * synthetic keycode that never matches the browser-delivered event
+   * (whose keysym is lowercase 'c' for Ctrl+letter combos). */
+  KeySym lo = keysym, hi = keysym;
+  if (keysym >= 'A' && keysym <= 'Z')
+    lo = keysym + ('a' - 'A');
+  else if (keysym >= 'a' && keysym <= 'z')
+    hi = keysym - ('a' - 'A');
+
   /* Forward lookup over the WHOLE keysym_table -- pre-fill at evdev
    * positions means slots can be non-zero before we ever lazy-allocate,
    * so scan the entire 8..255 range, not just up to next_keycode. */
   for (unsigned int i = 8; i < 256; i++) {
-    if (dpy->keysym_table[i] == keysym) {
+    KeySym entry = dpy->keysym_table[i];
+    if (entry == keysym || entry == lo || entry == hi) {
       return (KeyCode)i;
     }
   }

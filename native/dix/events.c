@@ -849,6 +849,7 @@ void em_x11_push_key_event_kc(int type,
    * but real X servers never autorepeat modifiers. Without this gate,
    * repeated Control_L KeyPress events match catch-all <Key> translations
    * (self-insert) and flood the event loop. */
+
   if (type == KeyPress && keycode < 256 && is_modifier_keysym(keysym)) {
     int byte = keycode / 8;
     int bit = keycode % 8;
