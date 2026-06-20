@@ -457,23 +457,28 @@ EM_JS(int, em_x11_js_get_atom_name, (unsigned int atom), {
  *
  *   Module['emX11ClipboardBytes'] : Uint8Array | null
  *
+ * For MODULARIZE builds where the global `Module` is not accessible from
+ * the host side, the host writes to `globalThis.__emX11ClipboardBytes`
+ * instead. Both halves check Module first, then fall back to globalThis.
+ *
  * Both halves read it synchronously. _fetch clears the cache so a stale
  * value can't bleed into the next paste.
  */
 EM_JS(int, em_x11_js_clipboard_read_begin, (void), {
-  var bytes = Module['emX11ClipboardBytes'];
+  var bytes = Module['emX11ClipboardBytes'] || globalThis.__emX11ClipboardBytes;
   if (!bytes)
     return -1;
   return bytes.length | 0;
 });
 
 EM_JS(int, em_x11_js_clipboard_read_fetch, (int dstPtr, int capacity), {
-  var bytes = Module['emX11ClipboardBytes'];
+  var bytes = Module['emX11ClipboardBytes'] || globalThis.__emX11ClipboardBytes;
   if (!bytes)
     return 0;
   var n = Math.min(bytes.length, capacity) | 0;
   HEAPU8.set(bytes.subarray(0, n), dstPtr);
   Module['emX11ClipboardBytes'] = null;
+  globalThis.__emX11ClipboardBytes = null;
   return n;
 });
 

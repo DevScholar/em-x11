@@ -131,6 +131,7 @@ void em_x11_push_selection_clear(Display* dpy,
   ev.xselectionclear.window = owner;
   ev.xselectionclear.selection = selection;
   ev.xselectionclear.time = time;
+  ev.xselectionclear.serial = dpy->request;
   em_x11_event_queue_push(dpy, &ev);
 }
 
@@ -203,6 +204,31 @@ void em_x11_push_property_notify(Display* dpy,
 /*  XSendEvent intercept path (em_x11_selection_intercept_send) detects      */
 /*  the proxy requestor and bridges to navigator.clipboard.writeText().     */
 /* ------------------------------------------------------------------------- */
+
+/* Reclaim CLIPBOARD for the proxy after a real client's data has been
+ * written to the browser clipboard. SelectionClear is sent to the old
+ * owner per ICCCM §2.1 — this is load-bearing:
+ *
+ *   XtGetSelectionValue checks ctx->was_disowned before dispatching a
+ *   ConvertSelection request. If the Xt context still has a live owner
+ *   widget, it short-circuits via DoLocalTransfer and never calls
+ *   XConvertSelection. SelectionClear triggers LoseSelection, which sets
+ *   was_disowned=TRUE so the next paste reaches our proxy bridge.
+ *
+ * No infinite loop: Motif's CLIPBOARD lose callback is NULL (CutPaste.c
+ * line ~439: XtOwnSelection(..., NULL, NULL)), so no re-assert happens.
+ * Each subsequent Ctrl+C fires XSetSelectionOwner again independently. */
+static void proxy_reclaim_clipboard(Display* dpy) {
+  em_x11_selection_ensure_atoms(dpy);
+  int slot = sel_find(dpy, dpy->atom_clipboard);
+  if (slot >= 0 && dpy->selections[slot].owner != dpy->clipboard_proxy_win) {
+    Window old_owner = dpy->selections[slot].owner;
+    dpy->selections[slot].owner = dpy->clipboard_proxy_win;
+    dpy->selections[slot].time = 0;
+    em_x11_push_selection_clear(
+      dpy, old_owner, dpy->atom_clipboard, CurrentTime);
+  }
+}
 
 static void fire_proxy_convert(Display* dpy, Window owner, Time time) {
   em_x11_selection_ensure_atoms(dpy);
@@ -437,8 +463,7 @@ Bool em_x11_incr_handle_chunk(Display* dpy,
     dpy->incr_cap = 0;
     dpy->incr_active = 0;
 
-    /* Data written to browser clipboard; owner retains ownership.
-     * Evicting here triggers the same infinite loop as intercept_send. */
+    proxy_reclaim_clipboard(dpy);
     return True;
   }
 
@@ -552,6 +577,21 @@ int XConvertSelection(Display* dpy,
 
   Window owner = XGetSelectionOwner(dpy, selection);
 
+  /* Safety net: evict real owner if browser clipboard has newer content. */
+  if (selection == dpy->atom_clipboard && owner != None &&
+      owner != dpy->clipboard_proxy_win) {
+    int staged_len = em_x11_js_clipboard_read_begin();
+    if (staged_len >= 0) {
+      int slot = sel_find(dpy, selection);
+      if (slot >= 0) {
+        dpy->selections[slot].sel = 0;
+        dpy->selections[slot].owner = None;
+        dpy->selections[slot].time = 0;
+      }
+      owner = dpy->clipboard_proxy_win;
+    }
+  }
+
   /* Proxy owns CLIPBOARD → serve from browser clipboard. */
   if (selection == dpy->atom_clipboard && owner == dpy->clipboard_proxy_win) {
     Atom reply_prop = property;
@@ -637,10 +677,11 @@ Bool em_x11_selection_intercept_send(Display* dpy, Window w, const XEvent* ev) {
 
   if (rc == Success && data && nitems > 0 && actual_fmt == 8) {
     em_x11_js_clipboard_write_utf8(data, (int)nitems);
-    /* Data written to browser clipboard; owner retains ownership.
-     * Evicting here would trigger SelectionClear->re-assert->proxy-
-     * convert->evict->infinite loop. Subsequent Ctrl+C fires
-     * XSetSelectionOwner again, re-triggering proxy convert. */
+    /* Data safely in browser clipboard. Proxy reclaims ownership so
+     * every subsequent paste reaches the browser bridge, not a stale
+     * internal buffer. SelectionClear sent → Xt was_disowned=TRUE →
+     * XtGetSelectionValue falls through to XConvertSelection. */
+    proxy_reclaim_clipboard(dpy);
   }
   if (data)
     free(data);

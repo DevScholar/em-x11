@@ -734,7 +734,7 @@ export class InputBridge {
      * (em_x11_js_clipboard_read_begin / _fetch in native/em_x11/bridges.c) has
      * to answer synchronously because runTcl is sync (no JSPI unwinding
      * on the clipboard path), so we
-     * pre-fill `Module?.['emX11ClipboardBytes']` ahead of every paste-
+     * pre-fill `globalThis.__emX11ClipboardBytes` ahead of every paste-
      * equivalent gesture:
      *
      *   1. document `paste` events — ClipboardEvent.clipboardData is
@@ -749,9 +749,7 @@ export class InputBridge {
       const e = ev as ClipboardEvent;
       const text = e.clipboardData?.getData('text/plain');
       if (typeof text === 'string') {
-        if (typeof Module !== 'undefined') {
-          Module['emX11ClipboardBytes'] = new TextEncoder().encode(text);
-        }
+        globalThis.__emX11ClipboardBytes = new TextEncoder().encode(text);
       }
     });
 
@@ -791,10 +789,8 @@ export class InputBridge {
          * unconditionally on resolve OR reject so a denied permission
          * doesn't swallow the keystroke. */
         navigator.clipboard.readText().then((text) => {
-          if (typeof Module !== 'undefined') {
-            Module['emX11ClipboardBytes'] = new TextEncoder().encode(text);
-          }
-        }).catch(() => {
+          globalThis.__emX11ClipboardBytes = new TextEncoder().encode(text);
+        }).catch((err) => {
           /* permission denied / not focused — leave cache as-is */
         }).finally(() => {
           this.pushKeyDown(data);

@@ -81,18 +81,19 @@ var LibraryEmX11 = {
 
   em_x11_js_clipboard_read_begin__sig: 'i',
   em_x11_js_clipboard_read_begin: function() {
-    var bytes = Module['emX11ClipboardBytes'];
+    var bytes = Module['emX11ClipboardBytes'] || globalThis.__emX11ClipboardBytes;
     if (!bytes) return -1;
     return bytes.length | 0;
   },
 
   em_x11_js_clipboard_read_fetch__sig: 'iiii',
   em_x11_js_clipboard_read_fetch: function(dstPtr, capacity) {
-    var bytes = Module['emX11ClipboardBytes'];
+    var bytes = Module['emX11ClipboardBytes'] || globalThis.__emX11ClipboardBytes;
     if (!bytes) return 0;
     var n = Math.min(bytes.length, capacity) | 0;
     HEAPU8.set(bytes.subarray(0, n), dstPtr);
     Module['emX11ClipboardBytes'] = null;
+    globalThis.__emX11ClipboardBytes = null;
     return n;
   },
 
