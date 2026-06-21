@@ -74,6 +74,26 @@ static void push_map_notify(Display* dpy, EmxWindow* win, bool mapped) {
     ev.xunmap.from_configure = False;
   }
   em_x11_event_queue_push(dpy, &ev);
+
+  /* MapWindow → VisibilityNotify, matching xorg's MapWindow→miValidateTree
+   * →miComputeClips→SendVisibilityNotify(dix/window.c:3016) single-call
+   * chain.  A freshly-mapped toplevel is VisibilityUnobscured by default;
+   * occlusion-aware updates (raise/lower/configure) can refine this later.
+   *
+   * Always push regardless of VisibilityChangeMask.  Tk's default attrs
+   * include it (tkWindow.c:ALL_EVENTS_MASK), but real X sends the event
+   * unconditionally in MapWindow; the mask gate is at delivery time, not
+   * generation time.  In em-x11 the ring buffer IS the delivery channel,
+   * and an un-waited-for VisibilityNotify is harmless — it's simply
+   * consumed and discarded by the next event loop iteration. */
+  {
+    XEvent vev = {0};
+    vev.xvisibility.type = VisibilityNotify;
+    vev.xvisibility.display = dpy;
+    vev.xvisibility.window = win->id;
+    vev.xvisibility.state = VisibilityUnobscured;
+    em_x11_event_queue_push(dpy, &vev);
+  }
 }
 
 static void push_configure_notify(Display* dpy, EmxWindow* win) {

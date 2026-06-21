@@ -887,6 +887,18 @@ void em_x11_push_key_event_kc(int type,
 }
 
 EMSCRIPTEN_KEEPALIVE
+void em_x11_push_visibility_notify(Window window, int state) {
+  Display* dpy = em_x11_get_display();
+  XEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.xvisibility.type = VisibilityNotify;
+  ev.xvisibility.display = dpy;
+  ev.xvisibility.window = window;
+  ev.xvisibility.state = state;
+  em_x11_event_queue_push(dpy, &ev);
+}
+
+EMSCRIPTEN_KEEPALIVE
 void em_x11_push_expose_event(Window window, int x, int y, int w, int h) {
   Display* dpy = em_x11_get_display();
   XEvent ev;

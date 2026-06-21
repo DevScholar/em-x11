@@ -35,6 +35,7 @@ set(EM_X11_RUNTIME_HOOKS
     _em_x11_push_key_event_kc
     _em_x11_install_keysym
     _em_x11_push_expose_event
+    _em_x11_push_visibility_notify
     _em_x11_push_map_request
     _em_x11_push_reparent_notify
     _em_x11_push_configure_notify

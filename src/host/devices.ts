@@ -153,7 +153,15 @@ export class InputBridge {
    *  is over. */
   setActivePointerGrab(connId: number, window: number): void {
     const module = this.moduleForConn(connId);
-    if (!module) return;
+    if (!module) {
+      console.warn(
+        `em-x11: XGrabPointer on window ${window >>> 0} but conn ${connId} ` +
+        `has no bound Module. Grab silently dropped. This is expected ` +
+        `during early bootstrap but indicates a timing bug if seen ` +
+        `during interactive use.`,
+      );
+      return;
+    }
     this.activePointerGrab = { window, module };
     /* Take over any in-progress implicit drag too -- the grabbing
      * client now owns the pointer, including release routing. */

@@ -326,7 +326,27 @@ static int poll_check(struct pollfd* fds, nfds_t nfds) {
 
 static volatile int g_in_blocking_poll = 0;
 
+EMSCRIPTEN_KEEPALIVE
 int em_x11_is_blocking_in_poll(void) { return g_in_blocking_poll; }
+
+/* ---- yield-via-Python callback -------------------------------------------
+ *
+ * emscripten_sleep() does NOT suspend when called from a side module in
+ * Emscripten 5.0.3 — the JSPI wrappers are only applied to the main
+ * module.  To yield from the blocking poll path, we call a Python
+ * callback (registered via ctypes from the prelude) that uses the main
+ * module's JSPI-capable asyncio.sleep().  The C→Python→JSPI→suspend→
+ * resume→C round-trip works because the suspension happens in the main
+ * module, not in the side module.
+ *
+ * When the callback is not set (standalone tcldide or main-module build),
+ * the blocking path falls back to emscripten_sleep() which works natively
+ * in main-module JSPI builds. */
+
+static void (*g_poll_yield_fn)(int ms) = NULL;
+
+EMSCRIPTEN_KEEPALIVE
+void em_x11_poll_set_yield_fn(void (*fn)(int)) { g_poll_yield_fn = fn; }
 
 /* ---- poll() -----------------------------------------------------------
  *
@@ -353,11 +373,11 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
   /* Blocking path.
    *
    * Interval adapts to the deadline to balance latency and wasm↔JS
-   * boundary-crossing overhead.  Each emscripten_sleep suspends the
-   * wasm call via JSPI, yielding to the browser event loop.  During
-   * the yield, ccalls from JS (em_x11_event_queue_push, etc.) create
-   * new wasm stacks and populate the ring buffer — they do not
-   * interfere with the suspended poll() stack. */
+   * boundary-crossing overhead.  When g_poll_yield_fn is set (Pyodide
+   * side-module path), the callback suspends via Python's JSPI-capable
+   * asyncio.sleep() in the MAIN module — the side module's call to
+   * emscripten_sleep() can't suspend on its own (Emscripten 5.0.3
+   * doesn't apply JSPI wraps to side modules). */
 
   int infinite = (timeout < 0);
   double deadline = infinite ? 0 : emscripten_get_now() + (double)timeout;
@@ -380,7 +400,11 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
     }
 
     g_in_blocking_poll = 1;
-    emscripten_sleep(sleep_ms);
+    if (g_poll_yield_fn) {
+      g_poll_yield_fn((int)sleep_ms);
+    } else {
+      emscripten_sleep(sleep_ms);
+    }
     g_in_blocking_poll = 0;
 
     /* Deliver any pending signals before re-checking fds.
