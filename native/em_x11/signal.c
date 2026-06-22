@@ -257,9 +257,11 @@ EMSCRIPTEN_KEEPALIVE
 void em_x11_signal_on_pipe(void) { em_x11_signal_set_pending(SIGPIPE); }
 
 /* kill() bridge: tell the host to deliver a signal to another process. */
+/* clang-format off */
 EM_JS(void, em_x11_js_kill, (int pid, int sig), {
   var host = Module['emX11Host'];
   if (host && host.onSignalDeliver) {
     host.onSignalDeliver(pid | 0, sig | 0);
   }
 });
+/* clang-format on */

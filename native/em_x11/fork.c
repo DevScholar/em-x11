@@ -121,6 +121,7 @@ pid_t fork(void) {
 
 /* ---- posix_spawn ------------------------------------------------------- */
 
+/* clang-format off */
 EM_JS(
   int,
   em_x11_js_posix_spawn,
@@ -166,6 +167,7 @@ EM_JS(
       return -1;
     }
   });
+/* clang-format on */
 
 static int count_strings(char* const* arr) {
   int n = 0;
