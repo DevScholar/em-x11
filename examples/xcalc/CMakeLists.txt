@@ -22,15 +22,8 @@ target_compile_options(xcalc PRIVATE -w)
 # runs, otherwise XtGetResources returns nothing and the button layout
 # collapses to widget defaults.  Use Emscripten's --preload-file so the
 # glue loads the file automatically — no JS-side preRun hook needed.
-#
-# HiDPI disabled: xcalc's Athena Toggle widgets repaint the LCD segments
-# in alternating Set/Unset cycles; at non-integer devicePixelRatio
-# (Windows 125%/150%) the compositor's drawImage upscale lands segment
-# edges on fractional device pixels, producing L-shaped antialiasing
-# ghosts at corners.
 em_x11_finalize_demo(xcalc
     EXPORT_NAME createXcalcModule
     LIBS Xaw Xmu Xt Xpm Xext X11
-    HI_DPI OFF
     PRELOAD_FILES "${XCALC_SRC_DIR}/app-defaults/XCalc@/usr/lib/X11/app-defaults/XCalc"
 )

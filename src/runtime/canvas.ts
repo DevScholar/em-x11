@@ -6,10 +6,7 @@
  * window resize does NOT reflow the canvas -- the X screen is a virtual
  * display of constant dimensions.
  *
- * Physical pixels always equal CSS pixels (1:1). There is no
- * devicePixelRatio scaling, so on high-DPI screens the browser will
- * upscale the canvas, which may look softer than native but avoids
- * sub-pixel antialiasing artifacts at widget edges.
+ * Physical pixels always equal CSS pixels (1:1).
  *
  * Three construction modes:
  *
@@ -47,7 +44,7 @@ export class RootCanvas {
   readonly ctx: RootCanvasContext;
   readonly cssWidth: number;
   readonly cssHeight: number;
-  /** Always 1 — no devicePixelRatio scaling. */
+  /** Always 1. */
   readonly dpr: number = 1;
   /** True when running against an OffscreenCanvas. */
   readonly headless: boolean;

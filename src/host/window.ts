@@ -38,8 +38,7 @@ export class WindowManager {
 
     /* Weave: 2×2 OffscreenCanvas, pure black + pure white on the
      * diagonal. Historically this dithered to gray on CRTs at the
-     * period's DPI; on HiDPI displays you see the checker clearly,
-     * which is authentic to the era. */
+     * period's DPI. */
     const weave = new OffscreenCanvas(2, 2);
     const wctx = weave.getContext('2d');
     if (wctx) {
