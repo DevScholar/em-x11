@@ -331,17 +331,16 @@ int em_x11_is_blocking_in_poll(void) { return g_in_blocking_poll; }
 
 /* ---- yield-via-Python callback -------------------------------------------
  *
- * emscripten_sleep() does NOT suspend when called from a side module in
- * Emscripten 5.0.3 — the JSPI wrappers are only applied to the main
- * module.  To yield from the blocking poll path, we call a Python
- * callback (registered via ctypes from the prelude) that uses the main
- * module's JSPI-capable asyncio.sleep().  The C→Python→JSPI→suspend→
- * resume→C round-trip works because the suspension happens in the main
- * module, not in the side module.
+ * When the side module imports emscripten_sleep via wasmImports and
+ * returns a Promise, JSPI suspends correctly (verified June 2026).
+ *
+ * The g_poll_yield_fn callback is an alternative for callers that
+ * need to suspend via the main module's asyncio.sleep() instead.
+ * Both paths are JSPI-capable; the callback exists for flexibility.
  *
  * When the callback is not set (standalone tcldide or main-module build),
  * the blocking path falls back to emscripten_sleep() which works natively
- * in main-module JSPI builds. */
+ * in JSPI builds. */
 
 static void (*g_poll_yield_fn)(int ms) = NULL;
 
@@ -373,11 +372,9 @@ int poll(struct pollfd* fds, nfds_t nfds, int timeout) {
   /* Blocking path.
    *
    * Interval adapts to the deadline to balance latency and wasm↔JS
-   * boundary-crossing overhead.  When g_poll_yield_fn is set (Pyodide
-   * side-module path), the callback suspends via Python's JSPI-capable
-   * asyncio.sleep() in the MAIN module — the side module's call to
-   * emscripten_sleep() can't suspend on its own (Emscripten 5.0.3
-   * doesn't apply JSPI wraps to side modules). */
+   * boundary-crossing overhead.  Prefers g_poll_yield_fn if set,
+   * otherwise falls back to emscripten_sleep() — both paths suspend
+   * correctly via JSPI when the import returns a Promise. */
 
   int infinite = (timeout < 0);
   double deadline = infinite ? 0 : emscripten_get_now() + (double)timeout;
