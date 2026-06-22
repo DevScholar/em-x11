@@ -29,7 +29,7 @@
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,json,md}\"",
-    "postinstall": "bash scripts/check-clang-format.sh && bash scripts/fetch-third-party.sh && printf '\\n>> Run \"pnpm build\" for library-only, or \"pnpm build:examples\" for the full demo suite.\\n\\n'",
+    "postinstall": "bash scripts/strip-git.sh && bash scripts/check-clang-format.sh && bash scripts/fetch-third-party.sh && printf '\\n>> Run \"pnpm build\" for library-only, or \"pnpm build:examples\" for the full demo suite.\\n\\n'",
     "clean": "rimraf build dist",
     "clean:all": "rimraf build dist node_modules ignored-area"
   },
@@ -44,6 +44,9 @@
     "rimraf": "^5.0.5",
     "typescript": "^5.4.0",
     "vite": "^5.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
   },
   "keywords": [
     "x11",
