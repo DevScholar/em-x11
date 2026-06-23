@@ -283,9 +283,3 @@ int XSetSubwindowMode(Display* dpy, GC gc, int subwindow_mode) {
   (void)subwindow_mode;
   return 1;
 }
-int XSetRegion(Display* dpy, GC gc, Region r) {
-  (void)dpy;
-  (void)gc;
-  (void)r;
-  return 1;
-}
