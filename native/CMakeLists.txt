@@ -33,9 +33,10 @@ set(EM_X11_PUBLIC_HEADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 #   em_x11/      — em-x11–specific     (wasm bridges, browser glue, etc.)
 #
 # Files in em_x11/ have no direct xorg counterpart.
-set(EM_X11_EVENT_QUEUE_SOURCES
+set(EM_X11_LIBC_OVERRIDE_SOURCES
     em_x11/poll.c
     em_x11/signal.c
+    em_x11/fork.c
 )
 set(EM_X11_X11_SOURCES
     em_x11/display.c
@@ -81,7 +82,6 @@ set(EM_X11_X11_SOURCES
     em_x11/keysym_table.c
     em_x11/bridges.c
     em_x11/threading.c
-    em_x11/fork.c
 )
 set(EM_X11_XEXT_SOURCES       Xext/shape.c)
 set(EM_X11_XRENDER_SOURCES    render/render.c)
@@ -92,7 +92,7 @@ set(EM_X11_GLX_SOURCES        glx/glx.c)
 # Combined list used only by the side-module path -- Pyodide dlopens one
 # .so, so everything still needs to land in a single artifact there.
 set(EM_X11_ALL_SOURCES
-    ${EM_X11_EVENT_QUEUE_SOURCES}
+    ${EM_X11_LIBC_OVERRIDE_SOURCES}
     ${EM_X11_X11_SOURCES}
     ${EM_X11_XEXT_SOURCES}
     ${EM_X11_XRENDER_SOURCES}
@@ -127,7 +127,7 @@ function(em_x11_add_static_lib target output_name)
     )
 endfunction()
 
-em_x11_add_static_lib(em_x11_event_queue em_x11_event_queue ${EM_X11_EVENT_QUEUE_SOURCES})
+em_x11_add_static_lib(em_x11_libc_override em_x11_libc_override ${EM_X11_LIBC_OVERRIDE_SOURCES})
 em_x11_add_static_lib(X11        X11        ${EM_X11_X11_SOURCES})
 em_x11_add_static_lib(Xext       Xext       ${EM_X11_XEXT_SOURCES})
 em_x11_add_static_lib(Xrender    Xrender    ${EM_X11_XRENDER_SOURCES})
@@ -135,9 +135,9 @@ em_x11_add_static_lib(fontconfig fontconfig ${EM_X11_FONTCONFIG_SOURCES})
 em_x11_add_static_lib(Xft        Xft        ${EM_X11_XFT_SOURCES})
 em_x11_add_static_lib(GLX        GLX        ${EM_X11_GLX_SOURCES})
 
-# Inter-archive PUBLIC link.  em_x11_event_queue provides poll/select
-# overrides and em_x11_deliver_pending_signals; X11 depends on it.
-target_link_libraries(X11        PUBLIC em_x11_event_queue)
+# Inter-archive PUBLIC link.  em_x11_libc_override provides poll/select
+# overrides, fork/vfork/_exit, and signal delivery; X11 depends on it.
+target_link_libraries(X11        PUBLIC em_x11_libc_override)
 target_link_libraries(Xext       PUBLIC X11)
 target_link_libraries(Xrender    PUBLIC X11)
 target_link_libraries(fontconfig PUBLIC X11)
@@ -190,16 +190,16 @@ if(EM_X11_BUILD_SIDE_MODULE)
     # shared-library layout.  The target_link_libraries calls create the
     # NEEDED entries so Pyodide's recursive dlopen auto-cascades.
     #
-    #   libem_x11_event_queue.so   poll/select overrides + signal delivery
-    #   libX11.so             NEEDED libem_x11_event_queue.so
-    #   libXext.so            NEEDED libX11.so
-    #   libXrender.so         NEEDED libX11.so
-    #   libfontconfig.so      NEEDED libX11.so
-    #   libXft.so             NEEDED libXrender.so libfontconfig.so libX11.so
+    #   libem_x11_libc_override.so   poll/select/fork/vfork/_exit overrides + signal delivery
+    #   libX11.so               NEEDED libem_x11_libc_override.so
+    #   libXext.so              NEEDED libX11.so
+    #   libXrender.so           NEEDED libX11.so
+    #   libfontconfig.so        NEEDED libX11.so
+    #   libXft.so               NEEDED libXrender.so libfontconfig.so libX11.so
 
-    em_x11_add_side_module(em_x11_event_queue_side em_x11_event_queue ${EM_X11_EVENT_QUEUE_SOURCES})
+    em_x11_add_side_module(em_x11_libc_override_side em_x11_libc_override ${EM_X11_LIBC_OVERRIDE_SOURCES})
     em_x11_add_side_module(em_x11_X11_side        X11         ${EM_X11_X11_SOURCES})
-    target_link_libraries(em_x11_X11_side PRIVATE em_x11_event_queue_side)
+    target_link_libraries(em_x11_X11_side PRIVATE em_x11_libc_override_side)
 
     em_x11_add_side_module(em_x11_Xext_side       Xext        ${EM_X11_XEXT_SOURCES})
     target_link_libraries(em_x11_Xext_side PRIVATE em_x11_X11_side)
@@ -217,7 +217,7 @@ if(EM_X11_BUILD_SIDE_MODULE)
     # GLX is deliberately skipped — pyodide-tk doesn't use OpenGL.
 
     add_custom_target(side-modules ALL
-        DEPENDS em_x11_event_queue_side em_x11_X11_side em_x11_Xext_side
+        DEPENDS em_x11_libc_override_side em_x11_X11_side em_x11_Xext_side
                 em_x11_Xrender_side em_x11_fontconfig_side em_x11_Xft_side)
 
 endif()

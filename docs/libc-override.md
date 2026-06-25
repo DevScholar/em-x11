@@ -138,7 +138,7 @@ definitions that replace the weak stubs when linked.
 | `execvp` | strong | process.c | twm, mwm | Tells JS host to kill+respawn the current connection |
 | `execv` | strong | process.c | twm, mwm | Same |
 | `execvpe` | strong | process.c | twm, mwm | Same |
-| `__wrap__exit` | **wrap** | fork.c | twm only | vfork child calling `_exit` longjmps back to parent instead of killing wasm |
+| `__wrap__exit` | **wrap** | fork.c | twm vfork children | vfork child calling `_exit` longjmps back to parent instead of killing wasm |
 
 **vfork flow** (only twm F_RESTART exercises this):
 1. `vfork()` calls `setjmp()` to save the parent resume point.
@@ -154,6 +154,57 @@ paths, `__wrap__exit` is dead code — no call site is redirected to it.
 
 **Current consumers**: twm (F_RESTART menu uses `execvp` + `vfork`; menu
 launches use `posix_spawn`), mwm (WmFunction.c uses `execvp`).
+
+---
+
+## Exit cleanup ([em-x11-exit-hook.js](../native/src/lib/em-x11-exit-hook.js)) — post-js Module.onExit
+
+When a wasm process calls `exit()`, the host must tear down its windows and
+push `DestroyNotify` to cross-connection parents (e.g. twm) so their frames
+disappear.  This section documents the exit interception chain and why only
+one mechanism works in JSPI builds.
+
+### JSPI exit chain
+
+In JSPI builds, Emscripten's exit path is entirely inside the generated JS:
+
+```
+C exit(0) → wasmImports.exit → exitJS → _proc_exit → Module.onExit → quit_/ExitStatus
+```
+
+Only `Module.onExit` is interceptable by post-js — every other link in the
+chain is either captured by the wasm instance at instantiation time or
+hardcoded by Emscripten after library insertion.
+
+### Why other approaches don't work in JSPI
+
+| Approach | Why it fails |
+|---|---|
+| JS-library `_exit` override | Emscripten 5.0.3 hardcodes `var _exit = exitJS;` **after** library insertion, overwriting whatever the library defined |
+| post-js `wasmImports.exit`/`_exit` patching | The wasm module is instantiated (`createWasm`) before post-js runs; the instance already captured the original `exitJS` — reassigning properties on `wasmImports` doesn't affect the running instance |
+| C `--wrap=_exit` (fork.c) | C `exit()` calls `wasmImports.exit` directly as a wasm import — it never touches the C `_exit()` symbol, so the linker redirect is bypassed. `__wrap__exit` is **only** reached when C code calls `_exit()` explicitly (e.g. vfork children) |
+
+### How it works
+
+**[em-x11-exit-hook.js](../native/src/lib/em-x11-exit-hook.js)** (post-js) hooks
+`Module.onExit`, which `_proc_exit` calls synchronously before throwing
+`ExitStatus`.  The hook reads `EmX11Host.connId` — set by the EM_JS
+`em_x11_js_open_display` in [bridges.c](../native/em_x11/bridges.c) — and
+calls `Host.closeDisplay()`, which triggers `ConnectionManager.close()`:
+destroying all owned windows, pushing `DestroyNotify` to cross-connection
+subscribers, and running a final `composeNow()` to clear the canvas.
+
+`Module.onExit` only fires when `noExitRuntime` is `false`, which
+`EmX11Host.init()` ensures via `noExitRuntime = false`.
+
+### connId tracking
+
+The EM_JS bridges in [bridges.c](../native/em_x11/bridges.c) maintain
+`EmX11Host.connId` so the post-js exit hook can find the connection without
+calling into C (which may be mid-unwind):
+
+- `em_x11_js_open_display` sets `EmX11Host.connId = info.connId`
+- `em_x11_js_close_display` clears `EmX11Host.connId = 0`
 
 ---
 
@@ -208,10 +259,11 @@ em-x11 demos via `em_x11_finalize_demo`), **T** = twm/mwm only,
 | Process | `vfork` | strong | fork.c | T |
 | Process | `posix_spawn` | strong | fork.c | T |
 | Process | `posix_spawnp` | strong | fork.c | T |
-| Process | `_exit` | `--wrap=_exit` | fork.c | D, T |
+| Process | `_exit` | `--wrap=_exit` | fork.c | D, T (vfork only) |
 | Process | `execvp` | strong | process.c | T |
 | Process | `execv` | strong | process.c | T |
 | Process | `execvpe` | strong | process.c | T |
+| Exit | `Module.onExit` | post-js hook | em-x11-exit-hook.js | D |
 | GL | `glBegin`/`glEnd`/… | `--wrap=` (app) | gl_displaylist.c | glxgears only |
 
 ### Necessity summary

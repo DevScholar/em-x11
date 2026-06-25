@@ -32,6 +32,11 @@ var LibraryEmX11 = {
      *  library function body resolves to undefined at call time even
      *  though bracket notation inside __postset sees it. */
     module: null,
+    /** Connection id assigned by Host.openDisplay().  Tracked here so
+     *  the _exit override can call closeDisplay(connId) without plumbing
+     *  through the C-side em_x11_current_conn_id() — which may already be
+     *  unusable if the wasm stack has started unwinding. */
+    connId: 0,
     caches: {},
     debug: {
       traceHit: false,
@@ -48,6 +53,14 @@ var LibraryEmX11 = {
     init: function() {
       // Capture Module now — it IS live inside __postset evaluation.
       this.module = Module;
+      // Emscripten initializes `var noExitRuntime = true` and later does
+      // `if(Module["noExitRuntime"]) noExitRuntime = Module["noExitRuntime"]`.
+      // The truthiness check means noExitRuntime:false is ignored (stays true).
+      // We set it false HERE so the check skips (false is falsy) and the
+      // runtime is allowed to exit. Without this, _proc_exit's keepRuntimeAlive()
+      // returns true, Module.onExit never fires, and the host never learns the
+      // wasm is gone — windows freeze on the compositor.
+      noExitRuntime = false;
       // If the user pre-installed a Host via Module['emX11Host'], use it.
       if (Module['emX11Host']) {
         this.bridge = Module['emX11Host'];
@@ -141,6 +154,8 @@ var LibraryEmX11 = {
       return;
     }
     var info = h.openDisplay(EmX11Host.module);
+    EmX11Host.connId = info.connId;
+
     HEAP32[connIdPtr >> 2] = info.connId | 0;
     HEAPU32[basePtr >> 2] = info.xidBase >>> 0;
     HEAPU32[maskPtr >> 2] = info.xidMask >>> 0;
@@ -148,8 +163,39 @@ var LibraryEmX11 = {
 
   em_x11_js_close_display__sig: 'vi',
   em_x11_js_close_display: function(connId) {
+    EmX11Host.connId = 0;
     var h = EmX11Host.get();
-    if (h) h.closeDisplay(connId);
+    if (h) {
+      h.closeDisplay(connId);
+    }
+  },
+
+  /* Override Emscripten's _exit so the host tears down owned windows
+   * and pushes DestroyNotify to cross-conn parents (twm) before the
+   * wasm module unwinds.  The C-side --wrap=_exit (fork.c) cannot
+   * intercept this path because Emscripten 5.0.3+JSPI defines _exit
+   * entirely in JavaScript (exitJS → _proc_exit → quit_/ExitStatus).
+   *
+   * Scope note: this runs inside the Emscripten closure where
+   * ExitStatus is visible.  Throwing it triggers JSPI async-stack
+   * unwinding, which is the normal Emscripten exit path. */
+  _exit__sig: 'vi',
+  _exit: function(status) {
+    if (EmX11Host.connId !== 0) {
+      var h = EmX11Host.get();
+      if (h) {
+        h.closeDisplay(EmX11Host.connId);
+        EmX11Host.connId = 0;
+      }
+    }
+    /* Replicate the original exit behaviour: set the exit code and
+     * throw ExitStatus so JSPI unwinds the async stack. */
+    if (typeof ExitStatus !== 'undefined') {
+      throw new ExitStatus(status);
+    }
+    /* Fallback: if ExitStatus is somehow not defined, throw a
+     * lookalike that the JSPI runtime will still recognise. */
+    throw { name: 'ExitStatus', status: status };
   },
 
   em_x11_js_get_root_window__sig: 'i',

@@ -384,6 +384,9 @@ extern void em_x11_js_open_display(int* conn_id_out,
                                    unsigned int* xid_base_out,
                                    unsigned int* xid_mask_out);
 extern void em_x11_js_close_display(int conn_id);
+/* atexit handler registered at XOpenDisplay time so exit() always cleans
+ * up the host-side connection, even when _exit bypasses the JS import. */
+extern void em_x11_atexit_cleanup(void);
 /* Shared root window. Host owns the single root; every client's
  * XOpenDisplay asks for its XID instead of minting a local root. */
 extern Window em_x11_js_get_root_window(void);

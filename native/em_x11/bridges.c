@@ -67,15 +67,18 @@ EM_JS(void, em_x11_js_open_display, (int connIdPtr, int basePtr, int maskPtr), {
     return;
   }
   var info = host.openDisplay(Module);
+  EmX11Host.connId = info.connId;
   HEAP32[connIdPtr >> 2] = info.connId | 0;
   HEAPU32[basePtr >> 2] = info.xidBase >>> 0;
   HEAPU32[maskPtr >> 2] = info.xidMask >>> 0;
 });
 
 EM_JS(void, em_x11_js_close_display, (int connId), {
+  EmX11Host.connId = 0;
   var host = Module['emX11Host'];
-  if (host)
+  if (host) {
     host.closeDisplay(connId);
+  }
 });
 
 EM_JS(unsigned int, em_x11_js_get_root_window, (void), {

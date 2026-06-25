@@ -54,6 +54,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -100,16 +101,31 @@ int em_x11_vfork_active(void) { return g_vfork_active; }
 /* Forward-declared: the linker supplies this. */
 extern void __real__exit(int status);
 
+/* Called from bridges.c; tells the JS host to tear down this
+ * connection's windows and push DestroyNotify to cross-conn parents
+ * (twm). Mirrors XCloseDisplay but safe to call at exit time. */
+extern void em_x11_js_close_display(int conn_id);
+extern int em_x11_current_conn_id(void);
+
 void __wrap__exit(int status) {
   if (g_vfork_active) {
     g_vfork_active = 0;
-    /* longjmp back to vfork(), which returns `status ? status : 1`.
-     * If status is 0 we pass 1 so setjmp can distinguish it from
-     * the initial 0 return. */
     longjmp(vfork_jmp, status ? status : 1);
     /* unreachable */
   }
+
+  em_x11_js_close_display(em_x11_current_conn_id());
   __real__exit(status);
+}
+
+/* atexit handler registered by XOpenDisplay.  exit() always calls atexit
+ * handlers before terminating, regardless of how the underlying _exit is
+ * implemented (JS library, WASI proc_exit, or compiler-rt trampoline). */
+void em_x11_atexit_cleanup(void) {
+  int cid = em_x11_current_conn_id();
+  if (cid > 0) {
+    em_x11_js_close_display(cid);
+  }
 }
 
 /* fork() — not possible in wasm.  Return a clear error so callers

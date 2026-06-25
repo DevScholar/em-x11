@@ -2,6 +2,8 @@
 
 #include <X11/Xutil.h>
 #include <fcntl.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -157,6 +159,16 @@ Display* XOpenDisplay(const char* display_name) {
   g_display.xid_base = (XID)xid_base;
   g_display.xid_mask = (XID)xid_mask;
   g_display.next_xid = 0;
+
+  {
+    extern void em_x11_js_close_display(int conn_id);
+    extern int em_x11_current_conn_id(void);
+    static bool s_atexit_registered = false;
+    if (!s_atexit_registered) {
+      s_atexit_registered = true;
+      atexit(em_x11_atexit_cleanup);
+    }
+  }
 
   /* Public Display fields -- a plausible-looking minimum. Clients rarely
    * read these but Xt/Xaw inspect a few (protocol version, release). */

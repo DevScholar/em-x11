@@ -96,6 +96,14 @@ function(em_x11_finalize_demo target)
         target_link_options(${target} PRIVATE "SHELL:--pre-js=${_host_bundle}")
     endif()
 
+    # Post-js exit hook wraps Emscripten's _exit so ConnectionManager.close()
+    # fires before the wasm unwinds. Must be post-js because Emscripten 5.0.3
+    # hardcodes `var _exit = exitJS;` after library insertion.
+    set(_exit_hook "${EM_X11_SRC}/native/src/lib/em-x11-exit-hook.js")
+    if(EXISTS "${_exit_hook}")
+        target_link_options(${target} PRIVATE "SHELL:--post-js=${_exit_hook}")
+    endif()
+
     # --preload-file embeds files into a .data package that Emscripten's
     # glue loads automatically before main(). Each entry is a <src>@<target>
     # pair where src is a build-machine path and target is the MEMFS path.

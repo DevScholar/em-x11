@@ -14,7 +14,7 @@
 import type { Host } from './index.js';
 import { loadWasm, type LoadOptions } from '../loader/wasm.js';
 import type { EmscriptenModule } from '../types/emscripten.js';
-import { XID_PER_CONN, XID_MASK } from './constants.js';
+import { XID_PER_CONN, XID_MASK, StructureNotifyMask, SubstructureNotifyMask } from './constants.js';
 
 /** The slice of an Emscripten Module the host actually invokes through.
  *  EmscriptenModule satisfies this; the Pyodide path supplies a shim
@@ -173,6 +173,7 @@ export class ConnectionManager {
      *                     propagates up the ccall before _proc_exit. */
     let exitedHandled = false;
     const handleExit = (): void => {
+
       if (exitedHandled) return;
       const cid = pending.connId;
       if (cid === 0) {
@@ -232,6 +233,7 @@ export class ConnectionManager {
         try {
           return rawCcall(name, ret, argTypes, args);
         } catch (err) {
+
           if (err && (err as { name?: string }).name === 'ExitStatus') {
             handleExit();
             return undefined;
@@ -369,26 +371,36 @@ export class ConnectionManager {
      * unloaded wasm code and the canvas would appear frozen even though
      * a fresh wasm has already booted (F_RESTART respawn). */
     this.host.devices.forgetConnection(conn.module);
-    /* Notify cross-conn parents (typically twm holding SubstructureNotify
-     * on its frames) BEFORE the renderer wipes our windows. Without this
-     * twm has no signal that the inner client is gone and its frame
-     * lingers on screen as a transparent outline. We push for every
-     * owned window whose parent belongs to a different conn; the C-side
-     * mask gate drops the no-op cases (parent didn't select
-     * SubstructureNotifyMask). */
     for (const winId of conn.ownedWindows) {
+      /* Push DestroyNotify to each connection that selected
+       * StructureNotifyMask on this window (including WMs that
+       * set the mask via XChangeWindowAttributes). */
+      for (const subConnId of this.host.events.getSubscribersForMask(winId, StructureNotifyMask)) {
+        if (subConnId === connId) continue;
+        const subConn = this.connections.get(subConnId);
+        if (!subConn?.module) continue;
+        subConn.module.ccall(
+          'em_x11_push_destroy_notify',
+          null,
+          ['number', 'number'],
+          [winId, winId],
+        );
+      }
+      /* Push DestroyNotify to the parent window's
+       * SubstructureNotifyMask subscribers. */
       const parent = this.host.renderer.parentOf(winId);
       if (parent === 0 || parent === undefined) continue;
-      const parentConnId = this.windowToConn.get(parent);
-      if (parentConnId === undefined || parentConnId === connId) continue;
-      const parentConn = this.connections.get(parentConnId);
-      if (!parentConn?.module) continue;
-      parentConn.module.ccall(
-        'em_x11_push_destroy_notify',
-        null,
-        ['number', 'number'],
-        [winId, parent],
-      );
+      for (const subConnId of this.host.events.getSubscribersForMask(parent, SubstructureNotifyMask)) {
+        if (subConnId === connId) continue;
+        const subConn = this.connections.get(subConnId);
+        if (!subConn?.module) continue;
+        subConn.module.ccall(
+          'em_x11_push_destroy_notify',
+          null,
+          ['number', 'number'],
+          [winId, parent],
+        );
+      }
     }
     /* Drop every window this connection owned. Renderer cleans up
      * its side; windowToConn, subscriptions, and override_redirect
@@ -419,6 +431,11 @@ export class ConnectionManager {
     }
     this.host.events.forgetConnection(connId);
     this.connections.delete(connId);
+    /* Force a synchronous compose so the canvas reflects destroyed
+     * windows immediately. The deferred rAF scheduled by markDirty
+     * inside destroyWindow may not fire when the wasm module exits
+     * on the main thread (standalone demo path). */
+    this.host.renderer.composeNow();
   }
 
   /* -- accessors used by sibling managers -------------------------------- */

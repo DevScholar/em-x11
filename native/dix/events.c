@@ -1066,10 +1066,40 @@ void em_x11_push_configure_notify(
  * already gone -- nobody on this side cares. */
 EMSCRIPTEN_KEEPALIVE
 void em_x11_push_destroy_notify(Window window, Window event_window) {
+
   Display* dpy = em_x11_get_display();
   EmxWindow* evw = em_x11_window_find(dpy, event_window);
-  if (!evw || !(evw->event_mask & SubstructureNotifyMask))
-    return;
+  /* When the event_window is the destroyed window itself (StructureNotify
+   * path) and the window is a foreign cross-conn window that isn't in our
+   * local EmxWindow table, trust the host — it only calls us when this
+   * connection subscribed to StructureNotifyMask.  Push unconditionally.
+   * For the parent path (SubstructureNotify), we need local shadow to
+   * verify the mask, so bail if not found. */
+  if (!evw) {
+    if (event_window == window) {
+
+      /* fall through to push */
+    } else {
+
+      return;
+    }
+  } else {
+    /* Real X11 semantics: DestroyNotify is sent to the window itself if it
+     * selected StructureNotifyMask, AND to the parent if it selected
+     * SubstructureNotifyMask.  twm selects StructureNotifyMask on the
+     * client window (not SubstructureNotifyMask on its frame). */
+    if (event_window == window) {
+      if (!(evw->event_mask & StructureNotifyMask)) {
+
+        return;
+      }
+    } else {
+      if (!(evw->event_mask & SubstructureNotifyMask)) {
+
+        return;
+      }
+    }
+  }
 
   XEvent ev;
   memset(&ev, 0, sizeof(ev));

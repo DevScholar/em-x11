@@ -572,8 +572,16 @@ int XChangeWindowAttributes(Display* display,
                             Window w,
                             unsigned long valuemask,
                             XSetWindowAttributes* attrs) {
+  if (!attrs)
+    return 0;
+  /* CWEventMask must reach the host even for foreign windows (twm
+   * setting StructureNotifyMask on a client it manages), mirroring
+   * the cross-connection forwarding in XSelectInput. */
+  if (valuemask & CWEventMask) {
+    em_x11_js_select_input(display->conn_id, w, attrs->event_mask);
+  }
   EmxWindow* win = em_x11_window_find(display, w);
-  if (!win || !attrs)
+  if (!win)
     return 0;
   if (valuemask & CWBackPixel) {
     win->background_pixel = attrs->background_pixel;
@@ -585,7 +593,6 @@ int XChangeWindowAttributes(Display* display,
   }
   if (valuemask & CWEventMask) {
     win->event_mask = attrs->event_mask;
-    em_x11_js_select_input(display->conn_id, w, attrs->event_mask);
   }
   if (valuemask & CWOverrideRedirect) {
     win->override_redirect = attrs->override_redirect;

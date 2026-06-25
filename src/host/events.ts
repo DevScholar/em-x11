@@ -293,6 +293,19 @@ export class EventDispatcher {
     }
   }
 
+  /** Return connIds that selected at least one bit in `mask` on the
+   *  given window. Used by ConnectionManager.close() to find where
+   *  DestroyNotify must be pushed. */
+  getSubscribersForMask(windowId: number, mask: number): number[] {
+    const subs = this.windowSubscriptions.get(windowId);
+    if (!subs) return [];
+    const out: number[] = [];
+    for (const [connId, m] of subs) {
+      if (m & mask) out.push(connId);
+    }
+    return out;
+  }
+
   /** Drop all subscriptions on a window. Called by WindowManager on
    *  XDestroyWindow + by ConnectionManager when the owning connection
    *  closes. */

@@ -23,6 +23,8 @@ export const X_KeyRelease = 3;
 /* X11 event-mask bits we act on directly (x11protocol.txt §847).
  * These are the literal mask values clients pass to XSelectInput. */
 export const SubstructureRedirectMask = 1 << 20;
+export const StructureNotifyMask = 1 << 17;
+export const SubstructureNotifyMask = 1 << 19;
 
 /* XID layout: top 3 bits always 0 (x11protocol.txt §935). We dedicate
  * the low 0x00200000 slot (conn_id=0, 2 M IDs) to Host-owned resources
