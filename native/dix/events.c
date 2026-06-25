@@ -15,6 +15,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Forward declarations — file-scope grab state referenced by hit_test
+ * and walk_up_for_mask, which are defined before the state variables. */
+static bool active_grab;
+static bool active_grab_owner_events;
+static unsigned int active_grab_event_mask;
 /* -- Window hit testing -------------------------------------------------- */
 
 /* Walk the parent chain to compute the window's origin in root-relative
@@ -108,7 +113,10 @@ static EmxWindow* hit_test(
   EmxWindow* cur = best;
   int ax = best_ax, ay = best_ay;
   while (cur) {
-    if (cur->event_mask & need_mask) {
+    unsigned int eff_mask = cur->event_mask;
+    if (active_grab && active_grab_owner_events)
+      eff_mask |= active_grab_event_mask;
+    if (eff_mask & need_mask) {
       if (lx_out)
         *lx_out = rx - ax;
       if (ly_out)
@@ -163,7 +171,10 @@ static EmxWindow* walk_up_for_mask(Display* dpy,
   EmxWindow* cur = start;
   int ax = base_ax, ay = base_ay;
   while (cur) {
-    if (cur->event_mask & need_mask) {
+    unsigned int eff_mask = cur->event_mask;
+    if (active_grab && active_grab_owner_events)
+      eff_mask |= active_grab_event_mask;
+    if (eff_mask & need_mask) {
       if (lx_out)
         *lx_out = rx - ax;
       if (ly_out)
@@ -207,6 +218,7 @@ static unsigned int grab_button_count = 0;
 static bool active_grab = false;
 static Window active_grab_window = None;
 static unsigned int active_grab_event_mask = 0;
+static bool active_grab_owner_events = false;
 
 /* Popup menu windows registered for dual-delivery. Motif posts menu
  * shells as OverrideRedirect top-levels — siblings, not children, of
@@ -580,19 +592,26 @@ void em_x11_push_button_event(int type,
     ev.xbutton.time = now;
     em_x11_event_queue_push(dpy, &ev);
 
-    /* xorg DeliverGrabbedEvent: after normal delivery (above),
-     * DeliverOneGrabbedEvent sends a copy to the grab window so it
-     * can dismiss the popup. Push a second event to the grab window
-     * when the normal target is outside the grab hierarchy. Distinct
-     * serial numbers prevent Motif's _XmIsEventUnique from treating
-     * the grab-delivery as a duplicate.
+    /* xorg DeliverGrabbedEvent: when owner_events=False, after normal
+     * delivery DeliverOneGrabbedEvent sends a copy to the grab window
+     * so it can dismiss the popup. Push a second event to the grab
+     * window when the normal target is outside the grab hierarchy.
+     * Distinct serial numbers prevent Motif's _XmIsEventUnique from
+     * treating the grab-delivery as a duplicate.
+     *
+     * Gated on !active_grab_owner_events: Motif popups use
+     * owner_events=False where the server delivers straight to
+     * grab->window. Tk uses owner_events=True (normal delivery
+     * reaches the menu), so dual-delivery would only interfere —
+     * especially when MenuButtonDown calls grab -global and changes
+     * active_grab_window between press and release.
      *
      * ButtonPress alone is not enough — Motif's MenuShell translation
      * table triggers PopdownDone on <BtnUp> (ButtonRelease), so we
      * must dual-deliver both press and release for the menu to
      * dismiss on outside clicks. */
     if ((type == ButtonPress || type == ButtonRelease) && active_grab &&
-        target->id != active_grab_window &&
+        !active_grab_owner_events && target->id != active_grab_window &&
         !win_is_inferior_of(dpy, target->id, active_grab_window)) {
       unsigned long need_mask =
         (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
@@ -1207,6 +1226,7 @@ int XUngrabPointer(Display* dpy, Time t) {
   active_grab = false;
   active_grab_window = None;
   active_grab_event_mask = 0;
+  active_grab_owner_events = false;
   em_x11_js_set_grab_cursor(0);
   em_x11_js_ungrab_pointer();
   return 1;
@@ -1226,18 +1246,7 @@ int XGrabPointer(Display* dpy,
   (void)confine_to;
   (void)t;
   active_grab_event_mask = event_mask;
-  EM_ASM(
-    {
-      var d = Module['emX11Debug'];
-      if (d && d.traceGrab) {
-        console.log('[c-grab] XGrabPointer conn=' + $0 + ' grab_win=' +
-                    ($1 >>> 0) + ' owner_events=' + $2 + ' cursor=' + $3);
-      }
-    },
-    dpy->conn_id,
-    grab_window,
-    owner_events ? 1 : 0,
-    (unsigned int)cursor);
+  active_grab_owner_events = (owner_events != 0);
   dpy->request++;
   em_x11_reset_implicit_grab();
   active_grab = true;
