@@ -31,12 +31,13 @@
  * wedging F_MOVE's XMaskEvent. */
 #define EM_X11_EVENT_QUEUE_CAPACITY 4096
 
-/* Per-event UTF-8 typed-text slot. One key event carries at most a
- * single grapheme today; sized at 32 bytes leaves room for stacked
- * combining marks and 4-byte codepoints (4 BMP-supplementary chars max).
- * Storage cost: 32 * EM_X11_EVENT_QUEUE_CAPACITY = 128 KiB per Display,
+/* Per-event UTF-8 typed-text slot. Physical keystrokes carry a single
+ * grapheme, but IME composition commits (XIM) deliver an entire word at
+ * once. 128 bytes holds ~20 CJK characters with room for combining marks
+ * and 4-byte codepoints.
+ * Storage cost: 128 * EM_X11_EVENT_QUEUE_CAPACITY = 512 KiB per Display,
  * which is small next to the event_queue itself. */
-#define EM_X11_KEY_TEXT_SLOT 32
+#define EM_X11_KEY_TEXT_SLOT 128
 
 /* ------------------------------------------------------------------------- */
 /*  GC -- opaque to clients; upstream only exposes "ext_data" (through the  */
