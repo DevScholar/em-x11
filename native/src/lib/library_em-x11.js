@@ -61,6 +61,20 @@ var LibraryEmX11 = {
       // returns true, Module.onExit never fires, and the host never learns the
       // wasm is gone — windows freeze on the compositor.
       noExitRuntime = false;
+      // Hook Module.onExit so _proc_exit tears down the connection before
+      // throwing ExitStatus.  This is the ONLY interceptable point in the
+      // JSPI exit chain — Emscripten hardcodes var _exit = exitJS after
+      // library insertion, and wasmImports.exit is captured by the wasm
+      // instance at instantiation time.
+      Module['onExit'] = function(code) {
+        if (EmX11Host.connId !== 0) {
+          var h = EmX11Host.get();
+          if (h) {
+            h.closeDisplay(EmX11Host.connId);
+            EmX11Host.connId = 0;
+          }
+        }
+      };
       // If the user pre-installed a Host via Module['emX11Host'], use it.
       if (Module['emX11Host']) {
         this.bridge = Module['emX11Host'];
@@ -172,9 +186,13 @@ var LibraryEmX11 = {
 
   /* Override Emscripten's _exit so the host tears down owned windows
    * and pushes DestroyNotify to cross-conn parents (twm) before the
-   * wasm module unwinds.  The C-side --wrap=_exit (fork.c) cannot
-   * intercept this path because Emscripten 5.0.3+JSPI defines _exit
-   * entirely in JavaScript (exitJS → _proc_exit → quit_/ExitStatus).
+   * wasm module unwinds.
+   *
+   * In JSPI builds this override is dead code — Emscripten 5.0.3
+   * hardcodes `var _exit = exitJS;` after library insertion.  The
+   * primary cleanup mechanism for JSPI is Module.onExit, set in
+   * $EmX11Host.init().  This override still catches non-JSPI builds
+   * and the maybeExit() path in callUserCallback.
    *
    * Scope note: this runs inside the Emscripten closure where
    * ExitStatus is visible.  Throwing it triggers JSPI async-stack
