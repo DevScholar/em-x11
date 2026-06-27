@@ -35,8 +35,8 @@
 #include <string.h>
 
 #define EM_X11_MAX_FONTS 64
-#define EM_X11_PER_CHAR_MIN 32
-#define EM_X11_PER_CHAR_MAX 126
+#define EM_X11_PER_CHAR_MIN 0
+#define EM_X11_PER_CHAR_MAX 255
 #define EM_X11_PER_CHAR_COUNT (EM_X11_PER_CHAR_MAX - EM_X11_PER_CHAR_MIN + 1)
 
 typedef struct EmxFont {
@@ -332,29 +332,26 @@ static void fill_font_struct(Display* dpy, EmxFont* f) {
   fs->fid = f->fid;
   fs->direction = FontLeftToRight;
 
-  /* Full-BMP two-byte span. Tk's AllocFontFamily classifies anything
-   * with max_byte1 > 0 or max_char_or_byte2 >= 256 as a two-byte font
-   * (tkUnixFont.c:1915); that toggle is what unlocks CJK. */
+  /* Single-byte span (0-255) with proper per_char. Tk's AllocFontFamily
+   * treats max_byte1==0 as a 1-byte font -- per_char is indexed 1D
+   * (tkUnixFont.c:2280), compatible with our 256-entry array. */
   fs->min_byte1 = 0;
-  fs->max_byte1 = 0xFF;
+  fs->max_byte1 = 0;
   fs->min_char_or_byte2 = 0;
   fs->max_char_or_byte2 = 0xFF;
   fs->all_chars_exist = True;
   fs->default_char = '?';
 
-  /* per_char = NULL tells FontMapLoadPage (tkUnixFont.c:2306) "accept
-   * every row+col the encoding produced", which is exactly what we
-   * want given the browser can render any Unicode codepoint. The
-   * per_char[] we still populate below is unused by Tk through the
-   * 2-byte path, but ASCII-only clients that inspect XFontStruct
-   * directly still see reasonable width data. */
-  fs->per_char = NULL;
+  /* per_char points to our 256-entry array. Motif's
+   * _FontStructPerCharExtents / _FontStructFindWidth use per_char
+   * directly for per-character widths; all 256 entries get
+   * reasonable values (measured for 32-126, max_width for gaps).
+   * Tk sees max_byte1=0 so FontMapLoadPage stays 1D-safe. */
 
-  int min_w = widths[0] > 0 ? widths[0] : max_width;
+  fs->per_char = f->per_char;
+
   for (int i = 0; i < EM_X11_PER_CHAR_COUNT; i++) {
-    short w = (short)widths[i];
-    if (w > 0 && w < min_w)
-      min_w = w;
+    short w = (i >= 32 && i <= 126) ? (short)widths[i - 32] : 0;
     f->per_char[i].lbearing = 0;
     f->per_char[i].rbearing = w;
     f->per_char[i].width = w;
@@ -363,9 +360,17 @@ static void fill_font_struct(Display* dpy, EmxFont* f) {
     f->per_char[i].attributes = 0;
   }
 
+  /* Fill unmeasured entries (0-31, 127-255) with max_width */
+  for (int i = 0; i < EM_X11_PER_CHAR_COUNT; i++) {
+    if (i < 32 || i > 126) {
+      f->per_char[i].rbearing = (short)max_width;
+      f->per_char[i].width = (short)max_width;
+    }
+  }
+
   fs->min_bounds.lbearing = 0;
-  fs->min_bounds.rbearing = (short)min_w;
-  fs->min_bounds.width = (short)min_w;
+  fs->min_bounds.rbearing = (short)max_width;
+  fs->min_bounds.width = (short)max_width;
   fs->min_bounds.ascent = (short)ascent;
   fs->min_bounds.descent = (short)descent;
 
