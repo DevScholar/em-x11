@@ -33,23 +33,41 @@ XID em_x11_next_xid(Display* dpy) {
   return dpy->xid_base | dpy->next_xid;
 }
 
+static bool grow_window_table(Display* dpy) {
+  int new_cap = dpy->window_capacity * 2;
+  EmxWindow* new_windows =
+    realloc(dpy->windows, (size_t)new_cap * sizeof(EmxWindow));
+  if (!new_windows)
+    return false;
+  memset(new_windows + dpy->window_capacity,
+         0,
+         (size_t)(new_cap - dpy->window_capacity) * sizeof(EmxWindow));
+  dpy->windows = new_windows;
+  dpy->window_capacity = new_cap;
+  return true;
+}
+
 EmxWindow* em_x11_window_alloc(Display* dpy) {
-  for (int i = 0; i < EM_X11_MAX_WINDOWS; i++) {
+  for (int i = 0; i < dpy->window_count; i++) {
     if (!dpy->windows[i].in_use) {
       memset(&dpy->windows[i], 0, sizeof(EmxWindow));
       dpy->windows[i].in_use = true;
       return &dpy->windows[i];
     }
   }
-  return NULL;
+  /* All slots in [0, window_count) are in-use. Try to grow. */
+  if (dpy->window_count >= dpy->window_capacity) {
+    if (!grow_window_table(dpy))
+      return NULL;
+  }
+  int i = dpy->window_count++;
+  memset(&dpy->windows[i], 0, sizeof(EmxWindow));
+  dpy->windows[i].in_use = true;
+  return &dpy->windows[i];
 }
 
-/* O(n) linear scan of the window table. At EM_X11_MAX_WINDOWS=256, the
- * worst case is 256 iterations — acceptable for now. TODO: replace with
- * a hash table (Window → index) if the table grows or hot-path profiling
- * (XQueryPointer, hit_test) shows measurable cost. */
 EmxWindow* em_x11_window_find(Display* dpy, Window id) {
-  for (int i = 0; i < EM_X11_MAX_WINDOWS; i++) {
+  for (int i = 0; i < dpy->window_count; i++) {
     if (dpy->windows[i].in_use && dpy->windows[i].id == id) {
       return &dpy->windows[i];
     }
@@ -127,6 +145,16 @@ Display* XOpenDisplay(const char* display_name) {
   int screen_h = env_override("EM_X11_SCREEN_HEIGHT", EM_X11_SCREEN_HEIGHT);
 
   memset(&g_display, 0, sizeof(g_display));
+
+  /* Dynamic window table: start at 64 slots, double on exhaustion.
+   * Real xorg allocates each window independently via dixAllocate;
+   * a dynamic array with capacity doubling gives the same "no fixed
+   * ceiling" property without per-window malloc churn. */
+  g_display.window_capacity = EM_X11_WINDOW_INITIAL_CAPACITY;
+  g_display.windows = calloc(EM_X11_WINDOW_INITIAL_CAPACITY, sizeof(EmxWindow));
+  if (!g_display.windows) {
+    return NULL;
+  }
 
   /* Self-pipe: the read end replaces the (nonexistent) X socket fd so
    * that libXt's Select() has something real to block on. When the host

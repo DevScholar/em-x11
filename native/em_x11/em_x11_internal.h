@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define EM_X11_MAX_WINDOWS 256
+#define EM_X11_WINDOW_INITIAL_CAPACITY 64
 /* Queue sized for a multi-second drag: twm's F_MOVE only drains the events
  * its XMaskEvent mask selects (Button/Motion/Crossing/Expose/Visibility),
  * so every XMoveWindow we generate accumulates a StructureNotify-gated
@@ -190,7 +190,9 @@ struct _XDisplay {
   XID xid_mask;
   int wakeup_fd; /* write end of self-pipe */
 
-  EmxWindow windows[EM_X11_MAX_WINDOWS];
+  EmxWindow* windows;
+  int window_count;    /* allocated slots; >= window_capacity means full */
+  int window_capacity; /* current array size; doubled on exhaustion */
 
   XEvent event_queue[EM_X11_EVENT_QUEUE_CAPACITY];
   unsigned int event_head; /* next slot to read        */

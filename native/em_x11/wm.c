@@ -389,7 +389,7 @@ int XMapRaised(Display* dpy, Window w) {
 int XMapSubwindows(Display* dpy, Window w) {
   if (!dpy)
     return 0;
-  for (int i = 0; i < EM_X11_MAX_WINDOWS; i++) {
+  for (int i = 0; i < dpy->window_count; i++) {
     EmxWindow* c = &dpy->windows[i];
     if (c->in_use && c->parent == w && !c->mapped) {
       XMapWindow(dpy, c->id);

@@ -30,7 +30,7 @@ static void window_abs_origin(
   Display* dpy, EmxWindow* w, int* ax_out, int* ay_out, int* depth_out) {
   int ax = 0, ay = 0, depth = 0;
   EmxWindow* cur = w;
-  for (int guard = 0; cur && guard < EM_X11_MAX_WINDOWS; guard++, depth++) {
+  for (int guard = 0; cur && guard < dpy->window_count; guard++, depth++) {
     ax += cur->x;
     ay += cur->y;
     if (cur->parent == None || cur->parent == cur->id)
@@ -83,7 +83,7 @@ static EmxWindow* hit_test(
   int best_depth = -1;
   int best_ax = 0, best_ay = 0;
 
-  for (int i = 0; i < EM_X11_MAX_WINDOWS; i++) {
+  for (int i = 0; i < dpy->window_count; i++) {
     EmxWindow* w = &dpy->windows[i];
     if (!w->in_use || !w->mapped)
       continue;
