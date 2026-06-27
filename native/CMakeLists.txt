@@ -37,6 +37,7 @@ set(EM_X11_LIBC_OVERRIDE_SOURCES
     em_x11/poll.c
     em_x11/signal.c
     em_x11/fork.c
+    em_x11/process.c
 )
 set(EM_X11_X11_SOURCES
     em_x11/display.c

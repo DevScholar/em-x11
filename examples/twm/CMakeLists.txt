@@ -26,10 +26,8 @@ add_executable(twm
     ${TWM_SRC_DIR}/session.c
     ${TWM_SRC_DIR}/twm.c
     ${TWM_SRC_DIR}/util.c
-    # Weak override of execvp/execv so f.restart can be honored by
-    # the host's kill+respawn shim instead of failing as ENOSYS.
-    # Linked into twm only -- other demos keep libc's stub.
-    ${CMAKE_SOURCE_DIR}/native/em_x11/process.c
+    # execvp/execv overrides now live in em_x11_libc_override,
+    # linked transitively through X11 -> em_x11_libc_override.
 )
 
 target_compile_definitions(twm PRIVATE HAVE_CONFIG_H=1)
