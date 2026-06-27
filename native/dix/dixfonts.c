@@ -94,15 +94,39 @@ static bool xlfd_field(const char* name, int field, char* buf, size_t buflen) {
   }
 }
 
-static int parse_xlfd_pixel_size(const char* name) {
-  /* Field 7 is PIXEL_SIZE. */
+/* Scan XLFD fields 6-10 for a size value. Tries PIXEL_SIZE (field 7) and
+ * POINT_SIZE (field 8) first, then falls back to any numeric field in
+ * a plausible size range (6-50 px, 50-5000 decipoints).  Motif fontList
+ * patterns may carry an extra leading wildcard that shifts the numeric
+ * field rightward; scanning the whole range makes the parser immune to
+ * that shift. */
+static int resolve_xlfd_size(const char* name) {
   char buf[16];
-  if (!xlfd_field(name, 7, buf, sizeof(buf)))
-    return 0;
-  if (buf[0] == '*' || buf[0] == '\0')
-    return 0;
-  int v = atoi(buf);
-  return v > 0 ? v : 0;
+  /* Pixel size candidates: fields 7, then 6, then 8 (the shifted-neighbour
+   * ring). Values ≤ 50 are treated as pixels. */
+  int pix_fields[] = {7, 6, 8, 9, 10, 5};
+  for (size_t fi = 0; fi < sizeof(pix_fields) / sizeof(pix_fields[0]); fi++) {
+    if (!xlfd_field(name, pix_fields[fi], buf, sizeof(buf)))
+      continue;
+    if (buf[0] == '*' || buf[0] == '\0')
+      continue;
+    int v = atoi(buf);
+    if (v >= 6 && v <= 50)
+      return v;
+  }
+  /* Point size candidates: fields 8, then 7, then 9. Decipoints → pixels
+   * at CSS fixed 96 DPI: px = decipoints * 96 / 720. */
+  int pt_fields[] = {8, 7, 9, 10, 6};
+  for (size_t fi = 0; fi < sizeof(pt_fields) / sizeof(pt_fields[0]); fi++) {
+    if (!xlfd_field(name, pt_fields[fi], buf, sizeof(buf)))
+      continue;
+    if (buf[0] == '*' || buf[0] == '\0')
+      continue;
+    int v = atoi(buf);
+    if (v >= 50 && v <= 5000)
+      return (int)(v * 96.0 / 720.0 + 0.5);
+  }
+  return 0;
 }
 
 /* Short alias handling: "6x13" means 6-wide 13-pixel. The second number
@@ -118,12 +142,13 @@ static int parse_alias_pixel_size(const char* name) {
 static int resolve_pixel_size(const char* name) {
   if (!name || !*name)
     return 13;
-  if (name[0] == '-') {
-    int v = parse_xlfd_pixel_size(name);
+  int v;
+  if (name[0] == '-' || name[0] == '*') {
+    v = resolve_xlfd_size(name);
     if (v > 0)
       return v;
   }
-  int v = parse_alias_pixel_size(name);
+  v = parse_alias_pixel_size(name);
   if (v > 0)
     return v;
   return 13;
@@ -160,30 +185,50 @@ static const char* resolve_css_family(const char* name) {
   return "sans-serif";
 }
 
-/* Field 4 is SLANT: 'r' (roman), 'i' (italic), 'o' (oblique). */
+/* Scan a range of XLFD fields for the first value that looks like a
+ * slant/weight/size keyword rather than relying on a fixed field index.
+ * Motif's fontList patterns occasionally carry an extra leading wildcard
+ * (e.g. "*-*-*-bold-r-..." instead of the standard "-*-*-bold-r-..."),
+ * shifting every field by one position.  Field-range scanning makes the
+ * parser tolerant of that shift without needing to change upstream
+ * resource files. */
+
+/* Field 4 is SLANT but check 3-6 so shifted patterns still match. */
 static const char* resolve_css_style(const char* name) {
   char buf[8];
-  if (!xlfd_field(name, 4, buf, sizeof(buf)))
-    return "";
-  if (buf[0] == 'i')
-    return "italic ";
-  if (buf[0] == 'o')
-    return "oblique ";
+  for (int f = 3; f <= 6; f++) {
+    if (!xlfd_field(name, f, buf, sizeof(buf)))
+      break;
+    if (buf[0] == 'i' && (buf[1] == '\0' || buf[1] == 't'))
+      return "italic ";
+    if (buf[0] == 'o')
+      return "oblique ";
+    if (buf[0] == 'r' && buf[1] == '\0')
+      return "";
+  }
   return "";
 }
 
-/* Field 3 is WEIGHT_NAME. */
+/* Field 3 is WEIGHT_NAME but check 2-6 so shifted patterns still match. */
 static const char* resolve_css_weight(const char* name) {
   char buf[32];
-  if (!xlfd_field(name, 3, buf, sizeof(buf)))
-    return "";
-  str_tolower(buf);
-  if (strstr(buf, "bold"))
-    return "bold ";
-  if (strstr(buf, "heavy") || strstr(buf, "black"))
-    return "900 ";
-  if (strstr(buf, "light") || strstr(buf, "thin"))
-    return "300 ";
+  for (int f = 2; f <= 6; f++) {
+    if (!xlfd_field(name, f, buf, sizeof(buf)))
+      break;
+    if (buf[0] == '*' || buf[0] == '\0')
+      continue;
+    str_tolower(buf);
+    if (strstr(buf, "bold"))
+      return "bold ";
+    if (strstr(buf, "heavy") || strstr(buf, "black"))
+      return "900 ";
+    if (strstr(buf, "light") || strstr(buf, "thin"))
+      return "300 ";
+    if (strstr(buf, "demibold"))
+      return "600 ";
+    if (strstr(buf, "medium") || strstr(buf, "regular"))
+      return "";
+  }
   return "";
 }
 

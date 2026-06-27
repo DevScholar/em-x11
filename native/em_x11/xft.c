@@ -393,39 +393,107 @@ FcPattern*
 XftXlfdParse(const char* xlfd, FcBool ignore_scalable, FcBool complete) {
   (void)ignore_scalable;
   (void)complete;
-  if (!xlfd || xlfd[0] != '-') {
+  bool has_leading_dash;
+  if (!xlfd)
+    return NULL;
+  if (xlfd[0] == '-') {
+    has_leading_dash = true;
+  } else if (xlfd[0] == '*') {
+    /* Motif fontList patterns often omit the leading dash. Prepend it
+     * so the field copier works identically. */
+    has_leading_dash = false;
+  } else {
     /* Not an XLFD. Real Xft returns NULL here; Tk's TkpGetNativeFont
-     * relies on that to fall through to TkpGetFontFromAttributes,
-     * which is where short names like "Helvetica 14 bold" actually
-     * get parsed (by tkFont.c, not by us). If we accept the string
-     * and stuff in a default family, Tk thinks the font already
-     * resolved and never reaches the real attribute-driven path. */
+     * relies on that to fall through to TkpGetFontFromAttributes. */
     return NULL;
   }
   FcPattern* p = FcPatternCreate();
   if (!p)
     return NULL;
-  char buf[64];
-  if (xlfd_field_copy(xlfd, 2, buf, sizeof(buf)) && buf[0] && buf[0] != '*') {
-    FcPatternAddString(p, FC_FAMILY, (const FcChar8*)buf);
+
+  /* Normalise the XLFD by prepending a dash if the caller omitted it. */
+  char canon[256];
+  const char* to_parse;
+  if (has_leading_dash) {
+    to_parse = xlfd;
   } else {
-    FcPatternAddString(p, FC_FAMILY, (const FcChar8*)"sans-serif");
+    snprintf(canon, sizeof(canon), "-%s", xlfd);
+    to_parse = canon;
   }
-  if (xlfd_field_copy(xlfd, 3, buf, sizeof(buf))) {
-    if (strstr(buf, "bold"))
-      FcPatternAddInteger(p, FC_WEIGHT, FC_WEIGHT_BOLD);
+
+  char buf[64];
+
+  /* Family: field 2, but scan 1-3 so shifted patterns still match. */
+  for (int f = 1; f <= 3; f++) {
+    if (xlfd_field_copy(to_parse, f, buf, sizeof(buf)) && buf[0] &&
+        buf[0] != '*') {
+      if (f == 1 && buf[0] && strchr("0123456789.", buf[0]))
+        continue;
+      FcPatternAddString(p, FC_FAMILY, (const FcChar8*)buf);
+      break;
+    }
   }
-  if (xlfd_field_copy(xlfd, 4, buf, sizeof(buf))) {
-    if (buf[0] == 'i')
-      FcPatternAddInteger(p, FC_SLANT, FC_SLANT_ITALIC);
-    else if (buf[0] == 'o')
-      FcPatternAddInteger(p, FC_SLANT, FC_SLANT_OBLIQUE);
+  /* If we added nothing, default to sans-serif. */
+  {
+    FcChar8* check;
+    if (FcPatternGetString(p, FC_FAMILY, 0, &check) != FcResultMatch)
+      FcPatternAddString(p, FC_FAMILY, (const FcChar8*)"sans-serif");
   }
-  if (xlfd_field_copy(xlfd, 7, buf, sizeof(buf)) && buf[0] && buf[0] != '*') {
-    int v = atoi(buf);
-    if (v > 0)
-      FcPatternAddDouble(p, FC_PIXEL_SIZE, (double)v);
+
+  /* Weight: field 3, but scan 2-6. */
+  for (int f = 2; f <= 6; f++) {
+    if (xlfd_field_copy(to_parse, f, buf, sizeof(buf)) && buf[0]) {
+      if (strstr(buf, "bold")) {
+        FcPatternAddInteger(p, FC_WEIGHT, FC_WEIGHT_BOLD);
+        break;
+      }
+      if (strstr(buf, "heavy") || strstr(buf, "black")) {
+        FcPatternAddInteger(p, FC_WEIGHT, FC_WEIGHT_BLACK);
+        break;
+      }
+      if (strstr(buf, "light") || strstr(buf, "thin")) {
+        FcPatternAddInteger(p, FC_WEIGHT, FC_WEIGHT_LIGHT);
+        break;
+      }
+      if (strstr(buf, "medium") || strstr(buf, "regular")) {
+        FcPatternAddInteger(p, FC_WEIGHT, FC_WEIGHT_MEDIUM);
+        break;
+      }
+    }
   }
+
+  /* Slant: field 4, but scan 3-6. */
+  for (int f = 3; f <= 6; f++) {
+    if (xlfd_field_copy(to_parse, f, buf, sizeof(buf)) && buf[0]) {
+      if (buf[0] == 'i') {
+        FcPatternAddInteger(p, FC_SLANT, FC_SLANT_ITALIC);
+        break;
+      } else if (buf[0] == 'o') {
+        FcPatternAddInteger(p, FC_SLANT, FC_SLANT_OBLIQUE);
+        break;
+      } else if (buf[0] == 'r' && buf[1] == '\0') {
+        FcPatternAddInteger(p, FC_SLANT, FC_SLANT_ROMAN);
+        break;
+      }
+    }
+  }
+
+  /* Pixel/point size: fields 6-10. */
+  for (int f = 6; f <= 10; f++) {
+    if (xlfd_field_copy(to_parse, f, buf, sizeof(buf)) && buf[0] &&
+        buf[0] != '*') {
+      int v = atoi(buf);
+      if (v >= 6 && v <= 50) {
+        FcPatternAddDouble(p, FC_PIXEL_SIZE, (double)v);
+        break;
+      }
+      if (v >= 50 && v <= 5000) {
+        FcPatternAddDouble(p, FC_PIXEL_SIZE, (double)(v * 96.0 / 720.0 + 0.5));
+        break;
+      }
+    }
+  }
+
   return p;
 }
 
