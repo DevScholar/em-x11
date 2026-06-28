@@ -336,14 +336,20 @@ unsigned int em_x11_event_queue_size(const Display* dpy);
  * cursor still generates the crossing real X would. Required for twm's
  * root-menu hover, which gates on EnterNotify on the menu window. */
 void em_x11_repoll_pointer_window(Display* dpy);
+void em_x11_repoll_pointer_window_hint(Display* dpy, Window cur_hint);
 
-/* Reset the C-side implicit pointer grab. XGrabPointer calls this before
- * installing the active grab so the stale grab_window from the original
- * ButtonPress (which triggered the menu/combobox popup) doesn't keep
- * capturing ButtonRelease events meant for popup entries. Without this,
- * MenuButton items see ButtonPress but never ButtonRelease, so their
- * -command callbacks don't fire. */
-void em_x11_reset_implicit_grab(void);
+/* enterleave.c — sprite tracking + crossing event synthesis */
+void em_x11_fill_sprite_trace(Display* dpy,
+                              Window deepest_hint,
+                              int rx,
+                              int ry);
+int em_x11_sprite_trace_good(void);
+Window em_x11_sprite_trace_get(int i);
+Window em_x11_sprite_win(void);
+void em_x11_do_enter_leave_events(
+  Display* dpy, Window from, Window to, int mode, int rx, int ry);
+void em_x11_update_sprite(
+  Display* dpy, Window deepest_hint, int rx, int ry, int mode);
 
 /* Remove the first event from the queue whose type's event-mask bit is
  * set in `mask`. Copies the event into *out and compacts the queue.
@@ -625,6 +631,13 @@ extern int em_x11_js_get_window_children(Window parent, int* out, int capacity);
  * connection (e.g. xcalc walking up into a twm frame). */
 extern void em_x11_js_get_window_abs_origin(Window id, int* out);
 
+/* Cross-connection window-tree queries used by enterleave.c for
+ * sprite-trace construction and ancestor checks when the local
+ * EmxWindow table doesn't have the answer. */
+extern int em_x11_js_is_ancestor(Window ancestor, Window descendant);
+extern Window em_x11_js_get_parent(Window window);
+extern Window em_x11_js_common_ancestor(Window a, Window b);
+
 /* Cross-connection bounding-shape lookup, two-call pattern. The count
  * call returns:
  *    -1  -- window unknown to the host
@@ -798,6 +811,15 @@ extern void em_x11_js_ungrab_button(Window window,
 extern void
 em_x11_js_grab_pointer(unsigned int conn_id, Window window, int owner_events);
 extern void em_x11_js_ungrab_pointer(void);
+
+/* C-side implicit-grab state → TS module routing.  Called from events.c
+ * on ButtonPress (start) and ButtonRelease count→0 / grab teardown (end).
+ * The TS host records which wasm module holds the implicit grab so
+ * subsequent Motion + ButtonRelease events route correctly without
+ * duplicating the grab state machine. */
+extern void em_x11_js_implicit_grab_start(unsigned int conn_id, Window window);
+extern void em_x11_js_implicit_grab_end(unsigned int conn_id);
+
 extern void em_x11_js_set_input_focus(Window window);
 
 /* XIM bridge -- wires Tk's XSetICFocus / XSetICValues(XNSpotLocation)

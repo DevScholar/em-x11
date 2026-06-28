@@ -251,6 +251,29 @@ EM_JS(int,
         return n;
       });
 
+/* --- window-tree queries (cross-connection) ----------------------------- */
+
+EM_JS(int, em_x11_js_is_ancestor, (unsigned int ancestor, unsigned int descendant), {
+  var host = Module['emX11Host'];
+  if (!host)
+    return 0;
+  return host.isAncestor(ancestor >>> 0, descendant >>> 0) ? 1 : 0;
+});
+
+EM_JS(unsigned int, em_x11_js_get_parent, (unsigned int window), {
+  var host = Module['emX11Host'];
+  if (!host)
+    return 0;
+  return host.getParent(window >>> 0) >>> 0;
+});
+
+EM_JS(unsigned int, em_x11_js_common_ancestor, (unsigned int a, unsigned int b), {
+  var host = Module['emX11Host'];
+  if (!host)
+    return 0;
+  return host.commonAncestor(a >>> 0, b >>> 0) >>> 0;
+});
+
 /* --- passive grabs (XGrabButton / XUngrabButton) ------------------------- */
 
 EM_JS(void,
@@ -320,6 +343,25 @@ EM_JS(void, em_x11_js_ungrab_pointer, (void), {
   var host = Module['emX11Host'];
   if (host)
     host.onUngrabPointer();
+});
+
+/* --- implicit grab (ButtonPress → ButtonRelease tracking) ----------------
+ *
+ * The C side owns the implicit-grab state machine (which window, how many
+ * buttons).  These bridges tell the TS host which wasm module currently
+ * holds the implicit grab so it can route subsequent Motion and
+ * ButtonRelease events without duplicating the state machine. */
+
+EM_JS(void, em_x11_js_implicit_grab_start, (unsigned int conn_id, unsigned int window), {
+  var host = Module['emX11Host'];
+  if (host)
+    host.onImplicitGrabStart(conn_id >>> 0, window >>> 0);
+});
+
+EM_JS(void, em_x11_js_implicit_grab_end, (unsigned int conn_id), {
+  var host = Module['emX11Host'];
+  if (host)
+    host.onImplicitGrabEnd(conn_id >>> 0);
 });
 
 /* --- deferred pointer-window repoll (XMapWindow / XUnmapWindow) ----------

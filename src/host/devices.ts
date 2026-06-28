@@ -75,10 +75,13 @@ export class InputBridge {
    *  Whenever this is non-null and resolves to a known window, it wins
    *  over the press-driven focusedWindow. */
   private explicitFocus: number | null = null;
-  /** Module that owns the current implicit pointer grab (set on ButtonPress,
-   *  cleared on ButtonRelease). Used by onMouseMove to route motion events
-   *  to the grab window even when the pointer is over empty canvas space. */
-  private dragModule: ModuleCcallSurface | null = null;
+  /** Module that owns the current implicit pointer grab.  Set by the C side
+   *  via onImplicitGrabStart bridge (called from em_x11_push_button_event on
+   *  ButtonPress); cleared by onImplicitGrabEnd (called on final
+   *  ButtonRelease or grab teardown).  Used by pushMouseMove + deliverButton
+   *  to route motion and release events to the grabbing module even when the
+   *  pointer is outside all mapped windows. */
+  implicitDragModule: ModuleCcallSurface | null = null;
   /** XGrabPointer cursor override. While non-null this CSS cursor is
    *  shown everywhere on the canvas, replacing the per-window
    *  XDefineCursor resolution -- twm needs this so MoveCursor /
@@ -163,14 +166,11 @@ export class InputBridge {
       return;
     }
     this.activePointerGrab = { window, module };
-    /* Take over any in-progress implicit drag too -- the grabbing
-     * client now owns the pointer, including release routing. */
-    this.dragModule = module;
   }
 
   clearActivePointerGrab(): void {
     if (this.activePointerGrab) {
-      this.dragModule = null;
+      this.implicitDragModule = null;
     }
     this.activePointerGrab = null;
   }
@@ -188,9 +188,9 @@ export class InputBridge {
     if (this.activePointerGrab && this.activePointerGrab.module === module) {
       this.activePointerGrab = null;
       this.grabCursor = null;
-      this.dragModule = null;
+      this.implicitDragModule = null;
     }
-    if (this.dragModule === module) this.dragModule = null;
+    if (this.implicitDragModule === module) this.implicitDragModule = null;
     /* focusedWindow / explicitFocus may point at a window the dead conn
      * owned; the WindowManager teardown already drops those windows from
      * the renderer, so moduleForWindow returns null. Reset eagerly so
@@ -272,11 +272,11 @@ export class InputBridge {
      * xeyes' frame mid-drag, but Motion must still reach TWM, not xeyes. */
     const module =
       this.activePointerGrab?.module ??
-      this.dragModule ??
+      this.implicitDragModule ??
       (win !== null ? this.moduleForWindow(win) : null);
     if (getDebugFlags()?.traceMotion) {
       const route = this.activePointerGrab ? 'activeGrab' :
-                    this.dragModule ? 'dragModule' :
+                    this.implicitDragModule ? 'dragModule' :
                     win !== null ? 'win' : 'NONE';
       console.log(
         `[mot] (${e.x}, ${e.y}) win=${win} route=${route} module=${module ? 'Y' : 'N'}`,
@@ -392,13 +392,19 @@ export class InputBridge {
   }
 
   /** Bridged from XSetInputFocus on any module. None (0) / PointerRoot (1)
-   *  clear the explicit override and let press-driven focus take over. */
+   *  clear the explicit override and let press-driven focus take over.
+   *  XSetInputFocus is an intentional focus change (WM hand-off, Motif
+   *  menu posting) that must override the press-driven focusedWindow —
+   *  without clearing it, arrow keys in posted Motif menus route to the
+   *  menu bar RowColumn (which has no arrow-key translations) instead of
+   *  the MenuShell/popup RowColumn that does. */
   setExplicitFocus(window: number): void {
     if (window === 0 || window === 1) {
       this.explicitFocus = null;
       return;
     }
     this.explicitFocus = window;
+    this.focusedWindow = null;
   }
 
   pushKeyDown(e: KeyEventData): void { this.pushKey(X_KeyPress, e); }
@@ -426,7 +432,29 @@ export class InputBridge {
         `[btn] type=${xType} (${e.x}, ${e.y}) target=${target} button=${e.button} mods=0x${e.modifiers.toString(16)} x11State=0x${x11State.toString(16)}`,
       );
     }
-    if (target === null) return;
+    /* ButtonRelease must always reach the C side even when the pointer
+     * is outside all mapped windows (findWindowAt returns null). The C
+     * side's implicit grab (grab_window / grab_button_count) can only
+     * clear via a matching release; if we drop the event here the grab
+     * persists forever — dragModule stays stale, motion events route to
+     * the wrong module, and multiple widgets stay painted in "armed"
+     * state. xorg also generates ButtonRelease for off-root releases. */
+    if (target === null) {
+      if (xType !== X_ButtonRelease) return;
+      if (this.activePointerGrab) {
+        const grab = this.activePointerGrab;
+        if (grab.module) {
+          grab.module.ccall('em_x11_push_button_event', null,
+            ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+            [xType, 0, e.x, e.y, e.x, e.y, e.button, x11State]);
+        }
+      } else if (this.implicitDragModule) {
+        this.implicitDragModule.ccall('em_x11_push_button_event', null,
+          ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+          [xType, 0, e.x, e.y, e.x, e.y, e.button, x11State]);
+      }
+      return;
+    }
 
     /* Active pointer grab from XGrabPointer: every button event goes
      * straight to the grabbing client, bypassing passive grab lookup
@@ -442,10 +470,7 @@ export class InputBridge {
       const lx = origin ? e.x - origin.ax : e.x;
       const ly = origin ? e.y - origin.ay : e.y;
       if (xType === X_ButtonPress && e.button < 4) {
-        this.dragModule = grab.module;
         this.focusedWindow = grab.window;
-      } else if (xType === X_ButtonRelease && this.dragModule === grab.module) {
-        this.dragModule = null;
       }
       grab.module.ccall(
         'em_x11_push_button_event',
@@ -460,7 +485,7 @@ export class InputBridge {
      *
      *   1. ActiveGrab (we don't model server-grabs explicitly here -- the
      *      C side maintains an "implicit pointer grab" that routes
-     *      Motion/Release to the press's destination, see dragModule).
+     *      Motion/Release to the press's destination, see implicitDragModule).
      *   2. PassiveGrab: walk from `target` up to root looking for a
      *      passive XGrabButton with matching (button, modifiers).
      *      First match wins; event delivered to grab_window in its coords.
@@ -489,7 +514,6 @@ export class InputBridge {
 
     if (xType === X_ButtonPress) {
       const grabWin = this.host.grabs.lookup(target, e.button, x11State);
-      if (traceFlag) console.log(`  grab lookup -> ${grabWin}`);
       if (grabWin !== null) {
         deliveryWin = grabWin;
         viaGrab = true;
@@ -529,19 +553,18 @@ export class InputBridge {
        * deliver to the right MODULE here. dragModule was captured at
        * press time. */
       deliveryWin = target;
-      if (this.dragModule) {
+      if (this.implicitDragModule) {
         /* Route via dragModule directly without consulting subscriber
          * tables -- the press already chose. */
         const origin = this.host.getWindowAbsOrigin(deliveryWin);
         const lx = origin ? e.x - origin.ax : e.x;
         const ly = origin ? e.y - origin.ay : e.y;
-        this.dragModule.ccall(
+        this.implicitDragModule.ccall(
           'em_x11_push_button_event',
           null,
           ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
           [xType, deliveryWin, lx, ly, e.x, e.y, e.button, x11State],
         );
-        this.dragModule = null;
         return;
       }
       const sub = this.host.events.findSubscriberFor(target, X_ButtonReleaseMask);
@@ -593,7 +616,6 @@ export class InputBridge {
        * override (which may point at a non-Xt toplevel the Xt dispatch
        * can't resolve). Clear it so pushKey prioritises focusedWindow. */
       this.explicitFocus = null;
-      this.dragModule = module;
     }
     module.ccall(
       'em_x11_push_button_event',
@@ -675,6 +697,27 @@ export class InputBridge {
       const e = ev as MouseEvent;
       const { x, y } = this.cssPoint(e, el);
       this.pushMouseUp({ x, y, button: e.button + 1, modifiers: modifiersFromEvent(e) });
+    });
+    // Pointer left the canvas entirely. If a button is still logically
+    // held (dragModule or activePointerGrab), the browser won't send us
+    // mouseup because the release happened outside the page (e.g. after
+    // alt-tabbing away). Synthesize a release so the C-side implicit
+    // grab clears and the user doesn't come back to a stuck arm state.
+    on(el, 'mouseleave', (_ev) => {
+      const e = _ev as MouseEvent;
+      const { x, y } = this.cssPoint(e, el);
+      const mods = modifiersFromEvent(e);
+      const send = (mod: ModuleCcallSurface, window: number) => {
+        mod.ccall('em_x11_push_button_event', null,
+          ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
+          [X_ButtonRelease, window, x, y, x, y, 1, mods]);
+      };
+      if (this.activePointerGrab?.module) {
+        send(this.activePointerGrab.module, this.activePointerGrab.window);
+      }
+      if (this.implicitDragModule && this.implicitDragModule !== this.activePointerGrab?.module) {
+        send(this.implicitDragModule, 0);
+      }
     });
     on(el, 'mousemove', (ev) => {
       const e = ev as MouseEvent;

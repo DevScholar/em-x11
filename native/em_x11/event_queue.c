@@ -15,7 +15,15 @@
 /* Signal delivery at cooperative yield points (signal.c). */
 extern void em_x11_deliver_pending_signals(void);
 
+static unsigned long event_serial = 1;
+
 bool em_x11_event_queue_push(Display* dpy, const XEvent* event) {
+  /* Every event needs a non-zero, monotonically-increasing serial number.
+   * Motif's _XmIsEventUnique checks serial before timestamp; if serial is
+   * always zero, the timestamp-only fallback causes keyboard events that
+   * arrive in the same millisecond to be discarded as duplicates. */
+  ((XEvent*)event)->xany.serial = event_serial++;
+
   /* Expose coalescing: when the queue already holds an Expose event for
    * the same window, merge the new rectangle into the existing one and
    * bump its count. This mirrors xorg's miSendExposures / miWindowExposures

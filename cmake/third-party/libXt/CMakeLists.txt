@@ -88,6 +88,7 @@ target_compile_options(Xt
     PRIVATE
         -w                          # silence upstream warnings wholesale
         -fvisibility=hidden
+        "SHELL:-include emscripten.h"
 )
 
 # Xt needs Xlib and SM/ICE; hooking in em-x11 headers and link targets.

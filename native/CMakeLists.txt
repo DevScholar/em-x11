@@ -62,6 +62,7 @@ set(EM_X11_X11_SOURCES
     libX11/CopyPlane.c
     libX11/PutImage.c
     dix/events.c
+    dix/enterleave.c
     em_x11/event_queue.c
     em_x11/event_send.c
     em_x11/event_keysym.c

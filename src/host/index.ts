@@ -288,6 +288,56 @@ export class Host implements EmX11Host {
     return absOrigin(this.renderer, win);
   }
 
+  /** Is `ancestor` in the parent chain of `descendant`?  Used by
+   *  enterleave.c's win_is_inferior_of for cross-connection windows. */
+  isAncestor(ancestor: number, descendant: number): boolean {
+    if (ancestor === 0 || descendant === 0 || ancestor === descendant) return false;
+    let cur = this.renderer.windows.get(descendant);
+    for (let guard = 0; cur && guard < 128; guard++) {
+      if (cur.parent === ancestor) return true;
+      if (cur.parent === 0) break;
+      const next = this.renderer.windows.get(cur.parent);
+      if (!next) break;
+      cur = next;
+    }
+    return false;
+  }
+
+  /** Parent of a window in the host's full tree.  Returns 0 if unknown
+   *  or at root.  Used by enterleave.c's sprite-trace construction. */
+  getParent(window: number): number {
+    const win = this.renderer.windows.get(window);
+    return win ? win.parent : 0;
+  }
+
+  /** Nearest common ancestor of two windows in the host's tree.
+   *  Returns 0 if none found.  Used by enterleave.c's nonlinear
+   *  crossing path. */
+  commonAncestor(a: number, b: number): number {
+    if (a === 0 || b === 0) return 0;
+    if (a === b) return a;
+
+    /* Collect ancestors of a */
+    const ancestors = new Set<number>();
+    let cur: number | undefined = a;
+    for (let guard = 0; cur && guard < 128; guard++) {
+      ancestors.add(cur);
+      const win = this.renderer.windows.get(cur);
+      if (!win || win.parent === 0) break;
+      cur = win.parent;
+    }
+
+    /* Walk up from b, first hit wins */
+    cur = b;
+    for (let guard = 0; cur && guard < 128; guard++) {
+      if (ancestors.has(cur)) return cur;
+      const win = this.renderer.windows.get(cur);
+      if (!win || win.parent === 0) break;
+      cur = win.parent;
+    }
+    return 0;
+  }
+
   /** Cross-connection bounding-shape lookup. Returns:
    *    null  -- window unknown to the host
    *    []    -- window known, but no bounding shape (rectangular)
@@ -425,6 +475,18 @@ export class Host implements EmX11Host {
   onUngrabButton(window: number, button: number, modifiers: number): void {
     this.grabs.remove(window, button, modifiers);
   }
+  /** C-side implicit grab started (ButtonPress).  Records which wasm
+   *  module holds the implicit grab so subsequent Motion + ButtonRelease
+   *  events route to the correct module. */
+  onImplicitGrabStart(connId: number, _window: number): void {
+    const conn = this.connection.get(connId);
+    if (conn?.module) this.devices.implicitDragModule = conn.module;
+  }
+  /** C-side implicit grab ended (final ButtonRelease or grab teardown). */
+  onImplicitGrabEnd(_connId: number): void {
+    this.devices.implicitDragModule = null;
+  }
+
   /** XGrabPointer / XUngrabPointer: install or release an active
    *  pointer grab on behalf of the calling wasm. Forwards to the input
    *  bridge, which redirects subsequent button + motion delivery. */
