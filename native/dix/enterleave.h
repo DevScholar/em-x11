@@ -5,6 +5,7 @@
 #define EM_X11_ENTERLEAVE_H
 
 #include <X11/Xlib.h>
+#include <stdbool.h>
 
 struct _XDisplay;
 

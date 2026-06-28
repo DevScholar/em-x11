@@ -862,8 +862,15 @@ Bool XTranslateCoordinates(Display* display,
     if (cur->parent == None || cur->parent == cur->id)
       break;
     EmxWindow* p = em_x11_window_find(display, cur->parent);
-    if (!p)
+    if (!p) {
+      int buf[EM_X11_ABS_ORIGIN_SIZE] = {0};
+      em_x11_js_get_window_abs_origin(cur->parent, buf);
+      if (buf[EM_X11_ABS_ORIGIN_PRESENT]) {
+        src_ax += buf[EM_X11_ABS_ORIGIN_AX];
+        src_ay += buf[EM_X11_ABS_ORIGIN_AY];
+      }
       break;
+    }
     cur = p;
   }
   int dst_ax = 0, dst_ay = 0;
@@ -873,8 +880,15 @@ Bool XTranslateCoordinates(Display* display,
     if (cur->parent == None || cur->parent == cur->id)
       break;
     EmxWindow* p = em_x11_window_find(display, cur->parent);
-    if (!p)
+    if (!p) {
+      int buf[EM_X11_ABS_ORIGIN_SIZE] = {0};
+      em_x11_js_get_window_abs_origin(cur->parent, buf);
+      if (buf[EM_X11_ABS_ORIGIN_PRESENT]) {
+        dst_ax += buf[EM_X11_ABS_ORIGIN_AX];
+        dst_ay += buf[EM_X11_ABS_ORIGIN_AY];
+      }
       break;
+    }
     cur = p;
   }
   if (dest_x_return)

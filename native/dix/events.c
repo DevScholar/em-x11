@@ -197,6 +197,8 @@ static Window deliver_window_from_sprite(
 static void DeliverGrabbedEvent(Display* dpy,
                                 int type,
                                 Window deepest_hint,
+                                int ts_lx,
+                                int ts_ly,
                                 int rx,
                                 int ry,
                                 unsigned int button,
@@ -207,37 +209,33 @@ static void DeliverGrabbedEvent(Display* dpy,
   Window normal_target = None;
 
   if (activeGrab.ownerEvents) {
-    /* Normal delivery: sprite-trace walk with grab mask ORed in.
-     * xorg's DeliverDeviceEvents(sprite->win, ..., grab, ...) walks
-     * the window tree from spriteWin upward, checking
-     * EventIsDeliverable on each window (which ORs the grab mask for
-     * owner_events).  Our deliver_window_from_sprite does the same. */
     normal_target =
       deliver_window_from_sprite(dpy, need_mask, rx, ry, &lx, &ly);
     if (normal_target != None) {
+      if (normal_target == deepest_hint) {
+        lx = ts_lx;
+        ly = ts_ly;
+      }
       push_button_xevent(
         dpy, type, normal_target, lx, ly, rx, ry, button, state, now);
     }
   }
 
-  /* xorg: if !ownerEvents or DeliverDeviceEvents returned 0 deliveries,
-   * fall through to DeliverOneGrabbedEvent → TryClientEvents(grab->window).
-   * Only the grab window receives the event; no "dual delivery". */
   if (normal_target == None) {
     EmxWindow* gw = em_x11_window_find(dpy, activeGrab.window);
     if (gw) {
       int ax, ay, depth;
       local_window_abs_origin(dpy, gw, &ax, &ay, &depth);
-      push_button_xevent(dpy,
-                         type,
-                         activeGrab.window,
-                         rx - ax,
-                         ry - ay,
-                         rx,
-                         ry,
-                         button,
-                         state,
-                         now);
+      int flx, fly;
+      if (activeGrab.window == deepest_hint) {
+        flx = ts_lx;
+        fly = ts_ly;
+      } else {
+        flx = rx - ax;
+        fly = ry - ay;
+      }
+      push_button_xevent(
+        dpy, type, activeGrab.window, flx, fly, rx, ry, button, state, now);
     }
   }
 }
@@ -278,7 +276,8 @@ void em_x11_push_button_event(int type,
    *    DeliverGrabbedEvent handles routing.  xorg: implicit grab IS the
    *    device grab — all events during grab go through DeliverGrabbedEvent. */
   if (activeGrab.active) {
-    DeliverGrabbedEvent(dpy, type, window, x_root, y_root, button, state, now);
+    DeliverGrabbedEvent(
+      dpy, type, window, x, y, x_root, y_root, button, state, now);
 
     /* Implicit grab deactivation on last ButtonRelease. */
     if (type == ButtonRelease && implicitGrab.window != None) {
@@ -317,12 +316,21 @@ void em_x11_push_button_event(int type,
     return;
   }
 
-  /* 3. Normal delivery: walk spriteTrace for mask match */
+  /* 3. Normal delivery: walk spriteTrace for mask match.
+   *    The sprite walk determines the correct delivery window (mask gate).
+   *    For local coordinates, trust the TS-provided x,y when the sprite
+   *    walk agrees with the hint — the TS side has correct stacking-aware
+   *    window positions; the EmxWindow chain may have stale coordinates. */
   long need_mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
   delivery_win =
     deliver_window_from_sprite(dpy, need_mask, x_root, y_root, &lx, &ly);
-  if (delivery_win == None)
+  if (delivery_win == None) {
     return;
+  }
+  if (delivery_win == window) {
+    lx = x;
+    ly = y;
+  }
 
   /* 4. Implicit grab activation on ButtonPress.
    *    xorg: ActivateImplicitGrab sets deviceGrab.grab so subsequent
@@ -332,17 +340,14 @@ void em_x11_push_button_event(int type,
     if (implicitGrab.buttonCount == 0) {
       EmxWindow* dw = em_x11_window_find(dpy, delivery_win);
       implicitGrab.window = delivery_win;
-      /* Mirror xorg ActivateImplicitGrab:
-       *   tempGrab->window = win;
-       *   tempGrab->ownerEvents = (deliveryMask & OwnerGrabButtonMask) ? TRUE :
-       * FALSE; tempGrab->eventMask = deliveryMask; */
       activeGrab.active = true;
       activeGrab.window = delivery_win;
       activeGrab.ownerEvents =
         (dw && (dw->event_mask & OwnerGrabButtonMask)) ? True : False;
       activeGrab.eventMask = dw ? dw->event_mask : 0;
       activeGrab.cursor = None;
-      activeGrab.tsSynced = false; /* implicit grab, no TS mirror */
+      activeGrab.tsSynced = false;
+      ;
       em_x11_js_implicit_grab_start((unsigned int)dpy->conn_id, delivery_win);
     }
     implicitGrab.buttonCount++;

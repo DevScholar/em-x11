@@ -133,14 +133,6 @@ void em_x11_fill_sprite_trace(Display* dpy,
                               Window deepest_hint,
                               int rx,
                               int ry) {
-  EM_ASM(
-    {
-      console.log('[sprite] fill_sprite_trace hint=' + ($0 >>> 0) + ' rx=' +
-                  $1 + ' ry=' + $2);
-    },
-    deepest_hint,
-    rx,
-    ry);
   /* If hint is None, try a depth-based fallback */
   if (deepest_hint == None) {
     /* Walk dpy->windows[] for deepest mapped window at (rx,ry) */
@@ -241,28 +233,9 @@ static void CoreEnterLeaveEvent(Display* dpy,
                                 int rx,
                                 int ry,
                                 unsigned int state) {
-  const char* tname = (type == EnterNotify) ? "Enter" : "Leave";
-  EM_ASM(
-    {
-      console.log('[DBG] crossing ' + UTF8ToString($0) + ' win=' + ($1 >>> 0) +
-                  ' child=' + ($2 >>> 0) + ' mode=' + $3 + ' detail=' + $4);
-    },
-    tname,
-    win,
-    child,
-    mode,
-    detail);
-
   EmxWindow* ew = em_x11_window_find(dpy, win);
-  if (!ew) {
-    EM_ASM(
-      {
-        console.log('[cross]   DROP: em_x11_window_find returned NULL for ' +
-                    ($0 >>> 0));
-      },
-      win);
+  if (!ew)
     return;
-  }
 
   long need = (type == EnterNotify) ? EnterWindowMask : LeaveWindowMask;
 
@@ -286,22 +259,8 @@ static void CoreEnterLeaveEvent(Display* dpy,
     eff_mask = ew->event_mask;
   }
 
-  if (!(eff_mask & need)) {
-    EM_ASM(
-      {
-        console.log('[DBG]   crossing DROP: ' + UTF8ToString($0) + ' win=' +
-                    ($1 >>> 0) + ' need=0x' + ($2).toString(16) + ' eff=0x' +
-                    ($3).toString(16) + ' grabAct=' + ($4 ? 'Y' : 'N') +
-                    ' isGrabWin=' + ($5 ? 'Y' : 'N'));
-      },
-      tname,
-      win,
-      need,
-      eff_mask,
-      active_grab_active(),
-      active_grab_active() && win == active_grab_window_get());
+  if (!(eff_mask & need))
     return;
-  }
 
   int ax, ay, depth;
   window_abs_origin(dpy, ew, &ax, &ay, &depth);
@@ -323,17 +282,6 @@ static void CoreEnterLeaveEvent(Display* dpy,
   ev.xcrossing.state = state;
   ev.xcrossing.time = event_now();
   ev.xcrossing.subwindow = child;
-  EM_ASM(
-    {
-      console.log('[DBG]   crossing coords: lx=' + $0 + ' ly=' + $1 + ' (ax=' +
-                  $2 + ' ay=' + $3 + ') rx=' + $4 + ' ry=' + $5);
-    },
-    (int)(rx - ax),
-    (int)(ry - ay),
-    ax,
-    ay,
-    rx,
-    ry);
   em_x11_event_queue_push(dpy, &ev);
 }
 
@@ -515,16 +463,6 @@ static void CoreEnterLeaveEvents(Display* dpy,
  * Mirrors xorg's DoEnterLeaveEvents (enterleave.c:596). */
 void em_x11_do_enter_leave_events(
   Display* dpy, Window from, Window to, int mode, int rx, int ry) {
-  EM_ASM(
-    {
-      console.log('[DBG] do_enter_leave_events from=' + ($0 >>> 0) + ' to=' +
-                  ($1 >>> 0) + ' mode=' + $2 + ' rx=' + $3 + ' ry=' + $4);
-    },
-    from,
-    to,
-    mode,
-    rx,
-    ry);
   if (from == to)
     return;
 
@@ -568,15 +506,6 @@ void em_x11_update_sprite(
   Display* dpy, Window deepest_hint, int rx, int ry, int mode) {
   Window old = spriteWin;
   em_x11_fill_sprite_trace(dpy, deepest_hint, rx, ry);
-  EM_ASM(
-    {
-      console.log('[sprite] update_sprite old=' + ($0 >>> 0) + ' new=' +
-                  ($1 >>> 0) + ' changed=' + ($2 ? 'Y' : 'N') + ' mode=' + $3);
-    },
-    old,
-    spriteWin,
-    (spriteWin != old),
-    mode);
   if (spriteWin != old)
     em_x11_do_enter_leave_events(dpy, old, spriteWin, mode, rx, ry);
 }

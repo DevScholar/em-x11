@@ -266,7 +266,7 @@ int XNextEvent(Display* display, XEvent* event_return) {
   EM_ASM(
     {
       var d = Module['emX11Debug'];
-      if (d && d.traceNext && $0) {
+      if (d && d.traceNext) {
         console.log('[c-next] XNextEvent conn=' + $1 + ' type=' + $2 + ' win=' +
                     ($3 >>> 0));
       }
