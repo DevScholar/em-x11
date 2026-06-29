@@ -12,7 +12,7 @@ int XClearArea(Display* display,
                unsigned int width,
                unsigned int height,
                Bool exposures) {
-  EmxWindow* win = em_x11_window_find(display, w);
+  EmX11Window* win = em_x11_window_find(display, w);
   if (!win)
     return 0;
   if (width == 0)

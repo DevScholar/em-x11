@@ -64,11 +64,11 @@ struct _XGC {
 };
 
 /* ------------------------------------------------------------------------- */
-/*  EmxWindow -- em-x11's per-window bookkeeping. Not visible to clients;   */
+/*  EmX11Window -- em-x11's per-window bookkeeping. Not visible to clients;   */
 /*  they only ever see opaque Window (XID).                                  */
 /* ------------------------------------------------------------------------- */
 
-typedef struct EmxWindow {
+typedef struct EmX11Window {
   Window id;
   Window parent;
   int x, y;
@@ -98,7 +98,7 @@ typedef struct EmxWindow {
 
   /* Linked list of XChangeProperty payloads. See property.c. */
   struct EmxProperty* properties;
-} EmxWindow;
+} EmX11Window;
 
 typedef struct EmxProperty {
   struct EmxProperty* next;
@@ -190,7 +190,7 @@ struct _XDisplay {
   XID xid_mask;
   int wakeup_fd; /* write end of self-pipe */
 
-  EmxWindow* windows;
+  EmX11Window* windows;
   int window_count;    /* allocated slots; >= window_capacity means full */
   int window_capacity; /* current array size; doubled on exhaustion */
 
@@ -322,8 +322,8 @@ void em_x11_signal_set_pending(int sig);
 void em_x11_vfork_clear(void);
 int em_x11_vfork_active(void);
 
-EmxWindow* em_x11_window_find(Display* dpy, Window id);
-EmxWindow* em_x11_window_alloc(Display* dpy);
+EmX11Window* em_x11_window_find(Display* dpy, Window id);
+EmX11Window* em_x11_window_alloc(Display* dpy);
 XID em_x11_next_xid(Display* dpy);
 
 bool em_x11_event_queue_push(Display* dpy, const XEvent* event);
@@ -607,7 +607,7 @@ extern void em_x11_js_window_shape(Window id, const int* rects, int count);
 extern void em_x11_js_pointer_xy(int* x_out, int* y_out);
 
 /* Cross-connection XGetWindowAttributes fallback. When the caller has
- * no local EmxWindow for `id` (the WM case: twm querying xeyes's shell),
+ * no local EmX11Window for `id` (the WM case: twm querying xeyes's shell),
  * this returns the Host-authoritative state. `out` is an int[8] buffer:
  *   [0] found (0/1)  [1] x  [2] y
  *   [3] width        [4] height  [5] mapped
@@ -633,7 +633,7 @@ extern void em_x11_js_get_window_abs_origin(Window id, int* out);
 
 /* Cross-connection window-tree queries used by enterleave.c for
  * sprite-trace construction and ancestor checks when the local
- * EmxWindow table doesn't have the answer. */
+ * EmX11Window table doesn't have the answer. */
 extern int em_x11_js_is_ancestor(Window ancestor, Window descendant);
 extern Window em_x11_js_get_parent(Window window);
 extern Window em_x11_js_common_ancestor(Window a, Window b);

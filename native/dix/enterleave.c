@@ -12,7 +12,7 @@
  * Cross-connection awareness: em-x11 runs each X11 client in a separate
  * wasm module whose Display only knows its own windows.  The TS host
  * owns the full window tree.  Sprite-trace building and ancestor checks
- * delegate to JS bridges when the local EmxWindow table doesn't have the
+ * delegate to JS bridges when the local EmX11Window table doesn't have the
  * answer.
  */
 
@@ -44,15 +44,15 @@ static Time event_now(void) {
 /* Absolute origin of a *local* window (must be in dpy->windows[]).
  * Mirrors the same-named static in events.c. */
 static void window_abs_origin(
-  Display* dpy, EmxWindow* w, int* ax_out, int* ay_out, int* depth_out) {
+  Display* dpy, EmX11Window* w, int* ax_out, int* ay_out, int* depth_out) {
   int ax = 0, ay = 0, depth = 0;
-  EmxWindow* cur = w;
+  EmX11Window* cur = w;
   for (int guard = 0; cur && guard < dpy->window_count; guard++, depth++) {
     ax += cur->x;
     ay += cur->y;
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* parent = em_x11_window_find(dpy, cur->parent);
+    EmX11Window* parent = em_x11_window_find(dpy, cur->parent);
     if (!parent) {
       int buf[EM_X11_ABS_ORIGIN_SIZE] = {0};
       em_x11_js_get_window_abs_origin(cur->parent, buf);
@@ -73,14 +73,14 @@ static void window_abs_origin(
 }
 
 /* Is `ancestor` in the parent chain of `descendant`?
- * Checks local EmxWindow table first; falls back to the JS host for
+ * Checks local EmX11Window table first; falls back to the JS host for
  * cross-connection relationships. */
 int win_is_inferior_of(Display* dpy, Window descendant, Window ancestor) {
   if (descendant == None || ancestor == None || descendant == ancestor)
     return false;
 
   /* Try local table first */
-  EmxWindow* cur = em_x11_window_find(dpy, descendant);
+  EmX11Window* cur = em_x11_window_find(dpy, descendant);
   while (cur) {
     if (cur->parent == ancestor)
       return true;
@@ -136,10 +136,10 @@ void em_x11_fill_sprite_trace(Display* dpy,
   /* If hint is None, try a depth-based fallback */
   if (deepest_hint == None) {
     /* Walk dpy->windows[] for deepest mapped window at (rx,ry) */
-    EmxWindow* best = NULL;
+    EmX11Window* best = NULL;
     int best_depth = -1;
     for (int i = 0; i < dpy->window_count; i++) {
-      EmxWindow* w = &dpy->windows[i];
+      EmX11Window* w = &dpy->windows[i];
       if (!w->in_use || !w->mapped)
         continue;
       int ax, ay, depth;
@@ -167,7 +167,7 @@ void em_x11_fill_sprite_trace(Display* dpy,
       break; /* reached root */
 
     /* Try local table for parent */
-    EmxWindow* ew = em_x11_window_find(dpy, cur);
+    EmX11Window* ew = em_x11_window_find(dpy, cur);
     if (ew && ew->parent != None && ew->parent != cur) {
       cur = ew->parent;
       continue;
@@ -233,7 +233,7 @@ static void CoreEnterLeaveEvent(Display* dpy,
                                 int rx,
                                 int ry,
                                 unsigned int state) {
-  EmxWindow* ew = em_x11_window_find(dpy, win);
+  EmX11Window* ew = em_x11_window_find(dpy, win);
   if (!ew)
     return;
 
@@ -314,7 +314,7 @@ static void CoreEnterNotifies(Display* dpy,
     path[count++] = cur;
     if (count >= MAX_SPRITE_TRACE)
       break;
-    EmxWindow* ew = em_x11_window_find(dpy, cur);
+    EmX11Window* ew = em_x11_window_find(dpy, cur);
     Window parent = None;
     if (ew && ew->parent != None && ew->parent != cur)
       parent = ew->parent;
@@ -352,7 +352,7 @@ static void CoreLeaveNotifies(Display* dpy,
     return;
 
   Window cur = descendant;
-  EmxWindow* ew = em_x11_window_find(dpy, cur);
+  EmX11Window* ew = em_x11_window_find(dpy, cur);
   while (cur != None && cur != ancestor) {
     Window parent;
     if (ew && ew->parent != None && ew->parent != cur)

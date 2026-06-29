@@ -71,7 +71,7 @@ Status XSendEvent(Display* display,
 
   /* Find the closest window up from `w` that selects any bit of
    * event_mask. If propagate=False, only `w` itself is a candidate. */
-  EmxWindow* target =
+  EmX11Window* target =
     (w == PointerWindow || w == None) ? NULL : em_x11_window_find(display, w);
   Window root = display->screens[0].root;
   while (target) {

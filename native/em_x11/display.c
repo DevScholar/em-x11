@@ -35,22 +35,22 @@ XID em_x11_next_xid(Display* dpy) {
 
 static bool grow_window_table(Display* dpy) {
   int new_cap = dpy->window_capacity * 2;
-  EmxWindow* new_windows =
-    realloc(dpy->windows, (size_t)new_cap * sizeof(EmxWindow));
+  EmX11Window* new_windows =
+    realloc(dpy->windows, (size_t)new_cap * sizeof(EmX11Window));
   if (!new_windows)
     return false;
   memset(new_windows + dpy->window_capacity,
          0,
-         (size_t)(new_cap - dpy->window_capacity) * sizeof(EmxWindow));
+         (size_t)(new_cap - dpy->window_capacity) * sizeof(EmX11Window));
   dpy->windows = new_windows;
   dpy->window_capacity = new_cap;
   return true;
 }
 
-EmxWindow* em_x11_window_alloc(Display* dpy) {
+EmX11Window* em_x11_window_alloc(Display* dpy) {
   for (int i = 0; i < dpy->window_count; i++) {
     if (!dpy->windows[i].in_use) {
-      memset(&dpy->windows[i], 0, sizeof(EmxWindow));
+      memset(&dpy->windows[i], 0, sizeof(EmX11Window));
       dpy->windows[i].in_use = true;
       return &dpy->windows[i];
     }
@@ -61,12 +61,12 @@ EmxWindow* em_x11_window_alloc(Display* dpy) {
       return NULL;
   }
   int i = dpy->window_count++;
-  memset(&dpy->windows[i], 0, sizeof(EmxWindow));
+  memset(&dpy->windows[i], 0, sizeof(EmX11Window));
   dpy->windows[i].in_use = true;
   return &dpy->windows[i];
 }
 
-EmxWindow* em_x11_window_find(Display* dpy, Window id) {
+EmX11Window* em_x11_window_find(Display* dpy, Window id) {
   for (int i = 0; i < dpy->window_count; i++) {
     if (dpy->windows[i].in_use && dpy->windows[i].id == id) {
       return &dpy->windows[i];
@@ -151,7 +151,8 @@ Display* XOpenDisplay(const char* display_name) {
    * a dynamic array with capacity doubling gives the same "no fixed
    * ceiling" property without per-window malloc churn. */
   g_display.window_capacity = EM_X11_WINDOW_INITIAL_CAPACITY;
-  g_display.windows = calloc(EM_X11_WINDOW_INITIAL_CAPACITY, sizeof(EmxWindow));
+  g_display.windows =
+    calloc(EM_X11_WINDOW_INITIAL_CAPACITY, sizeof(EmX11Window));
   if (!g_display.windows) {
     return NULL;
   }
@@ -242,13 +243,13 @@ Display* XOpenDisplay(const char* display_name) {
 
   /* Root window is Host-owned since Step 3a. Every client's XOpenDisplay
    * asks the Host for the shared root XID and installs a local shadow
-   * in its EmxWindow table -- the authoritative record (and the weave
+   * in its EmX11Window table -- the authoritative record (and the weave
    * pixmap hanging off it) lives in the JS compositor. We do NOT call
    * em_x11_js_window_create for root: the Host already has the entry
    * and a second window_create for the same XID would either clobber
    * state or put two compositor rows in conflict. */
   Window root_xid = em_x11_js_get_root_window();
-  EmxWindow* root = em_x11_window_alloc(&g_display);
+  EmX11Window* root = em_x11_window_alloc(&g_display);
   root->id = root_xid;
   root->parent = None;
   root->x = 0;

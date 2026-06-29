@@ -86,15 +86,15 @@ static Time event_now(void) {
  * has its own copy (they can't share a static easily without a header
  * or merging TUs). */
 static void local_window_abs_origin(
-  Display* dpy, EmxWindow* w, int* ax_out, int* ay_out, int* depth_out) {
+  Display* dpy, EmX11Window* w, int* ax_out, int* ay_out, int* depth_out) {
   int ax = 0, ay = 0, depth = 0;
-  EmxWindow* cur = w;
+  EmX11Window* cur = w;
   for (int guard = 0; cur && guard < dpy->window_count; guard++, depth++) {
     ax += cur->x;
     ay += cur->y;
     if (cur->parent == None || cur->parent == cur->id)
       break;
-    EmxWindow* parent = em_x11_window_find(dpy, cur->parent);
+    EmX11Window* parent = em_x11_window_find(dpy, cur->parent);
     if (!parent) {
       int buf[EM_X11_ABS_ORIGIN_SIZE] = {0};
       em_x11_js_get_window_abs_origin(cur->parent, buf);
@@ -153,7 +153,7 @@ static Window deliver_window_from_sprite(
   int good = em_x11_sprite_trace_good();
   for (int i = good - 1; i >= 0; i--) {
     Window w = em_x11_sprite_trace_get(i);
-    EmxWindow* ew = em_x11_window_find(dpy, w);
+    EmX11Window* ew = em_x11_window_find(dpy, w);
     if (!ew)
       continue;
     unsigned int eff = ew->event_mask;
@@ -169,7 +169,7 @@ static Window deliver_window_from_sprite(
   }
   Window fb = em_x11_sprite_win();
   if (fb != None) {
-    EmxWindow* ew = em_x11_window_find(dpy, fb);
+    EmX11Window* ew = em_x11_window_find(dpy, fb);
     if (ew) {
       int ax, ay, depth;
       local_window_abs_origin(dpy, ew, &ax, &ay, &depth);
@@ -222,7 +222,7 @@ static void DeliverGrabbedEvent(Display* dpy,
   }
 
   if (normal_target == None) {
-    EmxWindow* gw = em_x11_window_find(dpy, activeGrab.window);
+    EmX11Window* gw = em_x11_window_find(dpy, activeGrab.window);
     if (gw) {
       int ax, ay, depth;
       local_window_abs_origin(dpy, gw, &ax, &ay, &depth);
@@ -320,7 +320,7 @@ void em_x11_push_button_event(int type,
    *    The sprite walk determines the correct delivery window (mask gate).
    *    For local coordinates, trust the TS-provided x,y when the sprite
    *    walk agrees with the hint — the TS side has correct stacking-aware
-   *    window positions; the EmxWindow chain may have stale coordinates. */
+   *    window positions; the EmX11Window chain may have stale coordinates. */
   long need_mask = (type == ButtonPress) ? ButtonPressMask : ButtonReleaseMask;
   delivery_win =
     deliver_window_from_sprite(dpy, need_mask, x_root, y_root, &lx, &ly);
@@ -338,7 +338,7 @@ void em_x11_push_button_event(int type,
    *    activeGrab here, which makes step 2 catch subsequent events. */
   if (type == ButtonPress) {
     if (implicitGrab.buttonCount == 0) {
-      EmxWindow* dw = em_x11_window_find(dpy, delivery_win);
+      EmX11Window* dw = em_x11_window_find(dpy, delivery_win);
       implicitGrab.window = delivery_win;
       activeGrab.active = true;
       activeGrab.window = delivery_win;
@@ -378,7 +378,7 @@ void em_x11_push_motion_event(
   int lx = 0, ly = 0;
 
   if (implicitGrab.window != None) {
-    EmxWindow* gw = em_x11_window_find(dpy, implicitGrab.window);
+    EmX11Window* gw = em_x11_window_find(dpy, implicitGrab.window);
     if (gw && gw->mapped) {
       delivery_win = implicitGrab.window;
       int ax, ay, depth;
@@ -391,7 +391,7 @@ void em_x11_push_motion_event(
     delivery_win =
       deliver_window_from_sprite(dpy, mmask, x_root, y_root, &lx, &ly);
     if (delivery_win == None && !activeGrab.ownerEvents) {
-      EmxWindow* gw = em_x11_window_find(dpy, activeGrab.window);
+      EmX11Window* gw = em_x11_window_find(dpy, activeGrab.window);
       if (gw) {
         delivery_win = activeGrab.window;
         int ax, ay, depth;
@@ -578,7 +578,7 @@ void em_x11_push_map_request(Window parent, Window window) {
 EMSCRIPTEN_KEEPALIVE
 void em_x11_push_reparent_notify(Window window, Window parent, int x, int y) {
   Display* dpy = em_x11_get_display();
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   if (win) {
     win->parent = parent;
     win->x = x;
@@ -589,7 +589,7 @@ void em_x11_push_reparent_notify(Window window, Window parent, int x, int y) {
   if (win && (win->event_mask & StructureNotifyMask))
     wants = true;
   if (!wants && parent != None) {
-    EmxWindow* p = em_x11_window_find(dpy, parent);
+    EmX11Window* p = em_x11_window_find(dpy, parent);
     if (p && (p->event_mask & SubstructureNotifyMask))
       wants = true;
   }
@@ -613,7 +613,7 @@ EMSCRIPTEN_KEEPALIVE
 void em_x11_push_configure_notify(
   Window window, int x, int y, int width, int height, int border_width) {
   Display* dpy = em_x11_get_display();
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   if (win) {
     win->x = x;
     win->y = y;
@@ -626,7 +626,7 @@ void em_x11_push_configure_notify(
   if (win && (win->event_mask & StructureNotifyMask))
     wants = true;
   if (!wants && win && win->parent != None) {
-    EmxWindow* p = em_x11_window_find(dpy, win->parent);
+    EmX11Window* p = em_x11_window_find(dpy, win->parent);
     if (p && (p->event_mask & SubstructureNotifyMask))
       wants = true;
   }
@@ -656,7 +656,7 @@ void em_x11_push_configure_notify(
 EMSCRIPTEN_KEEPALIVE
 void em_x11_push_destroy_notify(Window window, Window event_window) {
   Display* dpy = em_x11_get_display();
-  EmxWindow* evw = em_x11_window_find(dpy, event_window);
+  EmX11Window* evw = em_x11_window_find(dpy, event_window);
   if (!evw) {
     if (event_window == window) {
       /* fall through to push */
@@ -691,7 +691,7 @@ void em_x11_push_shape_notify(Window window,
                               unsigned int height,
                               Bool shaped) {
   Display* dpy = em_x11_get_display();
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   if (win && !(win->shape_event_mask & ShapeNotifyMask))
     return;
 

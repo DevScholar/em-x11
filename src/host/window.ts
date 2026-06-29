@@ -154,7 +154,7 @@ export class WindowManager {
     /* Cross-connection ConfigureNotify delivery. When the caller is a
      * WM (twm) resizing a managed client's shell, the client app's
      * Tk / Xt layer needs to learn the new geometry to re-lay out --
-     * its own EmxWindow shadow and ConfigureNotify queue live in a
+     * its own EmX11Window shadow and ConfigureNotify queue live in a
      * different module. Mirrors the onReparent owner-ccall pattern.
      *
      * Push ConfigureNotify BEFORE the backing-store configure + Expose
@@ -277,7 +277,7 @@ export class WindowManager {
     /* Notify the window's *owner* connection that its shadow is now stale.
      * In the TWM case the reparent is issued by twm's display, but xcalc
      * (the owner) still has its shell recorded as parent=root in its own
-     * EmxWindow table. Without correcting that, the C-side window_abs_origin
+     * EmX11Window table. Without correcting that, the C-side window_abs_origin
      * walk lands at the pre-reparent absolute coords, ButtonPress/Motion
      * get translated with the wrong offset, hover/click hit the wrong
      * widget, and Xt's Shell widget never sees a ReparentNotify it would

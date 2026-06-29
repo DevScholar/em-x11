@@ -36,7 +36,7 @@ export const XID_MASK = XID_PER_CONN - 1;                // 0x001FFFFF
 
 /* Well-known XIDs for Host-owned resources. Clients learn the root
  * window's XID through the get_root_window bridge during XOpenDisplay
- * and put a local shadow entry in their EmxWindow table pointing at
+ * and put a local shadow entry in their EmX11Window table pointing at
  * it -- the Host keeps the authoritative renderer record. */
 export const HOST_ROOT_ID = 0x00000001;
 export const HOST_WEAVE_PIXMAP_ID = 0x00000002;

@@ -3,7 +3,7 @@
  *
  * Upstream libXext marshals these calls into X protocol requests and
  * sends them to the server. em-x11 has no server: we store the shape
- * data directly on the EmxWindow record and push it to the JS
+ * data directly on the EmX11Window record and push it to the JS
  * compositor, which clips rendering to the shape.
  *
  * v1 scope:
@@ -47,7 +47,7 @@ Status XShapeQueryVersion(Display* dpy, int* major, int* minor) {
 
 /* -- Helpers --------------------------------------------------------------- */
 
-static void push_shape_to_js(EmxWindow* win) {
+static void push_shape_to_js(EmX11Window* win) {
   if (!win)
     return;
   if (win->shape_bounding_count == 0 || !win->shape_bounding) {
@@ -70,7 +70,7 @@ static void push_shape_to_js(EmxWindow* win) {
   free(flat);
 }
 
-static void clear_shape(EmxWindow* win) {
+static void clear_shape(EmX11Window* win) {
   if (!win)
     return;
   free(win->shape_bounding);
@@ -78,7 +78,7 @@ static void clear_shape(EmxWindow* win) {
   win->shape_bounding_count = 0;
 }
 
-static void set_shape(EmxWindow* win, XRectangle* rects, int n) {
+static void set_shape(EmX11Window* win, XRectangle* rects, int n) {
   if (!win)
     return;
   clear_shape(win);
@@ -91,7 +91,7 @@ static void set_shape(EmxWindow* win, XRectangle* rects, int n) {
   win->shape_bounding_count = n;
 }
 
-static void union_shape(EmxWindow* win, XRectangle* rects, int n) {
+static void union_shape(EmX11Window* win, XRectangle* rects, int n) {
   if (!win || n <= 0 || !rects)
     return;
   int total = win->shape_bounding_count + n;
@@ -123,7 +123,7 @@ void XShapeCombineRectangles(Display* dpy,
                              int ordering) {
   (void)ordering;
 
-  EmxWindow* win = em_x11_window_find(dpy, dest);
+  EmX11Window* win = em_x11_window_find(dpy, dest);
   if (!win)
     return;
 
@@ -193,7 +193,7 @@ void XShapeCombineMask(Display* dpy,
 
   /* src==None means "no mask" -- the window becomes rectangular. */
   if (src == None) {
-    EmxWindow* win = em_x11_window_find(dpy, dest);
+    EmX11Window* win = em_x11_window_find(dpy, dest);
     if (!win)
       return;
     clear_shape(win);
@@ -213,7 +213,7 @@ void XShapeCombineMask(Display* dpy,
    * run-length encoding is cheaper done in one place than streaming
    * every pixel across the wasm boundary. */
   em_x11_js_shape_combine_mask(dest, src, x_off, y_off, op);
-  EmxWindow* win = em_x11_window_find(dpy, dest);
+  EmX11Window* win = em_x11_window_find(dpy, dest);
   if (win && (win->shape_event_mask & ShapeNotifyMask)) {
     em_x11_push_shape_notify(
       dest, dest_kind, 0, 0, win->width, win->height, True);
@@ -231,7 +231,7 @@ void XShapeCombineShape(Display* dpy,
   /* Copy shape from another window. The source may be foreign --
    * twm calls this on its frame (local) with the client window
    * (lives in xeyes' connection) as the source. Try the local
-   * EmxWindow table first; fall back to the host bridge so the
+   * EmX11Window table first; fall back to the host bridge so the
    * frame actually inherits the client's shape.
    *
    * SHAPE spec: an unshaped window's bounding shape is its full
@@ -241,7 +241,7 @@ void XShapeCombineShape(Display* dpy,
    * fallback the title bar gets erased from the frame's shape and
    * disappears from hit-testing. */
   (void)src_kind;
-  EmxWindow* src_win = em_x11_window_find(dpy, src);
+  EmX11Window* src_win = em_x11_window_find(dpy, src);
   if (src_win) {
     if (src_win->shape_bounding_count > 0) {
       XShapeCombineRectangles(dpy,
@@ -316,7 +316,7 @@ void XShapeCombineRegion(Display* dpy,
 
 void XShapeOffsetShape(
   Display* dpy, Window dest, int dest_kind, int x_off, int y_off) {
-  EmxWindow* win = em_x11_window_find(dpy, dest);
+  EmX11Window* win = em_x11_window_find(dpy, dest);
   if (!win || dest_kind != ShapeBounding)
     return;
   for (int i = 0; i < win->shape_bounding_count; i++) {
@@ -363,7 +363,7 @@ Status XShapeQueryExtents(Display* dpy,
   if (h_clip)
     *h_clip = 0;
 
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   if (win) {
     if (bounding_shaped)
       *bounding_shaped = (win->shape_bounding != NULL);
@@ -392,7 +392,7 @@ Status XShapeQueryExtents(Display* dpy,
 }
 
 void XShapeSelectInput(Display* dpy, Window window, unsigned long mask) {
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   if (win)
     win->shape_event_mask = mask;
   /* Always notify the host so cross-connection subscribers (twm
@@ -401,13 +401,13 @@ void XShapeSelectInput(Display* dpy, Window window, unsigned long mask) {
 }
 
 unsigned long XShapeInputSelected(Display* dpy, Window window) {
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   return win ? win->shape_event_mask : 0;
 }
 
 XRectangle* XShapeGetRectangles(
   Display* dpy, Window window, int kind, int* count, int* ordering) {
-  EmxWindow* win = em_x11_window_find(dpy, window);
+  EmX11Window* win = em_x11_window_find(dpy, window);
   if (ordering)
     *ordering = Unsorted;
   if (!win || kind != ShapeBounding || win->shape_bounding_count == 0) {

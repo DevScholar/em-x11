@@ -534,7 +534,7 @@ export class InputBridge {
         } else {
           /* Route to the subscriber's connection, but keep the original
            * deepest hit window as deliveryWin. The C-side walk_up_for_mask
-           * checks its own EmxWindow.event_mask (set via XCreateWindow /
+           * checks its own EmX11Window.event_mask (set via XCreateWindow /
            * XChangeWindowAttributes CWEventMask), which may differ from the
            * JS-side subscription table. When the deepest window (e.g. twm's
            * title bar) does have the mask in the C struct, walk_up_for_mask

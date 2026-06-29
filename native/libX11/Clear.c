@@ -13,7 +13,7 @@
 #include <string.h>
 
 int XClearWindow(Display* display, Window w) {
-  EmxWindow* win = em_x11_window_find(display, w);
+  EmX11Window* win = em_x11_window_find(display, w);
   if (!win)
     return 0;
   em_x11_js_clear_area(w, 0, 0, win->width, win->height);
