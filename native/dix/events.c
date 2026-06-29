@@ -452,6 +452,16 @@ void em_x11_push_key_event(int type,
 }
 
 EMSCRIPTEN_KEEPALIVE
+/* Called from JS when ButtonPress-driven focus changes, so the C-side
+ * focus_window override doesn't redirect keys away from the widget the
+ * user clicked on. Without this, init-time XSetInputFocus on the
+ * toplevel permanently captures all key events. */
+void em_x11_set_focus_window(Window w) {
+  Display* dpy = em_x11_get_display();
+  if (dpy)
+    dpy->focus_window = w;
+}
+
 void em_x11_push_key_event_kc(int type,
                               Window window,
                               unsigned int keycode,

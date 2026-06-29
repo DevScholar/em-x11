@@ -616,6 +616,12 @@ export class InputBridge {
        * override (which may point at a non-Xt toplevel the Xt dispatch
        * can't resolve). Clear it so pushKey prioritises focusedWindow. */
       this.explicitFocus = null;
+      /* Sync C-side focus_window so em_x11_push_key_event_kc doesn't
+       * override to a stale window (e.g. init-time XSetInputFocus). */
+      const focusMod = this.moduleForWindow(this.focusedWindow);
+      if (focusMod) {
+        focusMod.ccall('em_x11_set_focus_window', null, ['number'], [this.focusedWindow]);
+      }
     }
     module.ccall(
       'em_x11_push_button_event',
