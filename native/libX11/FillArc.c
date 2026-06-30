@@ -2,7 +2,8 @@
  * XFillArc — fill an arc (pie slice).
  * Upstream: libX11/src/FillArc.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XFillArc(Display* display,
              Drawable d,

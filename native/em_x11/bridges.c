@@ -41,7 +41,7 @@ void em_x11_repoll_pointer_window(Display* dpy);
 void em_x11_repoll_pointer_window_hint(Display* dpy, unsigned long cur_hint);
 
 /* Link anchor: this TU only contains EM_JS data symbols, which the
- * archive linker drops unless a real ref pulls the .o in. display.c
+ * archive linker drops unless a real ref pulls the .o in. display_init.c
  * calls this function so emcc's post-link pass sees the JS bodies. */
 void em_x11_bridges_link_anchor(void) {}
 
@@ -419,7 +419,7 @@ EM_JS(void, em_x11_js_set_input_focus, (unsigned int window), {
     host.onSetInputFocus(window >>> 0);
 });
 
-/* --- XIM (xim.c) --------------------------------------------------------- *
+/* --- XIM (xim_bridge.c) --------------------------------------------------------- *
  *
  * Tk calls XSetICFocus / XSetICValues(XNSpotLocation) as it moves focus
  * between entries / texts and drags the caret around inside them. The

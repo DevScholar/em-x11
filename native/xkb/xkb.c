@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Defined in event_keysym.c -- the same table backs XKeycodeToKeysym. */
+/* Defined in keysym.c -- the same table backs XKeycodeToKeysym. */
 extern KeySym XKeycodeToKeysym(Display* dpy, unsigned int keycode, int index);
 
 Display* XkbOpenDisplay(const char* name,

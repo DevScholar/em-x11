@@ -8,7 +8,7 @@
  * physical key, and patch our keysym_table accordingly inside each
  * wasm process AFTER it's loaded but BEFORE its first KeyPress event.
  *
- * The C side (event_keysym.c::em_x11_us_qwerty) pre-fills US QWERTY as
+ * The C side (keysym.c::em_x11_us_qwerty) pre-fills US QWERTY as
  * the fallback for every evdev keycode. This module overwrites the
  * letter / digit / punctuation slots with what the user actually
  * types -- so a French AZERTY user's physical Q key reports the

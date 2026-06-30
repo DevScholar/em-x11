@@ -2,7 +2,7 @@
  * Event queue: ring buffer + maskable scans + the public XPending /
  * XEventsQueued / XNextEvent entry points. Pure storage layer; no
  * synthesis, no input routing -- those live in event.c (input)
- * and event_send.c (synthetic delivery).
+ * and send_event.c (synthetic delivery).
  */
 
 #include "em_x11_internal.h"

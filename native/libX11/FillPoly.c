@@ -2,7 +2,8 @@
  * XFillPolygon — fill a polygon.
  * Upstream: libX11/src/FillPoly.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XFillPolygon(Display* display,
                  Drawable d,

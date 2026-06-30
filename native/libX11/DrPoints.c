@@ -2,7 +2,8 @@
  * XDrawPoints — draw multiple points.
  * Upstream: libX11/src/DrPoints.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawPoints(
   Display* display, Drawable d, GC gc, XPoint* points, int npoints, int mode) {

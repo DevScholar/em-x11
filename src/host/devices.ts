@@ -373,7 +373,7 @@ export class InputBridge {
     );
   }
 
-  /* -- Inline preedit bridges (xim.c) ------------------------------------ */
+  /* -- Inline preedit bridges (xim_bridge.c) ------------------------------------ */
 
   /** compositionstart: begin inline preedit on the focused widget. */
   pushPreeditStart(window: number): void {

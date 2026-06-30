@@ -2,7 +2,8 @@
  * XDrawLines — draw connected line segments.
  * Upstream: libX11/src/DrLines.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawLines(
   Display* display, Drawable d, GC gc, XPoint* points, int npoints, int mode) {

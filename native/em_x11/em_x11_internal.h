@@ -20,6 +20,7 @@
 #include <X11/Xlib.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #define EM_X11_WINDOW_INITIAL_CAPACITY 64
 /* Queue sized for a multi-second drag: twm's F_MOVE only drains the events
@@ -272,7 +273,7 @@ struct _XDisplay {
   int incr_len;
   int incr_cap;
 
-  /* XIM side-channel for typed UTF-8 (see xim.c).
+  /* XIM side-channel for typed UTF-8 (see xim_bridge.c).
    *
    *   pending_key_text     -- staged by JS (em_x11_set_pending_key_text)
    *                           right before each em_x11_push_key_event.
@@ -368,7 +369,7 @@ KeyCode em_x11_keysym_to_keycode(Display* dpy, KeySym keysym);
 
 /* Install the US QWERTY default keysyms at every evdev keycode slot.
  * Called once at Display init before host's getLayoutMap() patches
- * land. See event_keysym.c::em_x11_us_qwerty for the table. */
+ * land. See keysym.c::em_x11_us_qwerty for the table. */
 void em_x11_keysym_table_install_us_qwerty(Display* dpy);
 
 /* Look up the CSS font string bound to a loaded Font id. Returns NULL
@@ -824,7 +825,7 @@ extern void em_x11_js_set_input_focus(Window window);
 
 /* XIM bridge -- wires Tk's XSetICFocus / XSetICValues(XNSpotLocation)
  * to the host's hidden <textarea> overlay, which is what the OS IME
- * actually anchors its candidate window on. xim.c calls these. The host
+ * actually anchors its candidate window on. xim_bridge.c calls these. The host
  * ignores spot updates whose window doesn't currently own focus -- Tk
  * sets XNSpotLocation pre-emptively on every entry and we only want
  * the active widget's caret position to drive the overlay. */
@@ -833,13 +834,13 @@ extern void em_x11_js_xim_clear_focus(void);
 extern void em_x11_js_xim_set_spot(Window window, int x, int y);
 
 /* Preedit bridges: host calls these from compositionstart/update/end on
- * the hidden textarea. See text-input.ts + xim.c */
+ * the hidden textarea. See text-input.ts + xim_bridge.c */
 extern void em_x11_xim_preedit_start(Window window);
 extern void em_x11_xim_preedit_draw(
   Window window, const char* text, int caret, int chg_first, int chg_length);
 extern void em_x11_xim_preedit_done(Window window);
 
-/* xim.c side-channel hooks. event.c calls _capture_key_text after each
+/* xim_bridge.c side-channel hooks. event.c calls _capture_key_text after each
  * KeyPress/KeyRelease push so the parallel queue stays in lockstep with
  * event_queue; event_queue.c calls _capture_pop_text right before
  * advancing event_head so Xutf8LookupString sees the right slot. */
@@ -931,5 +932,40 @@ Bool em_x11_incr_handle_chunk(Display* dpy,
                               const unsigned char* data,
                               int nelements,
                               int format);
+
+/* Drawing helpers shared across libX11 drawing files (formerly DrawingPriv.h).
+ * gc_draw_disabled short-circuits drawing when the GC function is not GXcopy;
+ * flatten_points serialises XPoint[] with CoordMode resolution into a flat
+ * int[] for the JS bridge. */
+static inline bool gc_draw_disabled(GC gc) {
+  return gc && gc->function != GXcopy;
+}
+
+static inline int*
+flatten_points(XPoint* points, int npoints, int mode, int* out_count) {
+  if (npoints <= 0 || !points) {
+    *out_count = 0;
+    return NULL;
+  }
+  int* flat = malloc(sizeof(int) * 2 * (size_t)npoints);
+  if (!flat) {
+    *out_count = 0;
+    return NULL;
+  }
+  int cx = 0, cy = 0;
+  for (int i = 0; i < npoints; i++) {
+    if (mode == CoordModePrevious && i > 0) {
+      cx += points[i].x;
+      cy += points[i].y;
+    } else {
+      cx = points[i].x;
+      cy = points[i].y;
+    }
+    flat[i * 2 + 0] = cx;
+    flat[i * 2 + 1] = cy;
+  }
+  *out_count = npoints;
+  return flat;
+}
 
 #endif /* EM_X11_INTERNAL_H */

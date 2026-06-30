@@ -2,7 +2,8 @@
  * XDrawLine — draw a single line.
  * Upstream: libX11/src/DrLine.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawLine(
   Display* display, Drawable d, GC gc, int x1, int y1, int x2, int y2) {

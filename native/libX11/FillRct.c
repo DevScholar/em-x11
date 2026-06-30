@@ -2,7 +2,8 @@
  * XFillRectangle — fill a solid rectangle.
  * Upstream: libX11/src/FillRct.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XFillRectangle(Display* display,
                    Drawable d,

@@ -629,7 +629,7 @@ export class Host implements EmX11Host {
     return this.connection.posixSpawn(path, args, env);
   }
 
-  /* -- EmX11Host: XIM (xim.c) ------------------------------------------- */
+  /* -- EmX11Host: XIM (xim_bridge.c) ------------------------------------------- */
 
   /** XSetICFocus on any module. Tk fires this when its focus moves
    *  between entries / texts. The hidden textarea overlay grabs DOM

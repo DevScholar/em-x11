@@ -2,7 +2,8 @@
  * XDrawRectangle — outline a rectangle.
  * Upstream: libX11/src/DrRect.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawRectangle(Display* display,
                    Drawable d,

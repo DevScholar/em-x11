@@ -2,7 +2,8 @@
  * XDrawSegments — draw unconnected line segments.
  * Upstream: libX11/src/DrSegs.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawSegments(
   Display* display, Drawable d, GC gc, XSegment* segments, int nsegments) {

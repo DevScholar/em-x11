@@ -1,7 +1,7 @@
 /*
  * Colors.
  *
- * em-x11 always serves a single 24-bit TrueColor visual (see display.c).
+ * em-x11 always serves a single 24-bit TrueColor visual (see display_init.c).
  * XColor.pixel maps directly to 0x00RRGGBB, bypassing the colormap
  * machinery that real X servers carry for PseudoColor visuals. We still
  * populate the XColor struct fields so clients that round-trip through

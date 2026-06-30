@@ -2,7 +2,8 @@
  * XDrawPoint — draw a single point.
  * Upstream: libX11/src/DrPoint.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawPoint(Display* display, Drawable d, GC gc, int x, int y) {
   (void)display;

@@ -421,7 +421,7 @@ export interface EmX11Host {
   ): void;
   /** XPutImage: blit raw pixel data into a Drawable. format==0 (XYBitmap)
    *  + depth==1 paints as fg/bg stencil; format==2 (ZPixmap) expects
-   *  32bpp BGRA in the byte stream matching display.c's format0. */
+   *  32bpp BGRA in the byte stream matching display_init.c's format0. */
   onPutImage(
     dstId: number,
     dstX: number,
@@ -469,7 +469,7 @@ export interface EmX11Host {
   /** XSetInputFocus on any module. Forwarded so press-driven focus
    *  override can stop tracking the WM frame after a click-to-raise. */
   onSetInputFocus(window: number): void;
-  /** XIM (xim.c): Tk's XSetICFocus / XUnsetICFocus / XSetICValues
+  /** XIM (xim_bridge.c): Tk's XSetICFocus / XUnsetICFocus / XSetICValues
    *  XNSpotLocation. Host translates these into hidden-textarea focus
    *  + position so the OS IME anchors candidate windows correctly. */
   onXimSetFocus(window: number): void;

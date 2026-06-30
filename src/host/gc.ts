@@ -440,7 +440,7 @@ export class GcManager {
   /** XPutImage: blit a raw pixel buffer (ZPixmap, RGBA-ish) or 1-bit
    *  bitmap (XYBitmap) into a Drawable. ZPixmap arrives as 32bpp BGRA in
    *  memory order on little-endian wasm (format0 is LSBFirst, per
-   *  display.c). We reorder into RGBA for ImageData. XYBitmap treats each
+   *  display_init.c). We reorder into RGBA for ImageData. XYBitmap treats each
    *  set bit as gc->foreground, unset as gc->background. */
   onPutImage(
     dstId: number,
@@ -481,7 +481,7 @@ export class GcManager {
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const byte = data[y * bytesPerLine + (x >> 3)] ?? 0;
-          /* bitmap_bit_order LSBFirst (display.c). */
+          /* bitmap_bit_order LSBFirst (display_init.c). */
           const bit = (byte >> (x & 7)) & 1;
           const o = (y * w + x) * 4;
           if (dstIsBitmap) {

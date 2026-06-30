@@ -2,7 +2,8 @@
  * XDrawArc — outline an arc.
  * Upstream: libX11/src/DrArc.c
  */
-#include "DrawingPriv.h"
+
+#include "em_x11_internal.h"
 
 int XDrawArc(Display* display,
              Drawable d,

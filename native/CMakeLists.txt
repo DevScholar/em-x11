@@ -40,7 +40,7 @@ set(EM_X11_LIBC_OVERRIDE_SOURCES
     em_x11/process.c
 )
 set(EM_X11_X11_SOURCES
-    em_x11/display.c
+    em_x11/display_init.c
     dix/window.c
     dix/gc.c
     libX11/FillRct.c
@@ -80,31 +80,30 @@ set(EM_X11_X11_SOURCES
     dix/events.c
     dix/enterleave.c
     em_x11/event_queue.c
-    em_x11/event_send.c
-    em_x11/event_keysym.c
+    em_x11/send_event.c
+    em_x11/keysym.c
     dix/atom.c
     dix/property.c
     dix/selection.c
     dix/colormap.c
     em_x11/error.c
     dix/dixfonts.c
-    em_x11/wm.c
+    em_x11/wm_hints.c
     libX11/Xrm.c
     dix/pixmap.c
-    em_x11/xim.c
+    em_x11/xim_bridge.c
     dix/region.c
     libX11/Text16.c
     libX11/ImText.c
     dix/cursor.c
     xkb/xkb.c
-    em_x11/keysym_table.c
     em_x11/bridges.c
     em_x11/threading.c
 )
 set(EM_X11_XEXT_SOURCES       Xext/shape.c)
 set(EM_X11_XRENDER_SOURCES    render/render.c)
-set(EM_X11_FONTCONFIG_SOURCES em_x11/fontconfig.c)
-set(EM_X11_XFT_SOURCES        em_x11/xft.c)
+set(EM_X11_FONTCONFIG_SOURCES em_x11/fc_stubs.c)
+set(EM_X11_XFT_SOURCES        em_x11/xft_bridge.c)
 set(EM_X11_GLX_SOURCES        glx/glx.c)
 
 # Combined list used only by the side-module path -- Pyodide dlopens one
