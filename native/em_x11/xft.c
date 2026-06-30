@@ -301,15 +301,13 @@ XftFont* XftFontOpenXlfd(Display* dpy, int screen, const char* xlfd) {
   return XftFontOpenPattern(dpy, p);
 }
 
-XftFont*
+FcPattern*
 XftFontMatch(Display* dpy, int screen, FcPattern* pattern, FcResult* result) {
   (void)dpy;
   (void)screen;
-  if (result)
-    *result = FcResultMatch;
-  /* Caller retains `pattern`; return a duplicate they can pass to
-   * XftFontOpenPattern. Mirrors upstream Xft.h. */
-  return (XftFont*)FcPatternDuplicate(pattern);
+  FcConfigSubstitute(NULL, pattern, FcMatchPattern);
+  XftDefaultSubstitute(dpy, screen, pattern);
+  return FcFontMatch(NULL, pattern, result);
 }
 
 XftFont* XftFontOpen(Display* dpy, int screen, ...) {
@@ -921,4 +919,30 @@ void XftColorFree(Display* dpy,
   (void)visual;
   (void)cmap;
   (void)color;
+}
+
+/*
+ * XftDrawString32 — render a UCS-4 (FcChar32) string.
+ * Upstream: libXft/src/xftdraw.c
+ *
+ * Real Xft converts FcChar32 codepoints to glyph indices and renders
+ * through Xrender. em-x11's text pipeline uses UTF-8 canvas.fillText;
+ * this stub is here so callers link. Motif's XmRenderT.c calls this
+ * for XFT_RENDER_32 rendering; the 8-bit and 16-bit paths go through
+ * XftDrawStringUtf8 and XftDrawString16 respectively.
+ */
+void XftDrawString32(XftDraw* draw,
+                     _Xconst XftColor* color,
+                     XftFont* font,
+                     int x,
+                     int y,
+                     const FcChar32* string,
+                     int len) {
+  (void)draw;
+  (void)color;
+  (void)font;
+  (void)x;
+  (void)y;
+  (void)string;
+  (void)len;
 }

@@ -135,7 +135,7 @@ XftFont *XftFontOpen(Display *dpy, int screen, ...);
 XftFont *XftFontOpenName(Display *dpy, int screen, const char *name);
 XftFont *XftFontOpenXlfd(Display *dpy, int screen, const char *xlfd);
 XftFont *XftFontOpenPattern(Display *dpy, FcPattern *pattern);
-XftFont *XftFontMatch(Display *dpy, int screen, FcPattern *pattern, FcResult *result);
+FcPattern *XftFontMatch(Display *dpy, int screen, FcPattern *pattern, FcResult *result);
 void     XftFontClose(Display *dpy, XftFont *font);
 
 FcPattern *XftXlfdParse(const char *xlfd, FcBool ignore_scalable, FcBool complete);

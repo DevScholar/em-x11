@@ -61,6 +61,22 @@ set(EM_X11_X11_SOURCES
     libX11/CopyArea.c
     libX11/CopyPlane.c
     libX11/PutImage.c
+    libX11/AllCells.c
+    libX11/AllowEv.c
+    libX11/ChActPGb.c
+    libX11/ChClMode.c
+    libX11/ICWrap.c
+    libX11/ImUtil.c
+    libX11/LiICmaps.c
+    libX11/Macros.c
+    libX11/QuCurShp.c
+    libX11/SetTxtProp.c
+    libX11/StBytes.c
+    libX11/StColor.c
+    libX11/TextExt16.c
+    libX11/utf8Text.c
+    libX11/utf8WMProps.c
+    libX11/WinEvent.c
     dix/events.c
     dix/enterleave.c
     em_x11/event_queue.c
