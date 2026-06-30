@@ -81,6 +81,16 @@ bool em_x11_event_queue_push(Display* dpy, const XEvent* event) {
 
   unsigned int next_tail = (dpy->event_tail + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
   if (next_tail == dpy->event_head) {
+    EM_ASM(
+      {
+        var d = Module['emX11Debug'];
+        if (d && d.traceQp) {
+          console.warn('[em-x11] event queue overflow: conn=' + $0 +
+                       ' capacity=' + $1 + ' — events silently dropped');
+        }
+      },
+      dpy->conn_id,
+      EM_X11_EVENT_QUEUE_CAPACITY);
     return false;
   }
   dpy->event_queue[dpy->event_tail] = *event;
@@ -295,14 +305,7 @@ Bool XCheckIfEvent(Display* dpy,
     XEvent* e = &dpy->event_queue[i];
     if (predicate(dpy, e, arg)) {
       *event_return = *e;
-      unsigned int next = (i + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
-      while (next != dpy->event_tail) {
-        dpy->event_queue[i] = dpy->event_queue[next];
-        i = next;
-        next = (next + 1) % EM_X11_EVENT_QUEUE_CAPACITY;
-      }
-      dpy->event_tail = (dpy->event_tail + EM_X11_EVENT_QUEUE_CAPACITY - 1) %
-                        EM_X11_EVENT_QUEUE_CAPACITY;
+      queue_remove_at(dpy, i);
       return True;
     }
     i = (i + 1) % EM_X11_EVENT_QUEUE_CAPACITY;

@@ -222,6 +222,26 @@ struct _XDisplay {
   int focus_revert_to;
   Time focus_last_time;
 
+  /* Per-Display grab state.  Previously file-static globals in events.c;
+   * moved into the Display so multiple wasm modules in the same page
+   * (each with its own Display) don't collide on grab/button/modifier
+   * state.  See events.c DeliverGrabbedEvent / em_x11_push_button_event. */
+  struct {
+    bool active;
+    Window window;
+    Bool ownerEvents;
+    unsigned int eventMask;
+    Cursor cursor;
+    bool tsSynced; /* XGrabPointer called em_x11_js_grab_pointer */
+  } active_grab;
+  struct {
+    Window window;
+    unsigned int buttonCount;
+  } implicit_grab;
+  unsigned int buttons_down;
+  unsigned int modifier_state;
+  unsigned char down_keycodes[32];
+
   /* ICCCM selection state. Selection ownership is server-global in real
    * X (dix/selection.c); here it's per-Display because each wasm module
    * is its own in-process "server". Cross-module selection is deferred.
@@ -933,39 +953,15 @@ Bool em_x11_incr_handle_chunk(Display* dpy,
                               int nelements,
                               int format);
 
-/* Drawing helpers shared across libX11 drawing files (formerly DrawingPriv.h).
+/* Drawing helpers shared across libX11 drawing files.
  * gc_draw_disabled short-circuits drawing when the GC function is not GXcopy;
- * flatten_points serialises XPoint[] with CoordMode resolution into a flat
- * int[] for the JS bridge. */
+ * flatten_points (defined in draw_utils.c) serialises XPoint[] with CoordMode
+ * resolution into a flat int[] for the JS bridge. */
 static inline bool gc_draw_disabled(GC gc) {
   return gc && gc->function != GXcopy;
 }
 
-static inline int*
-flatten_points(XPoint* points, int npoints, int mode, int* out_count) {
-  if (npoints <= 0 || !points) {
-    *out_count = 0;
-    return NULL;
-  }
-  int* flat = malloc(sizeof(int) * 2 * (size_t)npoints);
-  if (!flat) {
-    *out_count = 0;
-    return NULL;
-  }
-  int cx = 0, cy = 0;
-  for (int i = 0; i < npoints; i++) {
-    if (mode == CoordModePrevious && i > 0) {
-      cx += points[i].x;
-      cy += points[i].y;
-    } else {
-      cx = points[i].x;
-      cy = points[i].y;
-    }
-    flat[i * 2 + 0] = cx;
-    flat[i * 2 + 1] = cy;
-  }
-  *out_count = npoints;
-  return flat;
-}
+extern int*
+flatten_points(XPoint* points, int npoints, int mode, int* out_count);
 
 #endif /* EM_X11_INTERNAL_H */
