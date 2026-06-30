@@ -1,108 +1,10 @@
-/**
- * @license
- * em-x11 Emscripten JS library.
+/*
+ * Manually written bridge functions with non-trivial marshalling logic
+ * (HEAP access, caching, UTF8 conversion, etc.).
  *
- * Provides the JS-side bridge functions that the C code in
- * native/em_x11/bridges.c calls. In the static-link path (-sUSE_EM_X11)
- * these override the EM_JS bodies in bridges.c; in the SIDE_MODULE path
- * (Pyodide dlopen) the EM_JS bodies provide the implementations and
- * this library is not used.
- *
- * Internal state lives under $EmX11Host (closure-private, NOT on Module).
- * User-configurable knobs are flat Module properties:
- *
- *   Module['emX11Host']           — pre-created Host instance (layers 2/3)
- *   Module['emX11ClipboardBytes'] — Uint8Array, staged before paste events
- *   Module['emX11NoAutoStart']    — skip auto-init (advanced users only)
- *
- * The Host (set via Module['emX11Host'] or by createEmX11()) must provide
- * the EmX11Host interface methods that each bridge function below
- * dispatches into.
+ * This file is read by tools/generate-js-library.py. Functions defined
+ * here take precedence over auto-generated stubs.
  */
-
-var LibraryEmX11 = {
-  $EmX11Host__internal: true,
-  $EmX11Host__postset: 'EmX11Host.init();',
-  $EmX11Host: {
-    bridge: null,
-    /** Emscripten Module reference, captured during init() when it is
-     *  guaranteed to be live. Bridge functions must use this.module and
-     *  NEVER bare `Module` — in some Emscripten build modes (MODULARIZE +
-     *  EXPORT_ES6 with certain optimiser passes) bare `Module` inside a
-     *  library function body resolves to undefined at call time even
-     *  though bracket notation inside __postset sees it. */
-    module: null,
-    /** Connection id assigned by Host.openDisplay().  Tracked here so
-     *  the _exit override can call closeDisplay(connId) without plumbing
-     *  through the C-side em_x11_current_conn_id() — which may already be
-     *  unusable if the wasm stack has started unwinding. */
-    connId: 0,
-    caches: {},
-    debug: {
-      traceHit: false,
-      traceHitNext: false,
-      traceMotion: false,
-      traceButton: false,
-      tracePaint: false,
-      traceCBtn: false,
-      traceCMot: false,
-      traceMove: false,
-      traceQp: false,
-    },
-
-    init: function() {
-      // Capture Module now — it IS live inside __postset evaluation.
-      this.module = Module;
-      // Emscripten initializes `var noExitRuntime = true` and later does
-      // `if(Module["noExitRuntime"]) noExitRuntime = Module["noExitRuntime"]`.
-      // The truthiness check means noExitRuntime:false is ignored (stays true).
-      // We set it false HERE so the check skips (false is falsy) and the
-      // runtime is allowed to exit. Without this, _proc_exit's keepRuntimeAlive()
-      // returns true, Module.onExit never fires, and the host never learns the
-      // wasm is gone — windows freeze on the compositor.
-      noExitRuntime = false;
-      // Hook Module.onExit so _proc_exit tears down the connection before
-      // throwing ExitStatus.  This is the ONLY interceptable point in the
-      // JSPI exit chain — Emscripten hardcodes var _exit = exitJS after
-      // library insertion, and wasmImports.exit is captured by the wasm
-      // instance at instantiation time.
-      Module['onExit'] = function(code) {
-        if (EmX11Host.connId !== 0) {
-          var h = EmX11Host.get();
-          if (h) {
-            h.closeDisplay(EmX11Host.connId);
-            EmX11Host.connId = 0;
-          }
-        }
-      };
-      // If the user pre-installed a Host via Module['emX11Host'], use it.
-      if (Module['emX11Host']) {
-        this.bridge = Module['emX11Host'];
-        // Mirror debug flags from the installed Host if it provides them.
-        // The TypeScript Host also writes its _debug onto Module['emX11Debug']
-        // so DevTools can toggle flags without reaching into the closure.
-        if (Module['emX11Debug']) this.debug = Module['emX11Debug'];
-        return;
-      }
-      // Layer 1 (zero JS): if no Host was pre-installed and auto-start is
-      // not disabled, the default host creator runs.  This path is exercised
-      // when the user compiles with -sUSE_EM_X11 and writes zero JS glue.
-      if (!Module['emX11NoAutoStart']) {
-        if (typeof EmX11DefaultHost !== 'undefined') {
-          this.bridge = EmX11DefaultHost.create(Module);
-          // EmX11DefaultHost.create() calls attachToBridge() which sets
-          // Module['emX11Debug']; sync it into the closure so $EmX11Host
-          // stays consistent.
-          if (Module['emX11Debug']) this.debug = Module['emX11Debug'];
-        }
-      }
-    },
-
-    /** Safe accessor – returns the bridge or null.  Every bridge function
-     *  below calls this so a missing Host is a silent no-op rather than a
-     *  TypeError on undefined. */
-    get: function() { return this.bridge; },
-  },
 
   /* ---- clipboard -------------------------------------------------------- */
 
@@ -981,7 +883,3 @@ var LibraryEmX11 = {
     if (!h || !h.glx) return;
     h.glx.resize(id | 0, width | 0, height | 0);
   },
-};
-
-autoAddDeps(LibraryEmX11, '$EmX11Host');
-addToLibrary(LibraryEmX11);

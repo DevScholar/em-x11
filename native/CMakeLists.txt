@@ -41,6 +41,7 @@ set(EM_X11_LIBC_OVERRIDE_SOURCES
 )
 set(EM_X11_X11_SOURCES
     em_x11/display_init.c
+    em_x11/draw_utils.c
     dix/window.c
     dix/gc.c
     libX11/FillRct.c
@@ -238,3 +239,43 @@ if(EM_X11_BUILD_SIDE_MODULE)
                 em_x11_Xrender_side em_x11_fontconfig_side em_x11_Xft_side)
 
 endif()
+
+# Auto-generate library_em-x11.js from bridges.c + preamble + custom files.
+# Runs at configure time so the file always exists before compilation.
+find_package(Python3 COMPONENTS Interpreter)
+set(_lib_out "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/library_em-x11.js")
+set(_lib_preamble "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/library_em-x11.preamble.js")
+set(_lib_custom "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/library_em-x11.custom.js")
+set(_bridges_c "${CMAKE_CURRENT_SOURCE_DIR}/em_x11/bridges.c")
+set(_generator "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate-js-library.py")
+
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${_generator}"
+            "${_bridges_c}" "${_lib_preamble}" "${_lib_custom}" "${_lib_out}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE _gen_result
+    OUTPUT_VARIABLE _gen_output
+    ERROR_VARIABLE _gen_error
+)
+if(NOT _gen_result EQUAL 0)
+    message(WARNING "generate-js-library.py failed: ${_gen_error}")
+else()
+    message(STATUS "generate-js-library: ${_gen_output}")
+endif()
+
+add_custom_target(generate-js-library ALL
+    COMMAND "${Python3_EXECUTABLE}" "${_generator}"
+            "${_bridges_c}" "${_lib_preamble}" "${_lib_custom}" "${_lib_out}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Generating library_em-x11.js from bridges.c"
+    VERBATIM
+)
+
+add_custom_target(check-bridge-sync
+    COMMAND "${Python3_EXECUTABLE}" "${_generator}"
+            "${_bridges_c}" "${_lib_preamble}" "${_lib_custom}" "${_lib_out}"
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/tools/check-bridge-sync.sh"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Verifying bridges.c ↔ library_em-x11.js sync"
+    VERBATIM
+)
