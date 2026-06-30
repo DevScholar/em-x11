@@ -1,6 +1,12 @@
 /*
  * XDrawArc — outline an arc.
  * Upstream: libX11/src/DrArc.c
+ *
+ * Drawable validation intentionally skipped: em-x11 trusts its wasm
+ * clients (they share an address space) and the browser's canvas API is
+ * the ultimate validator — operations on non-existent backing stores
+ * are harmless no-ops. Adding per-call lookup+check overhead on the
+ * hot drawing path would penalize legitimate draws for no benefit.
  */
 
 #include "em_x11_internal.h"

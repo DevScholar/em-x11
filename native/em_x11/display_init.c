@@ -340,6 +340,11 @@ unsigned long XWhitePixel(Display* display, int screen_number) {
 
 /* -- Generic allocator -- */
 
+/* XFree/free policy: In wasm both ultimately call the same allocator.
+ * XFree is the public Xlib API — real clients (Tk, twm, Motif) expect
+ * to release Xlib-returned data with XFree(), so public-API boundaries
+ * use it. Inside em-x11's own internals, plain free() is preferred for
+ * brevity. They are interchangeable — no special X-pool context here. */
 int XFree(void* data) {
   free(data);
   return 1;

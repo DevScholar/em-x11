@@ -36,6 +36,10 @@
  * StructureNotifyMask on hilite_w (nor SubstructureNotifyMask on
  * hilite_w's parent title_w), so the events were never delivered. */
 static bool wants_structure(Display* dpy, Window w) {
+  /* Cross-conn note: this only checks the local Display's window table.
+   * For cross-connection subscribers (e.g. twm in another wasm process),
+   * delivery happens via host ccalls (emx11_push_map_notify, etc.) which
+   * bypass this gate — the host delivers directly to the owning process. */
   EmX11Window* win = em_x11_window_find(dpy, w);
   if (!win)
     return false;
