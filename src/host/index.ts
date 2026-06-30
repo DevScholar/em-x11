@@ -123,6 +123,22 @@ export class Host implements EmX11Host {
     void this.keyboardLayout.resolve();
 
     this.window.installSharedRoot();
+
+    /* installSharedRoot depends on canvas, renderer, connection, and gc
+     * being initialised above. If this assertion fires, a field init was
+     * moved after installSharedRoot — reorder it back. */
+    if (
+      typeof Module !== 'undefined' &&
+      (Module as Record<string, unknown>)['emX11Debug']
+    ) {
+      const root = this.renderer.windows.get(this.window.getRootWindow());
+      if (!root) {
+        throw new Error(
+          'em-x11: Host constructor ordering error — installSharedRoot ' +
+          'ran before renderer / gc / connection were initialised',
+        );
+      }
+    }
   }
 
   /** Tear down DOM state owned by this Host (DOM listeners on
@@ -151,8 +167,9 @@ export class Host implements EmX11Host {
     const dbg = ensureDebugFlags();
     const surface = this._buildDebugSurface(dbg);
 
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-    const M = (typeof Module !== 'undefined' ? Module : null) as Record<string, any> | null;
+    const M = (typeof Module !== 'undefined' ? Module : null) as
+      | Record<string, unknown>
+      | null;
     if (M) {
       M['emX11Host'] = this;
       if (!M['emX11Caches']) M['emX11Caches'] = {};
@@ -741,6 +758,9 @@ export class Host implements EmX11Host {
     const bgR = (bgFallback >> 16) & 0xff;
     const bgG = (bgFallback >> 8) & 0xff;
     const bgB = bgFallback & 0xff;
+    /* Canvas getImageData returns RGBA (R at offset 0). Xlib expects
+     * BGRA (B at offset 0). The swap below is intentional, not a
+     * copy-paste error: R←B, G←G, B←R, A←A. */
     for (let i = 0; i < len; i += 4) {
       if (src[i + 3] === 0) {
         out[i]     = bgB;
@@ -759,7 +779,7 @@ export class Host implements EmX11Host {
 
   private findEffectiveBg(win: import('./render/types.js').ManagedWindow): number {
     let cur = win.parent;
-    for (let safety = 0; safety < 64; safety++) {
+    for (let safety = 0; safety < 128; safety++) {
       if (cur === 0) break;
       const w = this.renderer.windows.get(cur);
       if (!w) break;
@@ -768,6 +788,11 @@ export class Host implements EmX11Host {
        * Skip it — we can't resolve a tiled pattern to a single solid. */
       cur = w.parent;
     }
+    /* Guard tripped: window tree is deeper than 128 or corrupt. */
+    console.warn(
+      `em-x11: findEffectiveBg hit guard limit for window ${win.id}, ` +
+      `falling back to default background`,
+    );
     return 0xd9d9d9;
   }
 

@@ -4,6 +4,13 @@
  * library at native/src/lib/library_em-x11.js overrides these EM_JS
  * bodies.
  *
+ * SYNC CONTRACT: Every em_x11_js_* function defined here MUST have a
+ * matching entry in library_em-x11.js with the same name and compatible
+ * signature. When you add, rename, or remove a bridge function here,
+ * update the JS library too. A mismatched set produces silent failures
+ * (EM_JS body wins over library stub, or vice versa) with no build error.
+ * The check-bridge-sync CMake target verifies the two lists match.
+ *
  * Host reference: every bridge reads Module['emX11Host'] (a flat
  * Module property, per emscripten convention).  Internal caches
  * live under Module['emX11Caches']; debug flags under

@@ -159,6 +159,27 @@ export class EventDispatcher {
     return null;
   }
 
+  /** Resolved module for Expose delivery. Three outcomes:
+   *   - {module}: deliver events via ccall on this module
+   *   - 'defer': module not bound yet, parked in pendingExposes
+   *   - 'skip':  Host-owned window (root) or unknown owner */
+  private _resolveModuleForWindow(
+    id: number,
+    forceModule: ModuleCcallSurface | null,
+  ): { module: ModuleCcallSurface } | 'defer' | 'skip' {
+    if (forceModule) return { module: forceModule };
+    const ownerConnId = this.host.connection.connOf(id);
+    if (ownerConnId === undefined) return 'skip';
+    if (ownerConnId === 0) return 'skip';
+    const conn = this.host.connection.get(ownerConnId);
+    if (!conn) return 'skip';
+    if (!conn.module) {
+      this.host.connection.deferExpose(ownerConnId, id);
+      return 'defer';
+    }
+    return { module: conn.module };
+  }
+
   /** Push a full-window Expose to the owner of `id`, via ccall on the
    *  owner's Module. Used by WindowManager.onWindowMap and
    *  onWindowConfigure to keep Expose routing consistent regardless of
@@ -174,23 +195,9 @@ export class EventDispatcher {
   pushExposeForWindow(id: number, forceModule: ModuleCcallSurface | null): void {
     const geom = this.host.renderer.geometryOf(id);
     if (!geom) return;
-    let module: ModuleCcallSurface | null = forceModule;
-    if (!module) {
-      const ownerConnId = this.host.connection.connOf(id);
-      if (ownerConnId === undefined) return;
-      /* Host-owned windows (conn 0, currently just the root) have no
-       * client to expose. Skip silently. */
-      if (ownerConnId === 0) return;
-      const conn = this.host.connection.get(ownerConnId);
-      if (!conn) return;
-      if (!conn.module) {
-        /* Bootstrap: queue and let launchClient drain. */
-        this.host.connection.deferExpose(ownerConnId, id);
-        return;
-      }
-      module = conn.module;
-    }
-    module.ccall(
+    const resolved = this._resolveModuleForWindow(id, forceModule);
+    if (resolved === 'skip' || resolved === 'defer') return;
+    resolved.module.ccall(
       'em_x11_push_expose_event',
       null,
       ['number', 'number', 'number', 'number', 'number'],
@@ -219,19 +226,8 @@ export class EventDispatcher {
       if (region.length === 0) continue;
       const origin = this.host.getWindowAbsOrigin(id);
       if (!origin) continue;
-      let module: ModuleCcallSurface | null = forceModule;
-      if (!module) {
-        const ownerConnId = this.host.connection.connOf(id);
-        if (ownerConnId === undefined) continue;
-        if (ownerConnId === 0) continue; /* root: no client */
-        const conn = this.host.connection.get(ownerConnId);
-        if (!conn) continue;
-        if (!conn.module) {
-          this.host.connection.deferExpose(ownerConnId, id);
-          continue;
-        }
-        module = conn.module;
-      }
+      const resolved = this._resolveModuleForWindow(id, forceModule);
+      if (resolved === 'skip' || resolved === 'defer') continue;
       /* Always send ONE Expose per window using the bounding box of
        * the entire exposed region. Sending multiple rects triggers the
        * Expose coalescing in em_x11_event_queue_push, which used to
@@ -250,7 +246,7 @@ export class EventDispatcher {
       const ly = minY - origin.ay;
       const lw = maxX - minX;
       const lh = maxY - minY;
-      module.ccall(
+      resolved.module.ccall(
         'em_x11_push_expose_event',
         null,
         ['number', 'number', 'number', 'number', 'number'],

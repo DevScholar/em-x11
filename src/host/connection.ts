@@ -430,6 +430,7 @@ export class ConnectionManager {
       this.host.property.deleteAllForWindow(winId);
     }
     this.host.events.forgetConnection(connId);
+    this.pendingExposes.delete(connId);
     this.connections.delete(connId);
     /* Force a synchronous compose so the canvas reflects destroyed
      * windows immediately. The deferred rAF scheduled by markDirty
