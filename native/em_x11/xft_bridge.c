@@ -14,6 +14,7 @@
  */
 
 #include "em_x11_internal.h"
+#include "em_x11_utf8.h"
 #include <X11/Xft/Xft.h>
 
 #include <ctype.h>
@@ -22,33 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* -- UTF-8 emit for codepoints ------------------------------------------- */
-
-static int utf8_emit(unsigned int cp, char* dst) {
-  if (cp < 0x80) {
-    dst[0] = (char)cp;
-    return 1;
-  }
-  if (cp < 0x800) {
-    dst[0] = (char)(0xC0 | (cp >> 6));
-    dst[1] = (char)(0x80 | (cp & 0x3F));
-    return 2;
-  }
-  if (cp < 0x10000) {
-    dst[0] = (char)(0xE0 | (cp >> 12));
-    dst[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    dst[2] = (char)(0x80 | (cp & 0x3F));
-    return 3;
-  }
-  if (cp < 0x110000) {
-    dst[0] = (char)(0xF0 | (cp >> 18));
-    dst[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-    dst[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    dst[3] = (char)(0x80 | (cp & 0x3F));
-    return 4;
-  }
-  return 0;
-}
+/* -- UTF-8 emit: use shared em_x11_utf8_encode (em_x11_utf8.h). ----------- */
 
 /* -- pattern -> CSS ------------------------------------------------------- */
 
@@ -577,7 +552,7 @@ void XftGlyphExtents(Display* dpy,
   }
   int len = 0;
   for (int i = 0; i < nglyphs; i++) {
-    len += utf8_emit((unsigned int)glyphs[i], p + len);
+    len += em_x11_utf8_encode((unsigned int)glyphs[i], p + len);
   }
   int width = em_x11_js_measure_string(font->css, p, len);
   extents->width = (unsigned short)(width > 0 ? width : 0);
@@ -643,7 +618,7 @@ void XftTextExtents16(Display* dpy,
     return;
   int n = 0;
   for (int i = 0; i < len; i++)
-    n += utf8_emit(string[i], buf + n);
+    n += em_x11_utf8_encode(string[i], buf + n);
   extents_from_string(font, buf, n, extents);
   free(buf);
 }
@@ -665,7 +640,7 @@ void XftTextExtents32(Display* dpy,
     return;
   int n = 0;
   for (int i = 0; i < len; i++)
-    n += utf8_emit((unsigned int)string[i], buf + n);
+    n += em_x11_utf8_encode((unsigned int)string[i], buf + n);
   extents_from_string(font, buf, n, extents);
   free(buf);
 }
@@ -777,7 +752,7 @@ void XftDrawString16(XftDraw* draw,
     return;
   int n = 0;
   for (int i = 0; i < len; i++)
-    n += utf8_emit(string[i], buf + n);
+    n += em_x11_utf8_encode(string[i], buf + n);
   unsigned long fg = color ? color->pixel : 0;
   em_x11_js_draw_string(
     (Window)draw->drawable, x, y, font->css, buf, n, fg, 0, 0);
@@ -807,7 +782,7 @@ void XftDrawGlyphs(XftDraw* draw,
   }
   int n = 0;
   for (int i = 0; i < nglyphs; i++) {
-    n += utf8_emit((unsigned int)glyphs[i], buf + n);
+    n += em_x11_utf8_encode((unsigned int)glyphs[i], buf + n);
   }
   unsigned long fg = color ? color->pixel : 0;
   em_x11_js_draw_string(
@@ -845,7 +820,7 @@ void XftDrawGlyphFontSpec(XftDraw* draw,
     if (!fnt)
       continue;
     unsigned int cp = (unsigned int)specs[i].glyph;
-    int n = utf8_emit(cp, utf8);
+    int n = em_x11_utf8_encode(cp, utf8);
     if (n <= 0)
       continue;
     em_x11_js_draw_string((Window)draw->drawable,
