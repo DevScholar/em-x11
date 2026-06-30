@@ -298,6 +298,8 @@ void em_x11_push_button_event(int type,
      * (Motif RowColumn's <EnterWindow>Normal:MenuEnter only matches
      * NotifyNormal events). */
     if (type == ButtonRelease && buttonsDown == 0) {
+      Window old_grab_window = activeGrab.window;
+
       /* C-side activeGrab may have been set by XGrabPointer (explicit) or
        * implicit grab (ButtonPress).  Only the explicit path has a TS-side
        * activePointerGrab mirror (set by em_x11_js_grab_pointer).  If we
@@ -312,6 +314,19 @@ void em_x11_push_button_event(int type,
       activeGrab.window = None;
       activeGrab.ownerEvents = False;
       activeGrab.eventMask = 0;
+
+      /* xorg DeactivatePointerGrab fires DoEnterLeaveEvents(NotifyUngrab)
+       * and PostNewCursor.  Replicate both here so the crossing state and
+       * the CSS cursor revert even when twm's XUngrabPointer is
+       * short-circuited (active==false → early return). */
+      {
+        int px = 0, py = 0;
+        em_x11_js_pointer_xy(&px, &py);
+        Window cur = em_x11_sprite_win();
+        em_x11_do_enter_leave_events(
+          dpy, old_grab_window, cur, NotifyUngrab, px, py);
+      }
+      em_x11_js_set_grab_cursor(0);
     }
     return;
   }

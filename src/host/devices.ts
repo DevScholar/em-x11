@@ -173,6 +173,16 @@ export class InputBridge {
       this.implicitDragModule = null;
     }
     this.activePointerGrab = null;
+    /* Grab deactivation must revert the cursor to the per-window value.
+     * The C-side XUngrabPointer calls setGrabCursor(0), but when the grab
+     * is deactivated early by the last-button-release path inside
+     * em_x11_push_button_event, that call happens BEFORE twm's event loop
+     * dispatches the ButtonRelease that triggers XUngrabPointer — which
+     * then sees active==false and returns without resetting the cursor.
+     * Clearing here ensures the cursor resets regardless of which path
+     * deactivates the grab. */
+    this.grabCursor = null;
+    this.refreshCanvasCursor();
   }
 
   /** Drop every input-routing slot pointing at the closed connection's
