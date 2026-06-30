@@ -25,13 +25,13 @@ void em_x11_update_sprite(
   struct _XDisplay* dpy, Window deepest_hint, int rx, int ry, int mode);
 
 /* Grab-state accessors — defined in events.c, consumed by enterleave.c */
-bool active_grab_active(void);
-unsigned int active_grab_event_mask_get(void);
-Window active_grab_window_get(void);
-bool active_grab_owner_events_get(void);
+bool active_grab_active(struct _XDisplay* dpy);
+unsigned int active_grab_event_mask_get(struct _XDisplay* dpy);
+Window active_grab_window_get(struct _XDisplay* dpy);
+bool active_grab_owner_events_get(struct _XDisplay* dpy);
 
 /* Simple modifier state — defined in events.c */
-unsigned int key_modifier_state(void);
+unsigned int key_modifier_state(struct _XDisplay* dpy);
 
 /* Tree query — exposed for DeliverGrabbedEvent dual-delivery */
 int win_is_inferior_of(struct _XDisplay* dpy,

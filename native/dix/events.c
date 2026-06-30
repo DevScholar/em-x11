@@ -25,46 +25,28 @@
 #include <string.h>
 
 /* ================================================================== */
-/*  Grab state (single source of truth)                                */
+/*  Grab state — stored per-Display (em_x11_internal.h).               */
+/*  Accessors below are consumed by enterleave.c.                      */
 /* ================================================================== */
 
-static struct {
-  bool active;
-  Window window;
-  Bool ownerEvents;
-  unsigned int eventMask;
-  Cursor cursor;
-  bool tsSynced; /* XGrabPointer called em_x11_js_grab_pointer */
-} activeGrab;
-
-static struct {
-  Window window;
-  unsigned int buttonCount;
-} implicitGrab;
-
-/* Mirrors xorg's device->button->buttonsDown: tracks pressed buttons
- * independently of grab state so we can detect "all buttons released"
- * and deactivate the pointer grab (DeactivatePointerGrab).  Without
- * this, XGrabPointer clears implicitGrab on activation, so the
- * ButtonRelease cleanup at line 261 never fires and activeGrab leaks. */
-static unsigned int buttonsDown = 0;
-
 /* Accessors for enterleave.c */
-bool active_grab_active(void) { return activeGrab.active; }
-unsigned int active_grab_event_mask_get(void) { return activeGrab.eventMask; }
-Window active_grab_window_get(void) { return activeGrab.window; }
-bool active_grab_owner_events_get(void) { return activeGrab.ownerEvents; }
+bool active_grab_active(Display* dpy) { return dpy->active_grab.active; }
+unsigned int active_grab_event_mask_get(Display* dpy) {
+  return dpy->active_grab.eventMask;
+}
+Window active_grab_window_get(Display* dpy) { return dpy->active_grab.window; }
+bool active_grab_owner_events_get(Display* dpy) {
+  return dpy->active_grab.ownerEvents;
+}
 
 /* ================================================================== */
 /*  Key modifier state (simplified — no XKB)                           */
 /* ================================================================== */
 
-static unsigned int modifier_state = 0;
-
-unsigned int key_modifier_state(void) { return modifier_state; }
+unsigned int key_modifier_state(Display* dpy) { return dpy->modifier_state; }
 
 /* Browser autorepeat-suppression for modifier keys. */
-static unsigned char down_keycodes[32];
+/* down_keycodes lives in per-Display struct (em_x11_internal.h). */
 
 static int is_modifier_keysym(KeySym ks) {
   return (ks >= 0xFFE1 && ks <= 0xFFEE);
@@ -73,10 +55,6 @@ static int is_modifier_keysym(KeySym ks) {
 /* ================================================================== */
 /*  Helpers                                                            */
 /* ================================================================== */
-
-static unsigned long event_serial = 1;
-
-static void event_set_serial(XEvent* ev) { ev->xany.serial = event_serial++; }
 
 static Time event_now(void) {
   return (Time)(unsigned long)emscripten_get_now();
@@ -157,8 +135,8 @@ static Window deliver_window_from_sprite(
     if (!ew)
       continue;
     unsigned int eff = ew->event_mask;
-    if (activeGrab.active && activeGrab.ownerEvents)
-      eff |= activeGrab.eventMask;
+    if (dpy->active_grab.active && dpy->active_grab.ownerEvents)
+      eff |= dpy->active_grab.eventMask;
     if (eff & need_mask) {
       int ax, ay, depth;
       local_window_abs_origin(dpy, ew, &ax, &ay, &depth);
@@ -208,7 +186,7 @@ static void DeliverGrabbedEvent(Display* dpy,
   int lx = 0, ly = 0;
   Window normal_target = None;
 
-  if (activeGrab.ownerEvents) {
+  if (dpy->active_grab.ownerEvents) {
     normal_target =
       deliver_window_from_sprite(dpy, need_mask, rx, ry, &lx, &ly);
     if (normal_target != None) {
@@ -222,20 +200,28 @@ static void DeliverGrabbedEvent(Display* dpy,
   }
 
   if (normal_target == None) {
-    EmX11Window* gw = em_x11_window_find(dpy, activeGrab.window);
+    EmX11Window* gw = em_x11_window_find(dpy, dpy->active_grab.window);
     if (gw) {
       int ax, ay, depth;
       local_window_abs_origin(dpy, gw, &ax, &ay, &depth);
       int flx, fly;
-      if (activeGrab.window == deepest_hint) {
+      if (dpy->active_grab.window == deepest_hint) {
         flx = ts_lx;
         fly = ts_ly;
       } else {
         flx = rx - ax;
         fly = ry - ay;
       }
-      push_button_xevent(
-        dpy, type, activeGrab.window, flx, fly, rx, ry, button, state, now);
+      push_button_xevent(dpy,
+                         type,
+                         dpy->active_grab.window,
+                         flx,
+                         fly,
+                         rx,
+                         ry,
+                         button,
+                         state,
+                         now);
     }
   }
 }
@@ -259,32 +245,32 @@ void em_x11_push_button_event(int type,
   Window delivery_win = None;
 
   /* 1. Track pressed buttons independently of grab state.
-   *    Mirrors xorg's device->button->buttonsDown. */
+   *    Mirrors xorg's device->button->dpy->buttons_down. */
   if (type == ButtonPress)
-    buttonsDown++;
-  else if (type == ButtonRelease && buttonsDown > 0)
-    buttonsDown--;
+    dpy->buttons_down++;
+  else if (type == ButtonRelease && dpy->buttons_down > 0)
+    dpy->buttons_down--;
 
   /* 2. Update sprite and fire crossing events.
    *    Mirrors xorg's CheckMotion: NotifyGrab during active grab,
    *    NotifyNormal otherwise.  NotifyUngrab is only for the crossing
    *    events fired at grab deactivation time (XUngrabPointer). */
-  int mode = activeGrab.active ? NotifyGrab : NotifyNormal;
+  int mode = dpy->active_grab.active ? NotifyGrab : NotifyNormal;
   em_x11_update_sprite(dpy, window, x_root, y_root, mode);
 
   /* 3. If any grab is active (passive, explicit, or implicit),
    *    DeliverGrabbedEvent handles routing.  xorg: implicit grab IS the
    *    device grab — all events during grab go through DeliverGrabbedEvent. */
-  if (activeGrab.active) {
+  if (dpy->active_grab.active) {
     DeliverGrabbedEvent(
       dpy, type, window, x, y, x_root, y_root, button, state, now);
 
     /* Implicit grab deactivation on last ButtonRelease. */
-    if (type == ButtonRelease && implicitGrab.window != None) {
-      if (implicitGrab.buttonCount > 0)
-        implicitGrab.buttonCount--;
-      if (implicitGrab.buttonCount == 0) {
-        implicitGrab.window = None;
+    if (type == ButtonRelease && dpy->implicit_grab.window != None) {
+      if (dpy->implicit_grab.buttonCount > 0)
+        dpy->implicit_grab.buttonCount--;
+      if (dpy->implicit_grab.buttonCount == 0) {
+        dpy->implicit_grab.window = None;
         em_x11_js_implicit_grab_end((unsigned int)dpy->conn_id);
       }
     }
@@ -297,8 +283,8 @@ void em_x11_push_button_event(int type,
      * NotifyGrab mode forever, which breaks posted-menu hover
      * (Motif RowColumn's <EnterWindow>Normal:MenuEnter only matches
      * NotifyNormal events). */
-    if (type == ButtonRelease && buttonsDown == 0) {
-      Window old_grab_window = activeGrab.window;
+    if (type == ButtonRelease && dpy->buttons_down == 0) {
+      Window old_grab_window = dpy->active_grab.window;
 
       /* C-side activeGrab may have been set by XGrabPointer (explicit) or
        * implicit grab (ButtonPress).  Only the explicit path has a TS-side
@@ -306,14 +292,14 @@ void em_x11_push_button_event(int type,
        * don't sync here, XUngrabPointer's later call will see active==false
        * and return early, leaking the TS grab across menu interactions and
        * misrouting the next click's keyboard focus. */
-      if (activeGrab.tsSynced) {
+      if (dpy->active_grab.tsSynced) {
         em_x11_js_ungrab_pointer();
-        activeGrab.tsSynced = false;
+        dpy->active_grab.tsSynced = false;
       }
-      activeGrab.active = false;
-      activeGrab.window = None;
-      activeGrab.ownerEvents = False;
-      activeGrab.eventMask = 0;
+      dpy->active_grab.active = false;
+      dpy->active_grab.window = None;
+      dpy->active_grab.ownerEvents = False;
+      dpy->active_grab.eventMask = 0;
 
       /* xorg DeactivatePointerGrab fires DoEnterLeaveEvents(NotifyUngrab)
        * and PostNewCursor.  Replicate both here so the crossing state and
@@ -352,20 +338,20 @@ void em_x11_push_button_event(int type,
    *    events route via DeliverGrabbedEvent.  We mirror this by setting
    *    activeGrab here, which makes step 2 catch subsequent events. */
   if (type == ButtonPress) {
-    if (implicitGrab.buttonCount == 0) {
+    if (dpy->implicit_grab.buttonCount == 0) {
       EmX11Window* dw = em_x11_window_find(dpy, delivery_win);
-      implicitGrab.window = delivery_win;
-      activeGrab.active = true;
-      activeGrab.window = delivery_win;
-      activeGrab.ownerEvents =
+      dpy->implicit_grab.window = delivery_win;
+      dpy->active_grab.active = true;
+      dpy->active_grab.window = delivery_win;
+      dpy->active_grab.ownerEvents =
         (dw && (dw->event_mask & OwnerGrabButtonMask)) ? True : False;
-      activeGrab.eventMask = dw ? dw->event_mask : 0;
-      activeGrab.cursor = None;
-      activeGrab.tsSynced = false;
+      dpy->active_grab.eventMask = dw ? dw->event_mask : 0;
+      dpy->active_grab.cursor = None;
+      dpy->active_grab.tsSynced = false;
       ;
       em_x11_js_implicit_grab_start((unsigned int)dpy->conn_id, delivery_win);
     }
-    implicitGrab.buttonCount++;
+    dpy->implicit_grab.buttonCount++;
   }
 
   /* 5. Push the event */
@@ -385,30 +371,30 @@ void em_x11_push_motion_event(
   /* 1. Update sprite — NotifyGrab during active grab, NotifyNormal otherwise
    *    (mirrors xorg CheckMotion which uses grab ? NotifyGrab : NotifyNormal)
    */
-  int mode = activeGrab.active ? NotifyGrab : NotifyNormal;
+  int mode = dpy->active_grab.active ? NotifyGrab : NotifyNormal;
   em_x11_update_sprite(dpy, window, x_root, y_root, mode);
 
   /* 2. Determine delivery window */
   Window delivery_win = None;
   int lx = 0, ly = 0;
 
-  if (implicitGrab.window != None) {
-    EmX11Window* gw = em_x11_window_find(dpy, implicitGrab.window);
+  if (dpy->implicit_grab.window != None) {
+    EmX11Window* gw = em_x11_window_find(dpy, dpy->implicit_grab.window);
     if (gw && gw->mapped) {
-      delivery_win = implicitGrab.window;
+      delivery_win = dpy->implicit_grab.window;
       int ax, ay, depth;
       local_window_abs_origin(dpy, gw, &ax, &ay, &depth);
       lx = x_root - ax;
       ly = y_root - ay;
     }
-  } else if (activeGrab.active) {
+  } else if (dpy->active_grab.active) {
     long mmask = PointerMotionMask | ButtonMotionMask;
     delivery_win =
       deliver_window_from_sprite(dpy, mmask, x_root, y_root, &lx, &ly);
-    if (delivery_win == None && !activeGrab.ownerEvents) {
-      EmX11Window* gw = em_x11_window_find(dpy, activeGrab.window);
+    if (delivery_win == None && !dpy->active_grab.ownerEvents) {
+      EmX11Window* gw = em_x11_window_find(dpy, dpy->active_grab.window);
       if (gw) {
-        delivery_win = activeGrab.window;
+        delivery_win = dpy->active_grab.window;
         int ax, ay, depth;
         local_window_abs_origin(dpy, gw, &ax, &ay, &depth);
         lx = x_root - ax;
@@ -488,7 +474,7 @@ void em_x11_push_key_event_kc(int type,
 
   /* Update modifier state tracking */
   if (type == KeyPress) {
-    modifier_state = state;
+    dpy->modifier_state = state;
   }
 
   /* Honour XSetInputFocus: if the server-side focus window was set to
@@ -516,14 +502,14 @@ void em_x11_push_key_event_kc(int type,
   if (type == KeyPress && keycode < 256 && is_modifier_keysym(keysym)) {
     int byte = keycode / 8;
     int bit = keycode % 8;
-    if (down_keycodes[byte] & (1 << bit))
+    if (dpy->down_keycodes[byte] & (1 << bit))
       return;
-    down_keycodes[byte] |= (unsigned char)(1 << bit);
+    dpy->down_keycodes[byte] |= (unsigned char)(1 << bit);
   }
   if (type == KeyRelease && keycode < 256) {
     int byte = keycode / 8;
     int bit = keycode % 8;
-    down_keycodes[byte] &= (unsigned char)~(1 << bit);
+    dpy->down_keycodes[byte] &= (unsigned char)~(1 << bit);
   }
 
   ev.xkey.root = dpy->screens[0].root;
@@ -809,22 +795,22 @@ int XUngrabKeyboard(Display* dpy, Time t) {
 int XUngrabPointer(Display* dpy, Time t) {
   (void)t;
 
-  if (!activeGrab.active)
+  if (!dpy->active_grab.active)
     return 1;
 
-  Window old_grab_window = activeGrab.window;
+  Window old_grab_window = dpy->active_grab.window;
 
   /* Clear implicit grab */
-  if (implicitGrab.buttonCount > 0) {
-    implicitGrab.window = None;
-    implicitGrab.buttonCount = 0;
+  if (dpy->implicit_grab.buttonCount > 0) {
+    dpy->implicit_grab.window = None;
+    dpy->implicit_grab.buttonCount = 0;
     em_x11_js_implicit_grab_end((unsigned int)dpy->conn_id);
   }
 
-  activeGrab.active = false;
-  activeGrab.window = None;
-  activeGrab.eventMask = 0;
-  activeGrab.ownerEvents = false;
+  dpy->active_grab.active = false;
+  dpy->active_grab.window = None;
+  dpy->active_grab.eventMask = 0;
+  dpy->active_grab.ownerEvents = false;
   dpy->request++;
 
   /* Fire crossing events: grab window → current sprite */
@@ -858,25 +844,25 @@ int XGrabPointer(Display* dpy,
   /* Motif calls XGrabPointer twice during menu-bar cascade (MenuBarSelect
    * pre-grab + ChangeManaged post-grab). Skip bridge calls when the grab
    * is already active on the same window with the same parameters. */
-  if (activeGrab.active && activeGrab.window == grab_window &&
-      activeGrab.ownerEvents == (Bool)(owner_events != 0) &&
-      activeGrab.eventMask == event_mask) {
+  if (dpy->active_grab.active && dpy->active_grab.window == grab_window &&
+      dpy->active_grab.ownerEvents == (Bool)(owner_events != 0) &&
+      dpy->active_grab.eventMask == event_mask) {
     return GrabSuccess;
   }
 
   /* Reset implicit grab (mirrors xorg's ActivatePointerGrab) */
-  if (implicitGrab.buttonCount > 0) {
-    implicitGrab.window = None;
-    implicitGrab.buttonCount = 0;
+  if (dpy->implicit_grab.buttonCount > 0) {
+    dpy->implicit_grab.window = None;
+    dpy->implicit_grab.buttonCount = 0;
     em_x11_js_implicit_grab_end((unsigned int)dpy->conn_id);
   }
 
-  activeGrab.active = true;
-  activeGrab.window = grab_window;
-  activeGrab.ownerEvents = (owner_events != 0);
-  activeGrab.eventMask = event_mask;
-  activeGrab.cursor = cursor;
-  activeGrab.tsSynced = true;
+  dpy->active_grab.active = true;
+  dpy->active_grab.window = grab_window;
+  dpy->active_grab.ownerEvents = (owner_events != 0);
+  dpy->active_grab.eventMask = event_mask;
+  dpy->active_grab.cursor = cursor;
+  dpy->active_grab.tsSynced = true;
   dpy->request++;
 
   /* Fire crossing events: current sprite → grab window (NotifyGrab) */

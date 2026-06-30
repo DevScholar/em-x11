@@ -250,10 +250,11 @@ static void CoreEnterLeaveEvent(Display* dpy,
    * em-x11 simplifications: wOtherEventMasks is always 0 (single
    * client per wasm module); EventMaskForClient == ew->event_mask. */
   unsigned int eff_mask;
-  if (active_grab_active()) {
-    eff_mask =
-      (win == active_grab_window_get()) ? active_grab_event_mask_get() : 0;
-    if (active_grab_owner_events_get())
+  if (active_grab_active(dpy)) {
+    eff_mask = (win == active_grab_window_get(dpy))
+                 ? active_grab_event_mask_get(dpy)
+                 : 0;
+    if (active_grab_owner_events_get(dpy))
       eff_mask |= ew->event_mask;
   } else {
     eff_mask = ew->event_mask;
@@ -488,15 +489,15 @@ void em_x11_do_enter_leave_events(
    * is: ownerEvents=True → all crossing events use NotifyNormal.
    * This matches the effective xorg behavior where owner_events means
    * "let events reach the window under the pointer normally." */
-  if (mode == NotifyGrab && active_grab_active() &&
-      active_grab_owner_events_get()) {
+  if (mode == NotifyGrab && active_grab_active(dpy) &&
+      active_grab_owner_events_get(dpy)) {
     mode = NotifyNormal;
   }
 
   /* State is stored by events.c; pulled here for the event payload.
    * In a real X server this comes from the device's button->state and
    * the keyboard's xkbInfo.  We track a simplified modifier field. */
-  unsigned int state = key_modifier_state();
+  unsigned int state = key_modifier_state(dpy);
   CoreEnterLeaveEvents(dpy, from, to, mode, rx, ry, state);
 }
 
