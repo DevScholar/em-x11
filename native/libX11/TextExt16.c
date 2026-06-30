@@ -7,6 +7,7 @@
  * text measurement.
  */
 
+#include "../em_x11/em_x11_utf8.h"
 #include <X11/Xlib.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,21 +25,7 @@ ucs2_to_utf8(const XChar2b* string, int nchars, unsigned char* out, int cap) {
         i++;
       }
     }
-    if (cp < 0x80)
-      out[w++] = (unsigned char)cp;
-    else if (cp < 0x800) {
-      out[w++] = (unsigned char)(0xC0 | (cp >> 6));
-      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-    } else if (cp < 0x10000) {
-      out[w++] = (unsigned char)(0xE0 | (cp >> 12));
-      out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-    } else {
-      out[w++] = (unsigned char)(0xF0 | (cp >> 18));
-      out[w++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
-      out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-    }
+    w += em_x11_utf8_encode(cp, out + w);
   }
   return w;
 }

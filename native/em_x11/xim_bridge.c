@@ -15,6 +15,7 @@
  */
 
 #include "em_x11_internal.h"
+#include "em_x11_utf8.h"
 
 #include <emscripten.h>
 #include <stdarg.h>
@@ -79,26 +80,7 @@ int em_x11_nested_list_decode(void* list,
                               const char*** names_out,
                               void*** values_out);
 
-/* Count UTF-8 characters (not bytes) in a buffer of `byte_len` bytes. */
-static unsigned short utf8_char_count(const char* s, int byte_len) {
-  unsigned short count = 0;
-  int i = 0;
-  while (i < byte_len) {
-    unsigned char c = (unsigned char)s[i];
-    if (c < 0x80)
-      i += 1;
-    else if ((c & 0xE0) == 0xC0)
-      i += 2;
-    else if ((c & 0xF0) == 0xE0)
-      i += 3;
-    else if ((c & 0xF8) == 0xF0)
-      i += 4;
-    else
-      i += 1; /* invalid byte, skip */
-    count++;
-  }
-  return count;
-}
+/* UTF-8 character count: use shared em_x11_utf8_char_count (em_x11_utf8.h). */
 
 /* Apply XNSpotLocation + preedit callback fields found inside a preedit /
  * status nested list to ic. Tk's XCreateIC always seeds a (0,0) spot
@@ -622,7 +604,8 @@ XIC em_x11_find_xic_for_window(Display* dpy, Window w) {
  *   [XIMText] [XIMFeedback * char_count] [char * (text_len + 1)]
  * Caller frees with a single free(text). */
 static XIMText* make_preedit_text(const char* text, int text_len) {
-  unsigned short char_count = utf8_char_count(text, text_len);
+  unsigned short char_count =
+    (unsigned short)em_x11_utf8_char_count(text, text_len);
   size_t fb_off = sizeof(XIMText);
   size_t str_off = fb_off + char_count * sizeof(XIMFeedback);
   size_t total = str_off + text_len + 1;

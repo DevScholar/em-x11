@@ -10,6 +10,7 @@
  */
 
 #include "em_x11_internal.h"
+#include "em_x11_utf8.h"
 
 #include <X11/Xutil.h>
 #include <stdlib.h>
@@ -28,29 +29,9 @@ xchar2b_to_utf8(const XChar2b* s, int n, unsigned char* out, int cap) {
         i++;
       }
     }
-    if (cp < 0x80) {
-      if (w + 1 > cap)
-        break;
-      out[w++] = (unsigned char)cp;
-    } else if (cp < 0x800) {
-      if (w + 2 > cap)
-        break;
-      out[w++] = (unsigned char)(0xC0 | (cp >> 6));
-      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-    } else if (cp < 0x10000) {
-      if (w + 3 > cap)
-        break;
-      out[w++] = (unsigned char)(0xE0 | (cp >> 12));
-      out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-    } else {
-      if (w + 4 > cap)
-        break;
-      out[w++] = (unsigned char)(0xF0 | (cp >> 18));
-      out[w++] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
-      out[w++] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-      out[w++] = (unsigned char)(0x80 | (cp & 0x3F));
-    }
+    if (w + 4 > cap)
+      break;
+    w += em_x11_utf8_encode(cp, out + w);
   }
   return w;
 }

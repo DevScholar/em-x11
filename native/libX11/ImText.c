@@ -11,6 +11,7 @@
  */
 
 #include "em_x11_internal.h"
+#include "em_x11_utf8.h"
 
 #include <X11/Xutil.h>
 #include <stdlib.h>
@@ -19,32 +20,7 @@
 
 extern XFontStruct* em_x11_fontset_font(XFontSet font_set);
 
-static int wc_to_utf8_one(unsigned int cp, unsigned char* out) {
-  if (cp < 0x80) {
-    out[0] = (unsigned char)cp;
-    return 1;
-  }
-  if (cp < 0x800) {
-    out[0] = (unsigned char)(0xC0 | (cp >> 6));
-    out[1] = (unsigned char)(0x80 | (cp & 0x3F));
-    return 2;
-  }
-  if (cp < 0x10000) {
-    out[0] = (unsigned char)(0xE0 | (cp >> 12));
-    out[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-    out[2] = (unsigned char)(0x80 | (cp & 0x3F));
-    return 3;
-  }
-  if (cp < 0x110000) {
-    out[0] = (unsigned char)(0xF0 | (cp >> 18));
-    out[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
-    out[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
-    out[3] = (unsigned char)(0x80 | (cp & 0x3F));
-    return 4;
-  }
-  out[0] = '?';
-  return 1;
-}
+/* UTF-8 encode / char-count: use shared helpers from em_x11_utf8.h. */
 
 static unsigned char* wcs_to_utf8(const wchar_t* ws, int nw, int* out_bytes) {
   if (!ws || nw <= 0) {
@@ -64,29 +40,12 @@ static unsigned char* wcs_to_utf8(const wchar_t* ws, int nw, int* out_bytes) {
   }
   int used = 0;
   for (int i = 0; i < nw; i++) {
-    used += wc_to_utf8_one((unsigned int)ws[i], buf + used);
+    used += em_x11_utf8_encode((unsigned int)ws[i], buf + used);
   }
   buf[used] = 0;
   if (out_bytes)
     *out_bytes = used;
   return buf;
-}
-
-static int utf8_char_count(const char* text, int bytes) {
-  int n = 0;
-  for (int i = 0; i < bytes;) {
-    unsigned char c = (unsigned char)text[i];
-    int step = (c < 0x80)             ? 1
-               : ((c & 0xE0) == 0xC0) ? 2
-               : ((c & 0xF0) == 0xE0) ? 3
-               : ((c & 0xF8) == 0xF0) ? 4
-                                      : 1;
-    if (i + step > bytes)
-      step = 1;
-    i += step;
-    n++;
-  }
-  return n;
 }
 
 static void draw_with_fontset(Display* dpy,
@@ -276,7 +235,7 @@ static Status percharextents_utf8(XFontSet font_set,
                                   int* num_chars,
                                   XRectangle* overall_ink,
                                   XRectangle* overall_log) {
-  int total_chars = utf8_char_count(text, bytes);
+  int total_chars = em_x11_utf8_char_count(text, bytes);
   if (num_chars)
     *num_chars = total_chars;
   if (total_chars > buf_size)
