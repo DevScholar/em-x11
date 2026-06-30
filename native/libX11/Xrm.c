@@ -143,6 +143,31 @@ void XrmDestroyDatabase(XrmDatabase db) {
   free(db);
 }
 
+/* -- Component tokenizer --------------------------------------------------- */
+
+/* Scan the next resource-name component. Returns its length (0 if none) and
+ * stores it in buf (NUL-terminated, max bufsz-1 chars). Advances *s past the
+ * component and any following '.' / '*' delimiter, setting *binding_out to
+ * the delimiter that was consumed (or '.' if none, as in trailing leaf). */
+static int
+next_component(const char** s, char* buf, int bufsz, char* binding_out) {
+  int len = 0;
+  while (**s && **s != '.' && **s != '*' && len < bufsz - 1) {
+    buf[len++] = *(*s)++;
+  }
+  buf[len] = '\0';
+  if (binding_out) {
+    if (**s == '*' || **s == '.') {
+      *binding_out = *(*s)++;
+    } else {
+      *binding_out = '.';
+    }
+  } else if (**s == '*' || **s == '.') {
+    (*s)++;
+  }
+  return len;
+}
+
 /* -- Pattern parsing ------------------------------------------------------- */
 
 /* Parse "XCalc*foo.bar" or "*foo.bar" into bindings/quarks. Returns 0 on
@@ -790,18 +815,8 @@ void XrmStringToQuarkList(_Xconst char* s, XrmQuarkList list) {
   int out = 0;
   const char* p = s;
   while (*p) {
-    int len = 0;
-    while (p[len] && p[len] != '.' && p[len] != '*' &&
-           len < (int)sizeof(buf) - 1)
-      len++;
-    if (len > 0) {
-      memcpy(buf, p, (size_t)len);
-      buf[len] = '\0';
+    if (next_component(&p, buf, (int)sizeof(buf), NULL) > 0)
       list[out++] = XrmStringToQuark(buf);
-    }
-    p += len;
-    if (*p)
-      p++;
   }
   list[out] = NULLQUARK;
 }
